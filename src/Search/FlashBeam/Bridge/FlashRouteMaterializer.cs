@@ -30,6 +30,14 @@ internal sealed record FlashSolveOutcome(
 /// </summary>
 internal static class FlashRouteMaterializer
 {
+    /// <summary>
+    /// FlashBeam width and node budget as a multiple of the existing profile's, under the same soft time
+    /// budget. FlashBeam retains one rank lane and one offensive lane instead of the existing routing,
+    /// diversity and Pareto lanes, so it needs a wider beam for the same route quality
+    /// (docs/flash-search/testing.md, width benchmark).
+    /// </summary>
+    internal const int ProfileWidthScale = 4;
+
     public static FlashSolveOutcome Solve(
         CombatRootSnapshot root,
         SolverDisplayNames displayNames,
@@ -63,8 +71,8 @@ internal static class FlashRouteMaterializer
         TimeSpan admission = watch.Elapsed;
 
         FlashBeamOptions options = (flashOptions ?? new FlashBeamOptions(
-            profile.BeamWidth,
-            profile.MaxExpandedNodes,
+            checked(profile.BeamWidth * ProfileWidthScale),
+            checked(profile.MaxExpandedNodes * ProfileWidthScale),
             MaxTurns: 64,
             TimeSpan.FromMilliseconds(profile.SoftTimeBudgetMilliseconds),
             root.InitialPlayerMaxHp)) with

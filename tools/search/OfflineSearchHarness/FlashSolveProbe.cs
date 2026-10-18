@@ -29,7 +29,7 @@ internal static class FlashSolveProbe
         SolverResult existing = existingTask.GetAwaiter().GetResult();
         double existingMs = watch.Elapsed.TotalMilliseconds;
 
-        double widthScale = double.TryParse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_WIDTH_SCALE"), out double scale) ? scale : 1d;
+        double widthScale = double.TryParse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_WIDTH_SCALE"), out double scale) ? scale : FlashRouteMaterializer.ProfileWidthScale;
         double offensiveShare = double.TryParse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_OFFENSIVE_SHARE"), out double share) ? share : 0.25d;
         FlashBeamOptions flashOptions = new(
             (int)(profile.BeamWidth * widthScale),
@@ -40,17 +40,24 @@ internal static class FlashSolveProbe
         FlashSolveOutcome flash = default!;
         double flashMs = 0;
         List<double> warmRuns = [];
+        List<long> warmAllocatedBytes = [];
         for (int run = 0; run < 3; run++)
         {
+            long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
             watch.Restart();
             Task<FlashSolveOutcome> flashTask = Task.Run(() => FlashRouteMaterializer.Solve(
                 root, names, damage, policy with { Profile = profile }, profile, CancellationToken.None, flashOptions));
             loop.RunUntilCompleted(flashTask, TimeSpan.FromSeconds(660), "FlashRouteMaterializer.Solve");
             flash = flashTask.GetAwaiter().GetResult();
             if (run == 0)
+            {
                 flashMs = watch.Elapsed.TotalMilliseconds;
+            }
             else
+            {
                 warmRuns.Add(watch.Elapsed.TotalMilliseconds);
+                warmAllocatedBytes.Add(GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore);
+            }
         }
 
         Dictionary<string, object?> summary = new()
@@ -60,6 +67,7 @@ internal static class FlashSolveProbe
             ["flashAdmitted"] = flash.Rejection == FlashRejection.None,
             ["flashOptions"] = new { flashOptions.BeamWidth, flashOptions.MaxExpandedNodes, flashOptions.OffensiveShare },
             ["flashWarmWallMs"] = warmRuns,
+            ["flashWarmAllocatedBytes"] = warmAllocatedBytes,
         };
         if (flash.Rejection != FlashRejection.None)
         {
