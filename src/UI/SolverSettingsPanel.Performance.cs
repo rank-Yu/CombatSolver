@@ -132,6 +132,24 @@ internal sealed partial class SolverSettingsPanel
         }
     }
 
+    private OptionButton CreateFlashSearchModeInput()
+    {
+        OptionButton input = CreateOptionInput();
+        input.AddItem(SolverText.Get("关闭（默认）"), (int)FlashSearchMode.Off);
+        input.AddItem(SolverText.Get("对照（只记录）"), (int)FlashSearchMode.Shadow);
+        input.AddItem(SolverText.Get("启用"), (int)FlashSearchMode.On);
+        _reloadInputs.Add(data => input.Selected = input.GetItemIndex((int)data.FlashSearchMode));
+        input.ItemSelected += index =>
+        {
+            if (_loading)
+                return;
+            FlashSearchMode mode = (FlashSearchMode)input.GetItemId((int)index);
+            SolverSettings.Update(SolverSettings.Current with { FlashSearchMode = mode });
+            SetStatus(SolverText.Get("已保存，下次搜索生效"), SolverUiTokens.Palette.Success);
+        };
+        return input;
+    }
+
     private Control CreatePerformancePage()
     {
         VBoxContainer content = CreatePageContent("PerformanceSettingsPage");
@@ -193,6 +211,8 @@ internal sealed partial class SolverSettingsPanel
         AddBasicRow(budgetGrid, SolverText.Get("前两回合深入探索（实验）"),
             _earlyTurnExplorationEnabled,
             SolverText.Get("常规搜索后，保留前两回合不同的合法路线并继续搜索完整战斗。最多使用 40 分钟，可随时取消；只采用战损和用药综合结果更好的完整胜利路线。默认关闭，下次搜索生效。"));
+        AddBasicRow(budgetGrid, SolverText.Get("Flash 快速搜索（实验）"), CreateFlashSearchModeInput(),
+            SolverText.Get("实验性的高速搜索内核，目前只支持部分角色、卡牌、遗物和怪物。关闭：只用常规搜索。对照：常规搜索结束后再用 Flash 搜索一遍并写入日志，仍采用常规搜索的路线，会增加耗时。启用：支持的战斗改用 Flash 搜索，路线的每一步都由常规模拟逐步核对；遇到不支持的内容或核对不一致时自动改用常规搜索。只影响主搜索，路线精炼和补充检查仍用常规搜索。下次搜索生效。"));
         AddBasicRow(
             budgetGrid,
             SolverText.Get("搜索并行度"),

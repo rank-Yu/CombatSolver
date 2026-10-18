@@ -558,6 +558,7 @@ internal static partial class SolverController
             UseBeamWidthPortfolio = settings.UseBeamWidthPortfolio
                 || UnattendedTestRunner.UseBeamWidthPortfolioOverride,
             PredictPotionReward = settings.PredictPotionReward,
+            FlashMode = settings.FlashSearchMode,
             BeamWidthPortfolioWidths = UnattendedTestRunner.BeamWidthPortfolioWidthsOverride,
             BeamWidthPortfolioPlainBaselineMember =
                 UnattendedTestRunner.BeamWidthPortfolioPlainBaselineMemberOverride,

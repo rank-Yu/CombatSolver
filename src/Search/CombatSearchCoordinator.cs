@@ -339,7 +339,7 @@ internal static partial class CombatSearchCoordinator
                 Action<SolverProgress>? memberProgressCallback = refinement && progressCallback != null
                     ? progress => progressCallback(progress with { Phase = "正在精炼路线" })
                     : progressCallback;
-                SolverResult memberResult = new CombatBeamSolver(
+                SolverResult memberResult = BeamSolveDispatch.Solve(new BeamSolveRequest(
                     root,
                     displayNames,
                     battleDamage,
@@ -347,11 +347,11 @@ internal static partial class CombatSearchCoordinator
                     cancellationToken,
                     memberProgressCallback,
                     memberProfile,
-                    potionPolicyOverride: initialPotionPolicyOverride,
-                    primaryIncumbent: primaryIncumbent,
-                    directSearchPurpose: refinement
+                    initialPotionPolicyOverride,
+                    primaryIncumbent,
+                    refinement
                         ? DirectSearchPurpose.RefinementBeam
-                        : DirectSearchPurpose.PrimaryBeam).Solve();
+                        : DirectSearchPurpose.PrimaryBeam));
                 PlanAction[] firstTurn = memberResult.BestNode.Actions
                     .TakeWhile(action => action.Turn == root.StartTurnNumber)
                     .ToArray();

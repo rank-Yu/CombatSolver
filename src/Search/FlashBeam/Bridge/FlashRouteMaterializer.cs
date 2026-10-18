@@ -37,11 +37,15 @@ internal static class FlashRouteMaterializer
         SearchPolicySnapshot policy,
         SolverSearchProfile profile,
         CancellationToken cancellationToken,
-        FlashBeamOptions? flashOptions = null)
+        FlashBeamOptions? flashOptions = null,
+        SolverPotionPolicy? potionPolicyOverride = null,
+        Action<SolverProgress>? progressCallback = null,
+        DirectSearchPurpose? purpose = null)
     {
         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
         Player player = root.PlayerIdentity;
-        CombatBeamSolver replay = new(root, displayNames, battleDamage, policy, cancellationToken, searchProfile: profile);
+        CombatBeamSolver replay = new(root, displayNames, battleDamage, policy, cancellationToken,
+            searchProfile: profile, potionPolicyOverride: potionPolicyOverride);
         SimulationSnapshot rootSnapshot = replay.ReplayForFlash([], null);
         FlashRules rules;
         FlashBattle battle;
@@ -98,7 +102,8 @@ internal static class FlashRouteMaterializer
             SoftTimeBudgetMilliseconds = Math.Max(1, Math.Min(profile.SoftTimeBudgetMilliseconds, 2_000)),
         };
         SolverResult result = new CombatBeamSolver(root, displayNames, battleDamage, policy, cancellationToken,
-            searchProfile: materializeProfile, fixedPrefixActions: plan).Solve();
+            progressCallback, materializeProfile, potionPolicyOverride: potionPolicyOverride,
+            fixedPrefixActions: plan, directSearchPurpose: purpose).Solve();
         return new FlashSolveOutcome(result, FlashRejection.None, "", search, plan, admission, verification, watch.Elapsed);
     }
 

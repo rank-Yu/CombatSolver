@@ -421,6 +421,9 @@ internal static class ModRuntime
                 ?? policy.Profile.BoundedOffensiveRefinementPortfolio,
             StopPortfolioAtHpTarget = options.StopPortfolioAtHpTarget ?? policy.Profile.StopPortfolioAtHpTarget,
         } };
+        // OFFLINE_HARNESS_FLASH_MODE=Off|Shadow|On 覆盖设置里的 Flash 档位（主搜索分发点，见 BeamSolveDispatch）。
+        if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_MODE") is { Length: > 0 } flashMode)
+            policy = policy with { FlashMode = Enum.Parse<FlashSearchMode>(flashMode, ignoreCase: true) };
         using OrderingObservations? orderingObservations = options.OrderingObservationLimit > 0
             ? new OrderingObservations(options.OutputDirectory, options.OrderingObservationLimit,
                 options.OrderingWatchedStatesPath) : null;

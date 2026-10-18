@@ -127,6 +127,7 @@ internal sealed record SolverSettingsData
     public int? SearchMaxPileChoiceBranchesPerAction { get; init; }
     public int? SearchMaxHandChoiceBranchesPerAction { get; init; }
     public SolverDeploymentFastMode DeploymentFastMode { get; init; } = SolverDeploymentFastMode.FollowGame;
+    public FlashSearchMode FlashSearchMode { get; init; } = FlashSearchMode.Off;
     public double? DeploymentInterActionDelaySeconds { get; init; }
     public float? OverlayPositionX { get; init; }
     public float? OverlayPositionY { get; init; }
@@ -164,6 +165,7 @@ internal sealed record SolverSettingsSnapshot(
     public bool UseNoveltyPortfolio { get; init; }
     public bool UseEarlyTurnExploration { get; init; }
     public bool PredictPotionReward { get; init; }
+    public FlashSearchMode FlashSearchMode { get; init; }
 }
 
 internal static class SolverSettings
@@ -287,6 +289,7 @@ internal static class SolverSettings
             $"no_gc_enabled={Capture().EnableNoGcRegion.ToString().ToLowerInvariant()} " +
             $"no_gc_budget_bytes={Capture().NoGcRegionBudgetBytes} " +
             $"deployment_fast_mode={migrated.DeploymentFastMode} " +
+            $"flash_search_mode={migrated.FlashSearchMode} " +
             $"deployment_delay_seconds={migrated.DeploymentInterActionDelaySeconds ?? 0d:0.###} " +
             $"overlay_theme={migrated.OverlayTheme} " +
             $"overlay_opacity={migrated.OverlayOpacity:0.##}");
@@ -330,6 +333,7 @@ internal static class SolverSettings
             UseNoveltyPortfolio = data.UseNoveltyPortfolio,
             UseEarlyTurnExploration = data.UseEarlyTurnExploration,
             PredictPotionReward = data.PredictPotionReward,
+            FlashSearchMode = data.FlashSearchMode,
         };
     }
 
@@ -569,6 +573,8 @@ internal static class SolverSettings
             nameof(data.SearchMaxHandChoiceBranchesPerAction));
         if (!Enum.IsDefined(data.DeploymentFastMode))
             throw new InvalidDataException($"Unknown deployment fast mode {data.DeploymentFastMode}.");
+        if (!Enum.IsDefined(data.FlashSearchMode))
+            throw new InvalidDataException($"Unknown Flash search mode {data.FlashSearchMode}.");
         if (!Enum.IsDefined(data.SearchCompletionNotificationMode))
         {
             throw new InvalidDataException(

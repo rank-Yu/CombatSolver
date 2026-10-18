@@ -8,9 +8,9 @@
 
 ## 下一版本（开发中）
 
-### Flash 搜索后端（开发中，未接入搜索）
+### Flash 搜索后端（开发中，默认关闭）
 
-新增可选的结构体状态内核（`src/Engine/InCombat/Flash/`）与旧引擎衔接层（`src/Search/FlashBeam/Bridge/`）。当前覆盖铁甲战士初始牌组及 62 张其他铁甲战士卡牌、106 个遗物、40 种药水、24 张状态/诅咒牌、第一幕密林与暗港的 26 种怪物（19 种遭遇）及相关 Power；内核已有回合阶段骨架、玩家本回合计数、卡牌选择（搜索枚举、旧引擎逐次回放翻译）与药水（4 种）；其他内容在准入阶段拒绝。FlashBeam v1 与固定前缀物化已在离线宿主跑通，路线质量尚低于现有搜索，未接入协调器，玩家可见行为不变。离线宿主新增 `OFFLINE_HARNESS_FLASH_DIFF` 差分探针。规格见 [Flash 入口](flash-search/README.md)，证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
+新增可选的结构体状态内核（`src/Engine/InCombat/Flash/`）与旧引擎衔接层（`src/Search/FlashBeam/Bridge/`）。当前覆盖铁甲战士初始牌组及 62 张其他铁甲战士卡牌、106 个遗物、40 种药水、24 张状态/诅咒牌、第一幕密林与暗港的 26 种怪物（19 种遭遇）及相关 Power；内核已有回合阶段骨架、玩家本回合计数、卡牌选择（搜索枚举、旧引擎逐次回放翻译）与药水（4 种）；其他内容在准入阶段拒绝。FlashBeam v1 与固定前缀物化已接入协调器主搜索成员的分发点（`BeamSolveDispatch`），由新设置「Flash 快速搜索（实验）」选择关闭（默认）、对照（只记录）或启用；默认关闭时玩家可见行为不变。对照模式与关闭模式的结果、工作量和诊断完全相同，只多一行对照日志；启用模式在准入并逐步核对通过时采用 Flash 结果，否则回落现有搜索。FlashBeam 路线质量仍低于现有主搜索。离线宿主新增 `OFFLINE_HARNESS_FLASH_DIFF` 差分探针与 `OFFLINE_HARNESS_FLASH_MODE` 档位覆盖。规格见 [Flash 入口](flash-search/README.md)，证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
 
 ### Q015 路线保留（PR #227）
 

@@ -135,4 +135,7 @@ internal sealed record SearchPolicySnapshot(
     public SearchRequestWorkTotals? RequestWorkTotals { get; init; }
     public SearchInteractionState? Interaction { get; init; }
     internal DevelopmentSearchStrategy? DevelopmentStrategy { get; init; }
+
+    /// <summary>Backend for primary Beam solves; see <see cref="BeamSolveDispatch"/>.</summary>
+    public FlashSearchMode FlashMode { get; init; }
 }

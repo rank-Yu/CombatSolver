@@ -73,6 +73,7 @@ internal sealed class SolvedRouteCache(string path)
             policy.EarlyTurnExplorationDepth,
             policy.EarlyTurnExplorationBudgetMilliseconds,
             policy.PredictPotionReward,
+            FlashRoutes = policy.FlashMode == FlashSearchMode.On,
             policy.NoveltyBudget,
             policy.BeamWidthPortfolioWidths,
             policy.BeamWidthPortfolioPlainBaselineMember,
