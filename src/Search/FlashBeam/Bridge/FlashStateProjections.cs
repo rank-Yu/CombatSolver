@@ -262,6 +262,52 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
             case RedSkull:
                 target.Counter = ClaimStatefulRelic(relic).Current;
                 break;
+            // FakeHappyFlower.Counter = TurnsSeen (StatefulRelicState Current, CaptureLiveState).
+            case FakeHappyFlower:
+                target.Counter = ClaimStatefulRelic(relic).Current;
+                break;
+            // FakeVenerableTeaSet.Counter = GainEnergyInNextCombat (StatefulRelicState Current).
+            case FakeVenerableTeaSet:
+                target.Counter = ClaimStatefulRelic(relic).Current;
+                break;
+            // BoneTea.Counter = CombatsLeft (StatefulRelicState Current).
+            case BoneTea:
+                target.Counter = ClaimStatefulRelic(relic).Current;
+                break;
+            // PollinousCore.Counter = TurnsSeen (StatefulRelicState Current).
+            case PollinousCore:
+                target.Counter = ClaimStatefulRelic(relic).Current;
+                break;
+            // PaelsTears.Counter = HadLeftoverEnergy (StatefulRelicState Current).
+            case PaelsTears:
+                target.Counter = ClaimStatefulRelic(relic).Current;
+                break;
+            // IronClub.Counter = cards played toward the 4-card cycle
+            // (AfterCardPlayedMirrors.HandleIronClub uses CounterPredictionState; the live field is
+            // the fallback its constructor reads).
+            case IronClub club:
+                target.Counter = Claim<CounterPredictionState>(relic)?.Value ?? club.CardsPlayed;
+                break;
+            // VelvetChoker.Counter = cards played this turn
+            // (AfterCardPlayedMirrors.HandleVelvetChoker uses CounterPredictionState; the live field is
+            // the fallback its constructor reads).
+            case VelvetChoker choker:
+                target.Counter = Claim<CounterPredictionState>(relic)?.Value ?? choker._cardsPlayedThisTurn;
+                break;
+            // FakeOrichalcum.Counter = the latched ShouldTrigger value (OrichalcumMirrors' private state
+            // entry, shared by Orichalcum and FakeOrichalcum).
+            case FakeOrichalcum:
+            {
+                target.Counter = OrichalcumMirrors.ShouldTriggerForFlash(store, relic, out object? entry) ? 1 : 0;
+                if (entry != null)
+                    _claimed.Add(entry);
+                break;
+            }
+            // PumpkinCandle.Counter = KindleCount. The existing engine has no state-store entry for it;
+            // the model field is the data its constructor reads and it does not change during combat.
+            case PumpkinCandle candle:
+                target.Counter = candle.KindleCount;
+                break;
             default:
                 break;
         }
