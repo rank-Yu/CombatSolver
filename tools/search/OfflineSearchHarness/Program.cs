@@ -173,6 +173,16 @@ internal static class Program
             else if (options.Milestone != "M1")
             {
                 ModRuntime.SearchOutcome? outcome = null;
+                // OFFLINE_HARNESS_WARMUP_SEARCHES=N runs N discarded searches first (no session metrics) so the
+                // measured search sees a warm process, as later requests in a long game session do.
+                if (int.TryParse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_WARMUP_SEARCHES"), out int warmups)
+                    && warmups > 0)
+                {
+                    List<double> warmupWallSeconds = [];
+                    for (int warmup = 0; warmup < warmups; warmup++)
+                        warmupWallSeconds.Add(ModRuntime.RunSearchDetailed(combat!, options, loop, session: null).WallSeconds);
+                    payload["warmupWallSeconds"] = warmupWallSeconds;
+                }
                 using MemorySampler memory = new(TimeSpan.FromMilliseconds(100));
                 Step(steps, $"M2.1 跑一次固定预算搜索（{options.SearchMode}）", () =>
                 {
