@@ -5,6 +5,7 @@ using CombatSolver.Engine.InCombat.Mirrors.Hooks.Card;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Damage;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Death;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.TurnEnd;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Models.Relics;
@@ -217,9 +218,16 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
     }
 
     /// <summary>
-    /// Rejects the state unless every store entry was claimed or is inert. A
-    /// <see cref="PowerAmountPredictionState"/> whose amount equals its power's amount is inert:
-    /// <c>SynchronizePowerAmountPredictionStates</c> would only remove it.
+    /// Rejects the state unless every store entry was claimed or is inert. Inert entries:
+    /// <list type="bullet">
+    /// <item>a <see cref="PowerAmountPredictionState"/> whose amount equals its power's amount
+    /// (<c>SynchronizePowerAmountPredictionStates</c> would only remove it);</item>
+    /// <item>any entry of a power whose enemy owner has left the combat (died and was removed, or
+    /// escaped). The existing engine reads power state only through powers attached to creatures in
+    /// the combat, and an enemy that left never returns: native summons always create a new creature
+    /// (<c>CreatureCmd.Add</c> callers; only the player's pet is re-added), so the entry can no longer
+    /// be read.</item>
+    /// </list>
     /// </summary>
     public void RequireAllClaimed()
     {
@@ -228,6 +236,8 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
             if (_claimed.Contains(state))
                 continue;
             if (state is PowerAmountPredictionState amount && model is PowerModel power && amount.Amount == power.Amount)
+                continue;
+            if (model is PowerModel { Owner: { Side: CombatSide.Enemy } owner } && !combat.ContainsCreature(owner))
                 continue;
             throw new FlashImportException(FlashRejection.UnrepresentableState, $"StateStore: {state.GetType().Name}@{model.Id.Entry}");
         }
