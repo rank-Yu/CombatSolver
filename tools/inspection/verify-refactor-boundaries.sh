@@ -970,6 +970,7 @@ expected_beam_files=(
     CombatBeamSolver.ExpansionPlan.cs
     CombatBeamSolver.Expansion.Replay.cs
     CombatBeamSolver.FinalPlanOrdering.cs
+    CombatBeamSolver.Flash.cs
     CombatBeamSolver.Models.cs
     CombatBeamSolver.NoveltySearch.cs
     CombatBeamSolver.Transpositions.cs
@@ -1763,6 +1764,20 @@ for legacy in 'ShouldTakeExtraPlayerTurn(' 'ConsumeExtraTurnSources('; do
     if rg -Fq "$legacy" "$repository_root/src/Engine/InCombat/Mirrors/HookMirrors.ExtraTurn.cs" "$repository_root/src/Search/SimulatedCombatState.ReactiveRelics.cs"; then
         violations+=("Extra-turn effects must dispatch in listener order: $legacy")
     fi
+done
+# Flash kernel: BCL only. FlashBeam: no dispatch or coordinator dependency (Search rules also apply).
+flash_kernel_root="$repository_root/src/Engine/InCombat/Flash"
+mapfile -d '' -t flash_kernel_files < <(find "$flash_kernel_root" -type f -name '*.cs' -print0 | sort -z)
+for file in "${flash_kernel_files[@]}"; do
+    forbid_regex "$file" '^\s*using\s+(static\s+)?(MegaCrit|Godot|HarmonyLib)\b' 'Flash kernel must depend only on the BCL'
+    forbid_regex "$file" '\b(MegaCrit|Godot|HarmonyLib)\.[A-Za-z]' 'Flash kernel must depend only on the BCL'
+    forbid_regex "$file" '^\s*using\s+CombatSolver(;|\.(Search|Runtime|Prediction|UI|Testing|Api|Replay|Diagnostics|Strategy|FlashBeam|Engine\.Common|Engine\.InCombat\.(Simulation|Mirrors|Extensions))\b)' 'Flash kernel must not reference other CombatSolver namespaces'
+done
+mapfile -d '' -t flash_beam_files < <(find "$search_root/FlashBeam" -type f -name '*.cs' -print0 | sort -z)
+for file in "${flash_beam_files[@]}"; do
+    for reference in BeamSolveDispatch CombatSearchCoordinator; do
+        forbid_fixed "$file" "$reference" 'FlashBeam must not depend on dispatch or the coordinator'
+    done
 done
 if ((${#violations[@]} > 0)); then
     printf '%s\n' "${violations[@]}" >&2

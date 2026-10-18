@@ -34,7 +34,7 @@ description: 修改 Flash 搜索后端：src/Engine/InCombat/Flash 内核与内�
 ## 验证
 
 - 纯内核：编译并运行 `tools/testing/checks/FlashKernelChecks/`。
-- 差分：先 `dotnet build CombatSolver.csproj -c Release -p:CopyModOnBuild=false`，再用离线搜索宿主 `--flash-diff` 对相关 fixture 跑单步穷举与随机游走，要求零差异。
+- 差分：先构建模组与离线搜索宿主，再设置 `OFFLINE_HARNESS_FLASH_DIFF=1` 运行宿主到 `--milestone M1`，对相关根跑单步穷举与随机游走，要求 `flash-diff.txt` 首行 `failed=0 walkFailed=0`。完整命令见 [Flash 测试记录](../../../docs/flash-search/testing.md)。
 - 结构门禁：`./tools/inspection/verify-refactor-boundaries.sh`（Windows 用同名 `.ps1`）。
 - 文档改动：`python3 -B tools/inspection/verify-documentation.py`。
 

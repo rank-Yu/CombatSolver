@@ -8,6 +8,10 @@
 
 ## 下一版本（开发中）
 
+### Flash 搜索后端（开发中，未接入搜索）
+
+新增可选的结构体状态内核（`src/Engine/InCombat/Flash/`）与旧引擎衔接层（`src/Search/FlashBeam/Bridge/`）。当前只覆盖铁甲战士初始牌组、燃烧之血、力量、易伤与两种第一幕弱怪，其他内容在准入阶段拒绝；尚未接入协调器，玩家可见行为不变。离线宿主新增 `OFFLINE_HARNESS_FLASH_DIFF` 差分探针。规格见 [Flash 入口](flash-search/README.md)，证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
+
 ### Q015 路线保留（PR #227）
 
 在既有 Beam 名额内，按用药数量保留已降低敌方格挡、仍有合法攻击且敌方剩余生命不超过可执行手牌估值的收尾续路；合法攻击数沿现有手牌遍历冻结。该估值用于保路资格，实际攻击由模拟器结算。Discard／DiscardAndDraw 上下文优先保留预计安全的进攻续路。Control 在原有结束回合探测名额中保留一个可能由延迟伤害获胜的代表，再由实际试算决定。旧敌退出且新敌入场的 AliveEnemyMask 变化进入 RevivalWindow 通道。状态等价、终局政策、预算和战斗语义沿用原实现。

@@ -198,3 +198,7 @@ plan 每项的字段：`label`（必填，简单目录名）、`request`（必�
 算法配置记录补充：`searchPolicy` 现在显式输出 `BeamWidthPortfolioPlainBaselineMember` 与 `UseNoveltyPortfolio`。旧宿主未记录这两项时，比较报告显示 `Unrecorded`，必须结合保存的命令与实际成员表判断，不能把缺失值当作默认值。上下文排序对照允许这两项算法配置作为显式实验差异，仍拒绝根、预算、可接受战损和用药政策等目标差异。
 
 `Coordinator --use-portfolio` 默认启用组合再分配。`--disable-reallocated-refinement` 在同一最终程序集恢复旧默认成员列表，供明确A/B；`--reallocated-refinement` 可显式开启。真实运行是否采用新布局由 `PORTFOLIO_REALLOCATION` 与实际成员表确认，显式成员布局和其他可选实验不被改写。配置保存在 `searchPolicy.Profile.ReallocatedRefinementPortfolio`，对照工具将其视为算法差异而保留目标政策/根/预算核对。
+
+## Flash 差分探针
+
+设置 `OFFLINE_HARNESS_FLASH_DIFF=1` 后，宿主在到达玩家第一回合（M1）时比较现有引擎与 Flash 内核：先投影根，再对全部合法动作各执行一步、并按固定种子做多回合随机游走，逐步比较投影后的字节。结果写入 `flash-diff.txt` 与 `harness-result.json` 的 `flashDiff` 字段。根含 Flash 尚不支持的内容时报告准入拒绝原因，不做比较。命令与当前证据见 [Flash 测试记录](flash-search/testing.md)。

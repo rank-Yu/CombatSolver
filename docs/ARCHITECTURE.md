@@ -47,6 +47,7 @@
 | `.StateEvaluation.cs` / `.Terminal.cs` | 评分特征、终局回放和回合结果 |
 | `SimulatedCombatState*.cs` | 分支战斗状态与动作语义 |
 | `PrimaryIncumbentTable` / `ResourceIncumbentPolicy` | 同根同政策的资源桶见证、未来收益上界与认证回退 |
+| `FlashBeam/Bridge/` / `CombatBeamSolver.Flash.cs` | Flash 准入、规则编译、旧引擎状态投影、动作翻译；旧引擎回放入口（[Flash 规格](flash-search/README.md)） |
 
 成员共享原请求账本；预算准入、候选合法性和取优由所属策略决定。分支状态不承担 Beam 政策；中途保路和终局比较保持明确入口。药水反事实与强制用药的硬准入先于质量比较。终局可选用药遵守机会成本门槛，获胜且减少复活消耗或追回资源时保留对应政策例外；`RouteQualityPolicy.PotionPolicy` 为审计、组合成员和后置搜索统一比较战略战损加可选药水成本，成长与回合数在其后比较。固定前缀构造实际父链，EndTurn 从模拟前后状态生成 `TurnOutcome`。
 
@@ -78,8 +79,9 @@ Smart 药水梯度在主成员耗尽时间时拥有一个独立成员时间：�
 | `src/Engine/InCombat/Mirrors/` | 原版 Hook / Model 方法镜像 |
 | `MethodMirrorRegistryDescriptor` | 向 CoverageCatalog 暴露 registry 支持元数据 |
 | `src/Prediction/` | 怪物 AI、隐藏状态、生命周期、死亡/召唤、选择与 subscriber 捕获 |
+| `src/Engine/InCombat/Flash/` | 可选 Flash 后端的纯内核与内容定义，只依赖 BCL，语义镜像现有引擎 |
 
-每项战斗语义只有一个权威结算实现。可变值由根快照、影子状态、克隆 Model 或 `PredictionStateStore` 持有。一次 Fork 共用 `PredictionForkContext`，引用随同一上下文重映射；COW 取得可写所有者后再写。
+每项战斗语义只有一个权威结算实现；Flash 内核是逐项差分校验的派生实现，不是第二个权威。可变值由根快照、影子状态、克隆 Model 或 `PredictionStateStore` 持有。一次 Fork 共用 `PredictionForkContext`，引用随同一上下文重映射；COW 取得可写所有者后再写。
 
 Fork 发生在动作、选牌、Power、死亡和出牌事务允许复制的稳定边界。玩家记录的卡牌/药水嵌套效果作用域由引擎持有；选牌检查点保存不可变身份序列，恢复建立分支独占列表。最外层效果结束后再检查手空。稳定根及跨回合状态的该作用域为空，普通 Fork 要求为空。
 

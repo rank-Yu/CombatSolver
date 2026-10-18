@@ -1092,6 +1092,7 @@ $expectedBeamFiles = @(
     "CombatBeamSolver.ExpansionPlan.cs",
     "CombatBeamSolver.Expansion.Replay.cs",
     "CombatBeamSolver.FinalPlanOrdering.cs",
+    "CombatBeamSolver.Flash.cs",
     "CombatBeamSolver.Models.cs",
     "CombatBeamSolver.NoveltySearch.cs",
     "CombatBeamSolver.Transpositions.cs",
@@ -2275,6 +2276,27 @@ if (-not (Select-String -LiteralPath (Join-Path $repositoryRoot 'CombatSolver.cs
 foreach ($member in @('private sealed record KnownRoutePrefix(', 'private static MoveStateSnapshot[] CaptureKnownRouteRootStates(', 'private static KnownRoutePrefix FreezeKnownRoutePrefix(', 'private void AssertKnownRouteAliasSnapshot(')) {
     if (-not (Select-String -LiteralPath (Join-Path $maintainedTestingRoot 'Support/UnattendedTestRunner.RouteSnapshots.cs') -SimpleMatch $member -Quiet)) {
         throw "Missing shared route snapshot helper: $member"
+    }
+}
+# Flash kernel: BCL only. FlashBeam: no dispatch or coordinator dependency (Search rules also apply).
+$flashKernelRoot = Join-Path $repositoryRoot 'src/Engine/InCombat/Flash'
+foreach ($file in Get-ChildItem -LiteralPath $flashKernelRoot -Recurse -File -Filter '*.cs' | Sort-Object FullName) {
+    $lineNumber = 0
+    foreach ($line in [IO.File]::ReadAllLines($file.FullName)) {
+        $lineNumber++
+        if ($line -match '^\s*using\s+(static\s+)?(MegaCrit|Godot|HarmonyLib)\b' -or $line -match '\b(MegaCrit|Godot|HarmonyLib)\.[A-Za-z]') {
+            throw "$($file.FullName):${lineNumber}: Flash kernel must depend only on the BCL"
+        }
+        if ($line -match '^\s*using\s+CombatSolver(;|\.(Search|Runtime|Prediction|UI|Testing|Api|Replay|Diagnostics|Strategy|FlashBeam|Engine\.Common|Engine\.InCombat\.(Simulation|Mirrors|Extensions))\b)') {
+            throw "$($file.FullName):${lineNumber}: Flash kernel must not reference other CombatSolver namespaces"
+        }
+    }
+}
+foreach ($file in Get-ChildItem -LiteralPath (Join-Path $searchRoot 'FlashBeam') -Recurse -File -Filter '*.cs' | Sort-Object FullName) {
+    foreach ($reference in @('BeamSolveDispatch', 'CombatSearchCoordinator')) {
+        if (Select-String -LiteralPath $file.FullName -SimpleMatch $reference -Quiet) {
+            throw "$($file.FullName): FlashBeam must not depend on dispatch or the coordinator: $reference"
+        }
     }
 }
 Write-Output "REFACTOR_BOUNDARIES_OK search_files=$($searchFiles.Count)"
