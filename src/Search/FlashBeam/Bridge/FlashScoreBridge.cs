@@ -72,6 +72,7 @@ internal static class FlashScoreBridge
             BodySlamCardId = CardId<BodySlam>(),
             BufferPowerId = PowerId<MegaCrit.Sts2.Core.Models.Powers.BufferPower>(),
             NoDrawPowerId = PowerId<NoDrawPower>(),
+            TheGambitPowerId = PowerId<TheGambitPower>(),
             FairyInABottlePotionId = PotionId<FairyInABottle>(),
             LizardTailRelicId = RelicId<LizardTail>(),
         };
@@ -261,6 +262,8 @@ internal static class FlashScoreBridge
             AshenStrike => FlashCalculatedKind.ExhaustPileCount,
             ExpectAFight => FlashCalculatedKind.PlayerStrength,
             Bully => FlashCalculatedKind.TargetVulnerable,
+            MindBlast => FlashCalculatedKind.DrawPileCount,
+            Rend => FlashCalculatedKind.TargetDebuffPowerCount,
             _ => FlashCalculatedKind.Unsupported,
         };
     }
