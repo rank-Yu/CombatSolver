@@ -81,6 +81,7 @@ internal static class FlashRouteMaterializer
             Scorer = scorer,
             Ordering = new FlashRouteOrdering(root.InitialPlayerHp, root.InitialPlayerMaxHp, root.BossHpRelief,
                 root.PostCombatRelicHeal),
+            HpTargetStop = HpTargetStop(policy, battleDamage, potionPolicyOverride),
         };
         FlashBeamResult search = new FlashBeamSolver(rules, options).Solve(battle, cancellationToken);
 
@@ -133,6 +134,24 @@ internal static class FlashRouteMaterializer
     }
 
     /// <summary>The existing search's potion constraints at the root, in Flash player-turn units.</summary>
+    /// <summary>
+    /// The existing search stops at the HP target only for victories it counts as eligible
+    /// (<c>IsEligibleCompleteVictory</c>). Requests that require explicit potion uses add conditions
+    /// FlashBeam does not track, so they keep searching instead.
+    /// </summary>
+    private static FlashHpTargetStop? HpTargetStop(SearchPolicySnapshot policy, BattleDamageSnapshot battleDamage,
+        SolverPotionPolicy? potionPolicyOverride)
+    {
+        if (!policy.CanStopAtHpTarget
+            || (potionPolicyOverride ?? policy.PotionPolicy) == SolverPotionPolicy.RequireAtLeastOne
+            || policy.PotionStrategy.HasForcedDirectives)
+        {
+            return null;
+        }
+        return new FlashHpTargetStop(policy.AcceptableBattleHpLoss, battleDamage.HpLostSoFar,
+            policy.MinimumRequiredPotionUses(battleDamage.PotionsUsedSoFar));
+    }
+
     private static FlashPotionPolicy PotionPolicy(CombatBeamSolver replay, SimulationSnapshot rootSnapshot, in FlashBattle battle)
     {
         (bool[] allowed, int[] costs, int? earliestTurn, int? maximumUses) = replay.CapturePotionPolicyForFlash(rootSnapshot);
