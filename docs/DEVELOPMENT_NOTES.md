@@ -10,7 +10,7 @@
 
 ### Flash 搜索后端（开发中，未接入搜索）
 
-新增可选的结构体状态内核（`src/Engine/InCombat/Flash/`）与旧引擎衔接层（`src/Search/FlashBeam/Bridge/`）。当前覆盖铁甲战士初始牌组及 44 张其他铁甲战士卡牌，燃烧之血，力量、易伤、虚弱、脆弱、敏捷、巨像、无惧疼痛、势不可当、残酷，以及两种第一幕弱怪；内核已有回合阶段骨架、玩家本回合计数与卡牌选择（搜索枚举、旧引擎逐次回放翻译）；其他内容在准入阶段拒绝。FlashBeam v1 与固定前缀物化已在离线宿主跑通，路线质量尚低于现有搜索，未接入协调器，玩家可见行为不变。离线宿主新增 `OFFLINE_HARNESS_FLASH_DIFF` 差分探针。规格见 [Flash 入口](flash-search/README.md)，证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
+新增可选的结构体状态内核（`src/Engine/InCombat/Flash/`）与旧引擎衔接层（`src/Search/FlashBeam/Bridge/`）。当前覆盖铁甲战士初始牌组及 57 张其他铁甲战士卡牌、燃烧之血、第一幕密林的 18 种怪物（11 种遭遇）及相关 Power 与状态牌；内核已有回合阶段骨架、玩家本回合计数与卡牌选择（搜索枚举、旧引擎逐次回放翻译）；其他内容在准入阶段拒绝。FlashBeam v1 与固定前缀物化已在离线宿主跑通，路线质量尚低于现有搜索，未接入协调器，玩家可见行为不变。离线宿主新增 `OFFLINE_HARNESS_FLASH_DIFF` 差分探针。规格见 [Flash 入口](flash-search/README.md)，证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
 
 ### Q015 路线保留（PR #227）
 
