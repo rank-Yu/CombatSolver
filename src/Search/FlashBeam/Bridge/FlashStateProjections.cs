@@ -7,6 +7,7 @@ using CombatSolver.Engine.InCombat.Mirrors.Hooks.Damage;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Death;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.TurnEnd;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Models.Relics;
@@ -30,6 +31,26 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
 {
     private readonly HashSet<object> _claimed = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<RelicModel> _claimedRelicStates = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<(Creature Creature, string Name)> _claimedMonsterInts = [];
+
+    /// <summary>
+    /// Claims the monster-private integers a definition reads and writes them into
+    /// <see cref="FlashEnemy.Ai"/>; inert names are claimed without a register.
+    /// </summary>
+    public void ProjectMonster(Creature creature, FlashMonsterDef def, ref FlashEnemy target)
+    {
+        if (def.AiRegisterNames.Count > FlashLimits.EnemyAiRegisters)
+            throw new FlashImportException(FlashRejection.Capacity,
+                $"{creature.Monster?.Id.Entry} AI 寄存器 {def.AiRegisterNames.Count}");
+        for (int register = 0; register < def.AiRegisterNames.Count; register++)
+        {
+            string name = def.AiRegisterNames[register];
+            _claimedMonsterInts.Add((creature, name));
+            target.Ai[register] = combat.GetMonsterIntForFlash(creature, name);
+        }
+        foreach (string name in def.InertMonsterIntNames)
+            _claimedMonsterInts.Add((creature, name));
+    }
 
     /// <summary>Fills the private slots of one imported power.</summary>
     public void ProjectPower(PowerModel power, ref FlashPower target)
@@ -283,6 +304,21 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
         {
             if (!_claimedRelicStates.Contains(relic))
                 throw new FlashImportException(FlashRejection.UnrepresentableState, $"StatefulRelicState: {relic.Id.Entry}");
+        }
+    }
+
+    /// <summary>
+    /// Rejects any captured monster-private integer that no monster definition claimed, either as an
+    /// <see cref="FlashMonsterDef.AiRegisterNames"/> register or as an
+    /// <see cref="FlashMonsterDef.InertMonsterIntNames"/> entry.
+    /// </summary>
+    public void RequireAllMonsterIntsClaimed()
+    {
+        foreach ((Creature creature, string name, int _) in combat.MonsterIntEntriesForFlash())
+        {
+            if (!_claimedMonsterInts.Contains((creature, name)))
+                throw new FlashImportException(FlashRejection.UnrepresentableState,
+                    $"MonsterInt: {creature.Monster?.Id.Entry}.{name}");
         }
     }
 }

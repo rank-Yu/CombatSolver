@@ -66,13 +66,14 @@ internal static class FlashStateImporter
 
         ImportRng(ref battle, simulator.Rng);
         IReadOnlyList<Creature> known = combat.KnownEnemies;
-        ImportEnemies(ref battle, simulator, combat, known, rules, processedDeaths);
+        ImportEnemies(ref battle, simulator, combat, known, rules, processedDeaths, projections);
         ImportPowers(ref battle, combat, player, known, projections);
         ImportCards(ref battle, playerState, rules);
         RejectRunListenerDeckCards(player);
         ImportRelics(ref battle, combat, player, projections);
         ImportPotions(ref battle, combat, player);
         ImportOrbs(ref battle, playerState);
+        projections.RequireAllMonsterIntsClaimed();
         projections.RequireAllClaimed();
         return battle;
     }
@@ -158,7 +159,8 @@ internal static class FlashStateImporter
     }
 
     private static void ImportEnemies(ref FlashBattle battle, CombatPredictionSimulator simulator,
-        SimulatedCombatState combat, IReadOnlyList<Creature> known, FlashRules rules, IReadOnlySet<uint> processedDeaths)
+        SimulatedCombatState combat, IReadOnlyList<Creature> known, FlashRules rules, IReadOnlySet<uint> processedDeaths,
+        FlashStateProjections projections)
     {
         if (known.Count > FlashLimits.Enemies)
             throw new FlashImportException(FlashRejection.Capacity, $"敌人数 {known.Count}");
@@ -170,13 +172,21 @@ internal static class FlashStateImporter
                 ?? throw new FlashImportException(FlashRejection.UnsupportedMonster, "敌人没有怪物模型");
             if (!FlashRegistry.TryMonster(monster.Id.Entry, out ushort monsterId))
                 throw new FlashImportException(FlashRejection.UnsupportedMonster, monster.Id.Entry);
-            byte owner = FlashKernel.EnemyOwner(index);
-            FlashMonsterRules machine = rules.Monster(owner);
+            // Known enemies are append-only: the root's enemies occupy the first rules entries in
+            // order, every later known enemy is a summoned type and shares its type's entry.
+            int rulesId = index < rules.RootEnemyCount
+                ? index
+                : rules.TrySpawnRulesId(monsterId, out int spawnRulesId)
+                    ? spawnRulesId
+                    : throw new FlashImportException(FlashRejection.UnrepresentableState,
+                        $"{monster.Id.Entry} 不在根的可生成怪物闭包中");
+            FlashMonsterRules machine = rules.MonsterRule(checked((byte)rulesId));
             BranchMonsterAiState ai = combat.GetMonsterAiStateForFlash(creature);
             ref FlashEnemy enemy = ref battle.Enemies[index];
             enemy.Creature = Vitals(simulator.State.GetCreature(creature), combat.HasLostHpThisTurn(creature));
             enemy.MonsterId = monsterId;
-            enemy.Slot = (byte)index;
+            enemy.Rules = checked((byte)rulesId);
+            enemy.Slot = SlotForFlash(rules, creature);
             enemy.DeathPhase = (FlashDeathPhase)(byte)combat.DeathPhaseForFlash(creature);
             enemy.CombatId = creature.CombatId ?? throw new FlashImportException(FlashRejection.UnrepresentableState, "敌人没有 CombatId");
             if (ai.Current.Id == FlashKernel.StunnedNodeId)
@@ -189,23 +199,31 @@ internal static class FlashStateImporter
                 if (followUp == FlashKernel.StunnedNodeId)
                     throw new FlashImportException(FlashRejection.UnrepresentableState,
                         $"{monster.Id.Entry} 的 STUNNED 后继仍是 STUNNED");
-                int followUpNode = -1;
-                for (int node = 0; node < machine.Nodes.Length; node++)
-                {
-                    if (machine.Nodes[node].NativeId == followUp)
-                    {
-                        followUpNode = node;
-                        break;
-                    }
-                }
-                if (followUpNode < 0)
-                    throw new FlashImportException(FlashRejection.UnrepresentableState,
-                        $"{monster.Id.Entry} 的 STUNNED 后继 {followUp} 不在状态机中");
                 enemy.Move = checked((byte)machine.StunnedNode);
-                enemy.ForcedMove = checked((byte)followUpNode);
+                enemy.ForcedMove = checked((byte)NodeIndex(machine, followUp, monster));
+            }
+            else if (ai.Current.Id == FlashKernel.ReviveNodeId)
+            {
+                // SimulatedCombatState.BeginIllusionRevive builds a fresh MoveState outside the
+                // machine's States table (DeathLifecycle.cs:100-119). Its dynamic follow-up becomes
+                // ForcedMove, exactly like STUNNED.
+                if (machine.ReviveNode < 0)
+                    throw new FlashImportException(FlashRejection.UnrepresentableState,
+                        $"{monster.Id.Entry} 的复活行动没有 Flash 节点");
+                string followUp = ai.Current.FollowUpState?.Id ?? ai.Current.FollowUpStateId
+                    ?? throw new FlashImportException(FlashRejection.UnrepresentableState,
+                        $"{monster.Id.Entry} 的 REVIVE_MOVE 没有后继行动");
+                if (followUp is FlashKernel.StunnedNodeId or FlashKernel.ReviveNodeId)
+                    throw new FlashImportException(FlashRejection.UnrepresentableState,
+                        $"{monster.Id.Entry} 的 REVIVE_MOVE 后继是合成节点");
+                enemy.Move = checked((byte)machine.ReviveNode);
+                enemy.ForcedMove = checked((byte)NodeIndex(machine, followUp, monster));
             }
             else
             {
+                if (enemy.DeathPhase == FlashDeathPhase.Reviving && machine.ReviveNode < 0)
+                    throw new FlashImportException(FlashRejection.UnrepresentableState,
+                        $"{monster.Id.Entry} 处于复活状态但没有复活节点");
                 enemy.Move = checked((byte)machine.NodeIndex(ai.Current.Id));
                 enemy.ForcedMove = byte.MaxValue;
             }
@@ -217,6 +235,7 @@ internal static class FlashStateImporter
                 enemy.Flags |= FlashEnemyFlags.DeathProcessed;
             foreach (string logged in ai.StateLog)
                 FlashKernel.LogMonsterMove(ref enemy, machine.NodeIndex(logged));
+            projections.ProjectMonster(creature, FlashRegistry.Monster(monsterId), ref enemy);
         }
         IReadOnlyList<Creature> roster = combat.Enemies;
         battle.RosterCount = (byte)roster.Count;
@@ -228,6 +247,30 @@ internal static class FlashStateImporter
             battle.Roster[position] = (byte)index;
             battle.Enemies[index].Flags |= FlashEnemyFlags.InCombat;
         }
+    }
+
+    private static int NodeIndex(FlashMonsterRules machine, string nativeId, MonsterModel monster)
+    {
+        for (int node = 0; node < machine.Nodes.Length; node++)
+        {
+            if (machine.Nodes[node].NativeId == nativeId)
+                return node;
+        }
+        throw new FlashImportException(FlashRejection.UnrepresentableState,
+            $"{monster.Id.Entry} 的行动 {nativeId} 不在状态机中");
+    }
+
+    private static byte SlotForFlash(FlashRules rules, Creature creature)
+    {
+        if (creature.SlotName == null)
+            return checked((byte)FlashKernel.NoSlot);
+        for (int slot = 0; slot < rules.EncounterSlots.Count; slot++)
+        {
+            if (string.Equals(rules.EncounterSlots[slot], creature.SlotName, StringComparison.Ordinal))
+                return checked((byte)slot);
+        }
+        throw new FlashImportException(FlashRejection.UnrepresentableState,
+            $"遭遇没有槽位 {creature.SlotName}");
     }
 
     private static void ImportPowers(ref FlashBattle battle, SimulatedCombatState combat, Player player, IReadOnlyList<Creature> known,

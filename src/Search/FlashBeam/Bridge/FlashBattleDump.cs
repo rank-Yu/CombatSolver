@@ -39,7 +39,7 @@ internal static class FlashBattleDump
                 recentMoves.Add(enemy.RecentMoves[position]);
             string recent = string.Join(",", recentMoves);
             lines.Add($"Enemy[{index}]={monster} {Creature(enemy.Creature)} move={enemy.Move} flags={enemy.Flags} death={enemy.DeathPhase} "
-                + $"combatId={enemy.CombatId} logged={enemy.LoggedMoves} recent=[{recent}] everUsed={enemy.EverUsedMoves:X} "
+                + $"combatId={enemy.CombatId} rules={enemy.Rules} slot={enemy.Slot} logged={enemy.LoggedMoves} recent=[{recent}] everUsed={enemy.EverUsedMoves:X} "
                 + $"ai=[{enemy.Ai[0]},{enemy.Ai[1]},{enemy.Ai[2]},{enemy.Ai[3]}]");
         }
         for (int index = 0; index < battle.PowerCount; index++)

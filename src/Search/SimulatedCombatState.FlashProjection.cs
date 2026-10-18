@@ -42,21 +42,37 @@ internal sealed partial class SimulatedCombatState
     internal bool IsPrimaryEnemyForFlash(Creature creature)
         => ((CombatSolver.Engine.Common.ICombatPredictionCreatureSemantics)this).IsPrimaryEnemy(creature);
 
+    /// <summary>Native encounter slot names (<c>_encounterSlots</c>), for the Flash rules table.</summary>
+    internal IReadOnlyList<string> EncounterSlotsForFlash => _encounterSlots;
+
+    /// <summary>
+    /// The branch-local monster-private integers as the existing engine currently holds them. The
+    /// bridge claims every entry through a monster definition's <c>AiRegisterNames</c> or
+    /// <c>InertMonsterIntNames</c>, or rejects the root.
+    /// </summary>
+    internal IEnumerable<(Creature Creature, string Name, int Value)> MonsterIntEntriesForFlash()
+    {
+        if (_monsterIntStates == null)
+            return [];
+        return _monsterIntStates
+            .Select(item => (item.Key.Creature, item.Key.Name, item.Value))
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Reads a monster-private integer through the existing <see cref="GetMonsterInt"/> path: a
+    /// captured entry when present, otherwise the value read from the model (and cached on this
+    /// private fork). The bridge only calls this on its own import fork.
+    /// </summary>
+    internal int GetMonsterIntForFlash(Creature creature, string name) => GetMonsterInt(creature, name);
+
     /// <summary>
     /// Names the first branch state Flash does not model, or null. The per-turn counters Flash tracks
     /// are projected by the importer; the remaining counters (stars gained, non-hand draws, powered
     /// attack hits, Doom appliers, Fetch plays, enemy per-turn counts) are not listed: only content that
-    /// reads them makes them matter, and such content has no Flash definition.
+    /// reads them makes them matter, and such content has no Flash definition. Monster-private integers
+    /// are claimed by the monster definitions (<see cref="MonsterIntEntriesForFlash"/>).
     /// </summary>
-    /// <summary>
-    /// Private monster integers Flash leaves out because no resolution path reads them. The only one is
-    /// <c>LagavulinMatriarch._isAwake</c>: AsleepPower and the STUNNED move write it, but only
-    /// <see cref="DescribePredictedMonsterState"/> (state fingerprint and continuation text) reads it; move
-    /// selection reads the AsleepPower amount (<c>BranchMonsterAi.ResolveConditional</c>).
-    /// </summary>
-    private static bool IsInertMonsterIntStateForFlash((Creature Creature, string Name) key)
-        => key.Name == "_isAwake" && key.Creature.Monster?.GetType().Name == "LagavulinMatriarch";
-
     internal string? DescribeFlashUnrepresentableState()
     {
         if (HasPendingChoice || _activeActionChoices != null)
@@ -81,8 +97,6 @@ internal sealed partial class SimulatedCombatState
             return "unsettling lamp";
         if (_nemesisShouldApplyIntangible is { Count: > 0 })
             return nameof(_nemesisShouldApplyIntangible);
-        if (_monsterIntStates != null && _monsterIntStates.Keys.Any(key => !IsInertMonsterIntStateForFlash(key)))
-            return nameof(_monsterIntStates);
         if (_aeonglassAdditionalStrength is { Count: > 0 } || _aeonglassWitherUpgradeCount is { Count: > 0 })
             return "aeonglass";
         if (_knowledgeDemonCurseCounters is { Count: > 0 })
@@ -114,8 +128,6 @@ internal sealed partial class SimulatedCombatState
             return "theft";
         if (_battlewornDummyTimedOut)
             return nameof(_battlewornDummyTimedOut);
-        if (_deathPhases != null && _deathPhases.Values.Any(phase => phase == PredictedDeathPhase.Reviving))
-            return "reviving enemy";
         return null;
     }
 }

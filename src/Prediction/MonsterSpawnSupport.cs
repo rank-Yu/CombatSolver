@@ -38,6 +38,20 @@ internal static class MonsterSpawnSupport
         return combat.CreatePredictedMonster(simulator, monster, CombatSide.Enemy, slot);
     }
 
+    /// <summary>
+    /// Non-generic <see cref="Create{T}"/> for data-driven summon tables (the Flash rule compiler's
+    /// closure): clones the canonical model through the same <c>ToMutable</c> path.
+    /// </summary>
+    public static Creature Create(
+        CombatPredictionSimulator simulator,
+        SimulatedCombatState combat,
+        MonsterModel canonical,
+        string? slot)
+    {
+        MonsterModel monster = canonical.ToMutable();
+        return combat.CreatePredictedMonster(simulator, monster, CombatSide.Enemy, slot);
+    }
+
     public static void AddCreated(
         CombatPredictionSimulator simulator,
         SimulatedCombatState combat,

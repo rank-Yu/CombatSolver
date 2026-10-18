@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Modifiers;
 using MegaCrit.Sts2.Core.MonsterMoves;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
 
@@ -53,10 +54,92 @@ internal static class FlashRulesCompiler
         IReadOnlyList<Creature> known = combat.KnownEnemies;
         if (known.Count > FlashLimits.Enemies)
             throw new FlashImportException(FlashRejection.Capacity, $"敌人数 {known.Count}");
+        builder.RootEnemyCount = known.Count;
+        builder.HasEncounter = combat.Encounter != null;
+        builder.EncounterSlots = combat.EncounterSlotsForFlash.ToArray();
+        List<ushort> spawnClosure = SpawnClosure(known);
+        if (known.Count + spawnClosure.Count > FlashLimits.MonsterRules)
+            throw new FlashImportException(FlashRejection.Capacity,
+                $"怪物规则 {known.Count}+{spawnClosure.Count}");
+        // ApplyCreatureAddedRelics' Murderous modifier gives every newly created enemy Strength 3.
+        // PhilosophersStone and FurCoat are rejected unconditionally by their missing relic
+        // definitions in FlashStateImporter.ImportRelics.
+        if (spawnClosure.Count > 0 && combat.Modifiers.Any(static modifier => modifier is Murderous))
+            throw new FlashImportException(FlashRejection.UnsupportedClosure, "Murderous 修饰的召唤入场力量未移植");
+        // Monster rules are compiled from a private fork: reading monster-private integers through
+        // GetMonsterInt caches them, and admission must not mutate the caller's simulator.
+        CombatPredictionSimulator rootFork = simulator.Fork();
+        SimulatedCombatState rootCombat = (SimulatedCombatState)rootFork.State.CombatState;
         for (int index = 0; index < known.Count; index++)
-            builder.SetMonster(index, CompileMonster(combat, known[index]));
+            builder.SetMonster(index, CompileMonster(rootCombat, rootCombat.KnownEnemies[index]));
+        foreach (ushort monsterId in spawnClosure)
+            CompileSpawnedMonster(builder, simulator, monsterId);
         return builder.Build();
     }
+
+    /// <summary>
+    /// Native ids reachable from the root enemies' <see cref="FlashMonsterDef.SpawnedMonsterIds"/>,
+    /// transitively, in first-seen order.
+    /// </summary>
+    private static List<ushort> SpawnClosure(IReadOnlyList<Creature> known)
+    {
+        List<ushort> closure = [];
+        HashSet<ushort> seen = [];
+        Queue<string> pending = new();
+        void Declare(FlashMonsterDef def)
+        {
+            foreach (string nativeId in def.SpawnedMonsterIds)
+                pending.Enqueue(nativeId);
+        }
+        foreach (Creature creature in known)
+        {
+            string nativeId = creature.Monster?.Id.Entry
+                ?? throw new FlashImportException(FlashRejection.UnsupportedMonster, "敌人没有怪物模型");
+            if (!FlashRegistry.TryMonster(nativeId, out ushort id))
+                throw new FlashImportException(FlashRejection.UnsupportedMonster, nativeId);
+            Declare(FlashRegistry.Monster(id));
+        }
+        while (pending.Count > 0)
+        {
+            string nativeId = pending.Dequeue();
+            if (!FlashRegistry.TryMonster(nativeId, out ushort id))
+                throw new FlashImportException(FlashRejection.UnsupportedClosure,
+                    $"生成怪物 {nativeId} 没有 Flash 定义");
+            if (!seen.Add(id))
+                continue;
+            closure.Add(id);
+            Declare(FlashRegistry.Monster(id));
+        }
+        return closure;
+    }
+
+    /// <summary>
+    /// Compiles one spawnable type on its own private fork through the existing engine's creation
+    /// path (<c>MonsterSpawnSupport.Create</c> + <c>AddPredictedMonster</c> +
+    /// <c>PreparePredictedMonster</c>), so the state machine, static values and initial private
+    /// integers come from a fresh instance rather than from a same-typed root enemy.
+    /// </summary>
+    private static void CompileSpawnedMonster(FlashRulesBuilder builder,
+        CombatPredictionSimulator simulator, ushort monsterId)
+    {
+        string nativeId = FlashRegistry.Monster(monsterId).NativeId;
+        MonsterModel canonical = CanonicalMonsters.Value.TryGetValue(nativeId, out MonsterModel? monster)
+            ? monster
+            : throw new FlashImportException(FlashRejection.UnsupportedClosure, $"原版没有怪物 {nativeId}");
+        CombatPredictionSimulator fork = simulator.Fork();
+        SimulatedCombatState combat = (SimulatedCombatState)fork.State.CombatState;
+        string? slot = combat.NextFreeSlot();
+        if (string.IsNullOrEmpty(slot))
+            slot = null;
+        Creature created = MonsterSpawnSupport.Create(fork, combat, canonical, slot);
+        combat.AddPredictedMonster(created);
+        combat.PreparePredictedMonster(fork, created);
+        builder.AddSpawnableMonster(CompileMonster(combat, created));
+    }
+
+    private static readonly Lazy<Dictionary<string, MonsterModel>> CanonicalMonsters = new(() =>
+        ModelDb.All.OfType<MonsterModel>().GroupBy(monster => monster.Id.Entry, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal));
 
     public static ushort CardId(CardModel card)
         => FlashRegistry.TryCard(card.Id.Entry, out ushort id)
@@ -262,10 +345,13 @@ internal static class FlashRulesCompiler
         Dictionary<string, int> index = new(StringComparer.Ordinal);
         for (int position = 0; position < ids.Count; position++)
             index[ids[position]] = position;
-        if (ids.Count + 1 > 64)
+        int nodeCount = ids.Count + 1;
+        if (def.IllusionRevive)
+            nodeCount++;
+        if (nodeCount > 64)
             throw new FlashImportException(FlashRejection.Capacity, $"{monster.Id.Entry} 状态数 {ids.Count}");
 
-        FlashMonsterNode[] nodes = new FlashMonsterNode[ids.Count + 1];
+        FlashMonsterNode[] nodes = new FlashMonsterNode[nodeCount];
         for (int position = 0; position < ids.Count; position++)
         {
             MonsterState state = states[position];
@@ -312,6 +398,33 @@ internal static class FlashRulesCompiler
             Kind = FlashMonsterNodeKind.Move,
             MustPerformOnceBeforeTransitioning = true,
         };
+        int revive = -1;
+        if (def.IllusionRevive)
+        {
+            // SimulatedCombatState.BeginIllusionRevive builds this MoveState with
+            // MustPerformOnceBeforeTransitioning and a dynamic FollowUpStateId
+            // (SimulatedCombatState.DeathLifecycle.cs:100-119).
+            revive = stunned + 1;
+            nodes[revive] = new FlashMonsterNode
+            {
+                NativeId = FlashKernel.ReviveNodeId,
+                Kind = FlashMonsterNodeKind.Move,
+                MustPerformOnceBeforeTransitioning = true,
+            };
+        }
+        // SimulatedCombatState.RegisterPendingInitialMonsterAi picks the first registered MoveState
+        // as the placeholder while a fresh monster waits for its initial roll.
+        int pendingInitial = -1;
+        for (int position = 0; position < ids.Count; position++)
+        {
+            if (states[position] is MoveState)
+            {
+                pendingInitial = position;
+                break;
+            }
+        }
+        if (pendingInitial < 0)
+            throw new FlashImportException(FlashRejection.UnsupportedMonster, $"{monster.Id.Entry} 没有可用行动状态");
         int[] staticInts = new int[def.StaticIntNames.Count];
         for (int position = 0; position < staticInts.Length; position++)
         {
@@ -320,12 +433,21 @@ internal static class FlashRulesCompiler
                 ? value
                 : throw new FlashImportException(FlashRejection.UnsupportedMonster, $"{monster.Id.Entry} 没有静态值 {name}");
         }
+        int[] initialAiRegisters = new int[def.AiRegisterNames.Count];
+        for (int position = 0; position < initialAiRegisters.Length; position++)
+            initialAiRegisters[position] = combat.GetMonsterIntForFlash(creature, def.AiRegisterNames[position]);
         return new FlashMonsterRules
         {
+            MonsterId = monsterId,
             Nodes = nodes,
             InitialNode = initial,
+            PendingInitialMoveNode = pendingInitial,
             StunnedNode = stunned,
+            ReviveNode = revive,
+            InitialHpMin = monster.MinInitialHp,
+            InitialHpMax = monster.MaxInitialHp,
             StaticInts = staticInts,
+            InitialAiRegisters = initialAiRegisters,
         };
     }
 
