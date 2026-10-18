@@ -1,3 +1,7 @@
+using CombatSolver.Engine.Common;
+using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Entities.Creatures;
+using CombatSolver.Engine.InCombat.Simulation;
 using CombatSolver;
 using CombatSolver.Engine.InCombat.Flash;
 using CombatSolver.FlashBeam;
@@ -50,6 +54,7 @@ internal static class FlashDifferentialProbe
             summary["rejection"] = ex.Reason.ToString();
             summary["detail"] = ex.Detail;
             report.Add($"REJECTED {ex.Reason}: {ex.Detail}");
+            report.Add(MissingContent(rootSnapshot.Simulator, player));
             File.WriteAllLines(Path.Combine(outputDirectory, "flash-diff.txt"), report);
             return summary;
         }
@@ -193,6 +198,43 @@ internal static class FlashDifferentialProbe
     /// K4 and K5: the Flash evaluation and the incumbent lower-bound inputs of every projected state must
     /// equal the existing snapshot's. States the existing engine stopped at a search boundary are skipped.
     /// </summary>
+    /// <summary>
+    /// Every card, relic, potion and known monster of the root that has no Flash definition, so a survey
+    /// sees more than the first rejection.
+    /// </summary>
+    private static string MissingContent(CombatPredictionSimulator simulator, Player player)
+    {
+        SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
+        SimPlayerCombatState state = simulator.State.GetPlayerCombatState(player);
+        SortedSet<string> cards = new(StringComparer.Ordinal), relics = new(StringComparer.Ordinal),
+            potions = new(StringComparer.Ordinal), monsters = new(StringComparer.Ordinal);
+        foreach (SimCardPile pile in new[] { state.Hand, state.DrawPile, state.DiscardPile, state.ExhaustPile, state.PlayPile })
+        {
+            foreach (PredictedCard card in pile.Cards)
+            {
+                if (!FlashRegistry.TryCard(card.Preview.Id.Entry, out _))
+                    cards.Add(card.Preview.Id.Entry);
+            }
+        }
+        foreach (RelicModel relic in combat.RelicsOf(player))
+        {
+            if (!FlashRegistry.TryRelic(relic.Id.Entry, out _))
+                relics.Add(relic.Id.Entry);
+        }
+        for (int slot = 0; slot < combat.PotionSlotCountForFlash(player); slot++)
+        {
+            if (combat.GetPotionAtSlot(player, slot) is { } potion && !FlashRegistry.TryPotion(potion.Id.Entry, out _))
+                potions.Add(potion.Id.Entry);
+        }
+        foreach (Creature enemy in combat.KnownEnemies)
+        {
+            if (enemy.Monster is { } monster && !FlashRegistry.TryMonster(monster.Id.Entry, out _))
+                monsters.Add(monster.Id.Entry);
+        }
+        return $"MISSING cards=[{string.Join(",", cards)}] relics=[{string.Join(",", relics)}] "
+            + $"potions=[{string.Join(",", potions)}] monsters=[{string.Join(",", monsters)}]";
+    }
+
     private sealed class ScoreCheck(
         FlashScorer? scorer, FlashBoundFeatures? bound, CombatBeamSolver solver, List<string> report)
     {

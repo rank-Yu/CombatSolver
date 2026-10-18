@@ -203,4 +203,4 @@ plan 每项的字段：`label`（必填，简单目录名）、`request`（必�
 
 ## Flash 差分探针
 
-设置 `OFFLINE_HARNESS_FLASH_DIFF=1` 后，宿主在到达玩家第一回合（M1）时比较现有引擎与 Flash 内核：先投影根，再对全部合法动作各执行一步、并按固定种子做多回合随机游走，逐步比较投影后的字节。结果写入 `flash-diff.txt` 与 `harness-result.json` 的 `flashDiff` 字段。根含 Flash 尚不支持的内容时报告准入拒绝原因，不做比较。命令与当前证据见 [Flash 测试记录](flash-search/testing.md)。
+设置 `OFFLINE_HARNESS_FLASH_DIFF=1` 后，宿主在到达玩家第一回合（M1）时比较现有引擎与 Flash 内核：先投影根，再对全部合法动作各执行一步、并按固定种子做多回合随机游走，逐步比较投影后的字节。结果写入 `flash-diff.txt` 与 `harness-result.json` 的 `flashDiff` 字段。根含 Flash 尚不支持的内容时报告准入拒绝原因，并在下一行 `MISSING` 列出根上全部没有 Flash 定义的卡牌、遗物、药水与怪物，不做比较。命令与当前证据见 [Flash 测试记录](flash-search/testing.md)。
