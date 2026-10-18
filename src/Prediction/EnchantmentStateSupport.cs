@@ -58,6 +58,27 @@ internal static class EnchantmentStateSupport
         return text.ToString();
     }
 
+    /// <summary>
+    /// The enchantment-private value already covered by <see cref="Append(ref StateFingerprintBuilder, EnchantmentModel?)"/>:
+    /// <c>Glam._usedThisCombat</c> as 0/1 and <c>Momentum._extraDamage</c>. The Flash bridge uses this
+    /// read-only accessor so it does not reflect over live models itself.
+    /// </summary>
+    public static bool TryGetPrivateValue(EnchantmentModel enchantment, out int value)
+    {
+        switch (enchantment)
+        {
+            case Glam glam:
+                value = (bool)GlamUsedField.GetValue(glam)! ? 1 : 0;
+                return true;
+            case Momentum momentum:
+                value = (int)MomentumExtraDamageField.GetValue(momentum)!;
+                return true;
+            default:
+                value = 0;
+                return false;
+        }
+    }
+
     private static FieldInfo RequiredField(Type type, string name)
         => type.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)
            ?? throw new MissingFieldException(type.FullName, name);

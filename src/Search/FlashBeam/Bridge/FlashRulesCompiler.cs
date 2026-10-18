@@ -3,12 +3,14 @@ using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Extensions;
 using CombatSolver.Engine.InCombat.Flash;
 using CombatSolver.Engine.InCombat.Simulation;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Factories;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
+using MegaCrit.Sts2.Core.Models.Monsters;
 using MegaCrit.Sts2.Core.Models.Modifiers;
 using MegaCrit.Sts2.Core.MonsterMoves;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
@@ -125,16 +127,23 @@ internal static class FlashRulesCompiler
     private static void CompileSpawnedMonster(FlashRulesBuilder builder,
         CombatPredictionSimulator simulator, ushort monsterId)
     {
-        string nativeId = FlashRegistry.Monster(monsterId).NativeId;
+        FlashMonsterDef def = FlashRegistry.Monster(monsterId);
+        string nativeId = def.NativeId;
         MonsterModel canonical = CanonicalMonsters.Value.TryGetValue(nativeId, out MonsterModel? monster)
             ? monster
             : throw new FlashImportException(FlashRejection.UnsupportedClosure, $"原版没有怪物 {nativeId}");
         CombatPredictionSimulator fork = simulator.Fork();
         SimulatedCombatState combat = (SimulatedCombatState)fork.State.CombatState;
-        string? slot = combat.NextFreeSlot();
+        string? slot = def.SpawnSlotName ?? combat.NextFreeSlot();
         if (string.IsNullOrEmpty(slot))
             slot = null;
-        Creature created = MonsterSpawnSupport.Create(fork, combat, canonical, slot);
+        // Same creation path as MonsterSpawnSupport.Create, with the definition's spawn configuration:
+        // Wriggler's StartStunned selects the SPAWNED_MOVE initial node, and its INIT_MOVE conditional
+        // reads the slot name, so a spawn rule entry must not be compiled from an unmatched slot.
+        MonsterModel mutable = canonical.ToMutable();
+        if (def.SpawnedStunned && mutable is Wriggler wriggler)
+            wriggler.StartStunned = true;
+        Creature created = combat.CreatePredictedMonster(fork, mutable, CombatSide.Enemy, slot);
         combat.AddPredictedMonster(created);
         combat.PreparePredictedMonster(fork, created);
         builder.AddSpawnableMonster(CompileMonster(combat, created));

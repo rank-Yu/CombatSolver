@@ -74,7 +74,7 @@ internal static class FlashStateImporter
         IReadOnlyList<Creature> known = combat.KnownEnemies;
         ImportEnemies(ref battle, simulator, combat, known, rules, processedDeaths, projections);
         ImportPowers(ref battle, combat, player, known, projections);
-        ImportCards(ref battle, playerState, rules);
+        ImportCards(ref battle, combat, playerState, rules);
         RejectRunListenerDeckCards(player);
         ImportRelics(ref battle, combat, player, projections);
         ImportPotions(ref battle, combat, player);
@@ -160,6 +160,10 @@ internal static class FlashStateImporter
                 automaticPotionUseCount = checked(automaticPotionUseCount + 1);
         }
         battle.SetCounter(FlashCounter.AutomaticPotionUseCount, automaticPotionUseCount);
+        battle.SetCounter(FlashCounter.VitalSparkNormalizedAmount,
+            combat.LastNormalizedVitalSparkAmountForFlash);
+        battle.SetCounter(FlashCounter.SkillPlayedThisSideTurn,
+            combat.HasPlayedSkillThisTurn(owner) ? 1 : 0);
     }
 
     private static void ImportRng(ref FlashBattle battle, CombatPredictionRngSet rng)
@@ -241,9 +245,12 @@ internal static class FlashStateImporter
             }
             else
             {
-                if (enemy.DeathPhase == FlashDeathPhase.Reviving && machine.ReviveNode < 0)
+                // A reviving Illusion is always in its synthetic REVIVE_MOVE (handled above). A
+                // Reattach segment instead revives from the native DEAD_MOVE/REATTACH_MOVE nodes, so a
+                // non-illusion reviving phase is a normal node.
+                if (enemy.DeathPhase == FlashDeathPhase.Reviving && FlashRegistry.Monster(monsterId).IllusionRevive)
                     throw new FlashImportException(FlashRejection.UnrepresentableState,
-                        $"{monster.Id.Entry} 处于复活状态但没有复活节点");
+                        $"{monster.Id.Entry} 处于复活状态但不在复活行动中");
                 enemy.Move = checked((byte)machine.NodeIndex(ai.Current.Id));
                 enemy.ForcedMove = byte.MaxValue;
             }
@@ -289,8 +296,10 @@ internal static class FlashStateImporter
             if (string.Equals(rules.EncounterSlots[slot], creature.SlotName, StringComparison.Ordinal))
                 return checked((byte)slot);
         }
-        throw new FlashImportException(FlashRejection.UnrepresentableState,
-            $"遭遇没有槽位 {creature.SlotName}");
+        // SimulatedCombatState.GetSlotIndex returns -1 for a slot name outside _encounterSlots; an
+        // EncounterModel.Slots list can be empty while GenerateMonsters still names slots (Bowlbugs,
+        // SlumberingBeetle), and no slot order may be invented for them.
+        return checked((byte)FlashKernel.NoSlot);
     }
 
     private static void ImportPowers(ref FlashBattle battle, SimulatedCombatState combat, Player player, IReadOnlyList<Creature> known,
@@ -351,7 +360,8 @@ internal static class FlashStateImporter
         }
     }
 
-    private static void ImportCards(ref FlashBattle battle, SimPlayerCombatState playerState, FlashRules rules)
+    private static void ImportCards(ref FlashBattle battle, SimulatedCombatState combat,
+        SimPlayerCombatState playerState, FlashRules rules)
     {
         (SimCardPile Pile, FlashPile Flash)[] piles =
         [
@@ -364,19 +374,16 @@ internal static class FlashStateImporter
         foreach ((SimCardPile pile, FlashPile target) in piles)
         {
             foreach (PredictedCard card in pile.Cards)
-                FlashPiles.Append(ref battle, target, Card(card.Preview, rules));
+                FlashPiles.Append(ref battle, target, Card(card, rules, combat.IsRootCardForFlash(card)));
         }
     }
 
-    private static FlashCard Card(CardModel card, FlashRules rules)
+    private static FlashCard Card(PredictedCard predicted, FlashRules rules, bool rootCard)
     {
+        CardModel card = predicted.Preview;
         ushort id = FlashRulesCompiler.CardId(card);
         int upgrade = card.CurrentUpgradeLevel;
         FlashCardStats stats = rules.Card(id, upgrade);
-        if (card.Enchantment != null)
-            throw new FlashImportException(FlashRejection.UnsupportedEnchantment, card.Enchantment.Id.Entry);
-        if (card.Affliction != null)
-            throw new FlashImportException(FlashRejection.UnsupportedAffliction, card.Affliction.Id.Entry);
         if (card.IsDupe)
             throw new FlashImportException(FlashRejection.UnsupportedCard, $"{card.Id.Entry} 复制品");
 
@@ -389,6 +396,47 @@ internal static class FlashStateImporter
             BaseStarCost = checked((sbyte)card.BaseStarCost),
             ReplayCount = checked((byte)card.BaseReplayCount),
         };
+        // Root cards were present at _liveCardsAtSnapshot, so the one-time check can never apply to
+        // them; marking them checked is equivalent to the existing engine's first normalization and
+        // keeps their bytes stable while an auto-play queue holds them. Generated cards copy the
+        // actual flag and are distinguished by CreatedAfterRoot.
+        if (rootCard || predicted.HasCheckedPowerAfflictionEntry)
+            result.Flags |= FlashCardFlags.PowerAfflictionChecked;
+        if (!rootCard)
+            result.Keywords |= FlashKeywords.CreatedAfterRoot;
+        if (card.Enchantment != null)
+        {
+            EnchantmentModel enchantment = card.Enchantment;
+            if (!FlashRegistry.TryEnchantment(enchantment.Id.Entry, out ushort enchantmentId))
+                throw new FlashImportException(FlashRejection.UnsupportedEnchantment, enchantment.Id.Entry);
+            if ((uint)enchantment.Amount > short.MaxValue || enchantment.Amount < short.MinValue)
+                throw new FlashImportException(FlashRejection.UnrepresentableState,
+                    $"{card.Id.Entry} 附魔层数 {enchantment.Amount}");
+            if ((uint)enchantment.Status > 1)
+                throw new FlashImportException(FlashRejection.UnrepresentableState,
+                    $"{card.Id.Entry} 附魔状态 {(int)enchantment.Status}");
+            result.EnchantmentId = checked((byte)(enchantmentId + 1));
+            result.EnchantmentAmount = (short)enchantment.Amount;
+            result.EnchantmentStatus = (byte)enchantment.Status;
+            if (EnchantmentStateSupport.TryGetPrivateValue(enchantment, out int privateValue))
+            {
+                if (privateValue is < short.MinValue or > short.MaxValue)
+                    throw new FlashImportException(FlashRejection.UnrepresentableState,
+                        $"{card.Id.Entry} 附魔私有值 {privateValue}");
+                result.EnchantmentPrivate = (short)privateValue;
+            }
+        }
+        if (card.Affliction != null)
+        {
+            AfflictionModel affliction = card.Affliction;
+            if (!FlashRegistry.TryAffliction(affliction.Id.Entry, out ushort afflictionId))
+                throw new FlashImportException(FlashRejection.UnsupportedAffliction, affliction.Id.Entry);
+            if (affliction.Amount is < short.MinValue or > short.MaxValue)
+                throw new FlashImportException(FlashRejection.UnrepresentableState,
+                    $"{card.Id.Entry} 苦难层数 {affliction.Amount}");
+            result.AfflictionId = checked((byte)(afflictionId + 1));
+            result.AfflictionAmount = (short)affliction.Amount;
+        }
         if (card.ExhaustOnNextPlay) result.Flags |= FlashCardFlags.ExhaustOnNextPlay;
         if (card.HasSingleTurnSly) result.Flags |= FlashCardFlags.SlyThisTurn;
         if (card.HasSingleTurnRetain) result.Flags |= FlashCardFlags.RetainThisTurn;

@@ -32,6 +32,12 @@ internal sealed partial class SimulatedCombatState
     private int? _lastNormalizedVitalSparkAmount;
     private ForkableSet<Creature>? _skillsPlayedThisTurn;
 
+    /// <summary>Read-only view for the Flash bridge (<see cref="int.MinValue"/> means null).</summary>
+    internal int LastNormalizedVitalSparkAmountForFlash => _lastNormalizedVitalSparkAmount ?? int.MinValue;
+
+    /// <summary>Whether the card was already present at the root snapshot (<c>_liveCardsAtSnapshot</c>).</summary>
+    internal bool IsRootCardForFlash(PredictedCard card) => _liveCardsAtSnapshot?.Contains(card.Original) == true;
+
     public void RecordPowerAmountChange(PowerModel power, int delta, Creature? applier)
     {
         if (delta != 0)

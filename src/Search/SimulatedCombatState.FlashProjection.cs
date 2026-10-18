@@ -46,6 +46,14 @@ internal sealed partial class SimulatedCombatState
     internal IReadOnlyList<string> EncounterSlotsForFlash => _encounterSlots;
 
     /// <summary>
+    /// The TenderPower card count through <see cref="GetTenderCardsPlayed"/>: the captured
+    /// <c>_tenderCardsPlayed</c> entry when present, otherwise the native model field the getter would
+    /// read. Only called for an owner that still holds a positive TenderPower; a retired entry without
+    /// the power is inert (no reader consults it without the power).
+    /// </summary>
+    internal int TenderCardsPlayedForFlash(Creature owner) => GetTenderCardsPlayed(owner);
+
+    /// <summary>
     /// The branch-local monster-private integers as the existing engine currently holds them. The
     /// bridge claims every entry through a monster definition's <c>AiRegisterNames</c> or
     /// <c>InertMonsterIntNames</c>, or rejects the root.
@@ -122,8 +130,10 @@ internal sealed partial class SimulatedCombatState
             return nameof(_returnToHandNextTurn);
         if (_addedPowerInstances is { Count: > 0 } || _rootMultiInstancePowerClones is { Count: > 0 })
             return "instanced powers";
-        if (_tenderCardsPlayed != null && _tenderCardsPlayed.Values.Any(value => value != 0))
-            return nameof(_tenderCardsPlayed);
+        // _tenderCardsPlayed is projected into TenderPower.Aux0 by the bridge
+        // (FlashStateProjections.ProjectPower). An entry can outlive the power when the owner dies and
+        // its powers are cleared, but no reader calls GetTenderCardsPlayed without a positive
+        // TenderPower, so a retired entry is inert.
         if (_outstandingStolenGold is > 0 || _outstandingStolenCards is > 0)
             return "theft";
         if (_battlewornDummyTimedOut)

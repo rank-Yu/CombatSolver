@@ -164,6 +164,26 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
                 }
                 break;
             }
+            // SurroundedPower.Aux0 = Facing (BeforeCardPlayedMirrors/DeathPowerSupport update
+            // SurroundedPredictionState; without an entry its constructor reads the live field).
+            case SurroundedPower surrounded:
+                target.Aux0 = (int)(Claim<SurroundedPredictionState>(power)?.Facing ?? surrounded.Facing);
+                break;
+            // CurlUpPower.Aux0 = Consumed, .Aux1 = a card is recorded. Both live only in
+            // CurlUpPredictionState (its constructor reads nothing from the model); a fresh entry is
+            // false/false, and a live power is claimed here.
+            case CurlUpPower:
+            {
+                CurlUpPredictionState? curl = Claim<CurlUpPredictionState>(power);
+                target.Aux0 = curl?.Consumed == true ? 1 : 0;
+                target.Aux1 = curl?.PlayedCard != null ? 1 : 0;
+                break;
+            }
+            // TenderPower.Aux0 = cards played this turn. The existing engine reads it through
+            // GetTenderCardsPlayed (_tenderCardsPlayed when captured, otherwise the native model field).
+            case TenderPower tender:
+                target.Aux0 = combat.TenderCardsPlayedForFlash(tender.Owner);
+                break;
             // RagePower has no private state; its stale PowerAmountPredictionState after the turn-end
             // removal is inert (amount equals the removed power's amount) and stays unclaimed.
             default:
@@ -402,6 +422,23 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
                 continue;
             if (model is PowerModel { Owner: { Side: CombatSide.Enemy } owner } && !combat.ContainsCreature(owner))
                 continue;
+            // Retired power prediction states whose only readers are the power's own hooks. The power
+            // amount reached zero and ImportPowers skipped it, so no EffectivePowers entry can reach
+            // these readers again (a re-acquired power is a fresh native instance).
+            //
+            // SurroundedPower is removed only when the player dies (HandlePlayerDeath clears the
+            // player's powers); its Facing is read only by BeforeCardPlayed/ModifyDamage on the living
+            // player.
+            if (model is SurroundedPower { Amount: 0 } && state is SurroundedPredictionState)
+            {
+                continue;
+            }
+            // CurlUpPower consumes itself in AfterCardPlayed; the store entry keeps Consumed and the
+            // cleared card. AfterDamageReceived/AfterCardPlayed only visit a positive effective power.
+            if (model is CurlUpPower { Amount: 0 } && state is CurlUpPredictionState)
+            {
+                continue;
+            }
             throw new FlashImportException(FlashRejection.UnrepresentableState, $"StateStore: {state.GetType().Name}@{model.Id.Entry}");
         }
         foreach (RelicModel relic in combat.StatefulRelicKeysForFlash())
