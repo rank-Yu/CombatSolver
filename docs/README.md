@@ -10,6 +10,7 @@
 | [无人测试](HEADLESS_TESTING.md) | 原生、差分与部署方法 |
 | [检查点回放](CHECKPOINT_REPLAY.md) | 问题包恢复和批量回放 |
 | [离线宿主](OFFLINE_SEARCH_HARNESS.md) | 固定根搜索指标 |
+| [Flash 搜索](flash-search/README.md) | 可选结构体状态搜索后端的规格 |
 | [覆盖材料](../coverage/README.md) / [覆盖目录](COMBAT_HOOK_COVERAGE.md) / [适配验证](ADAPTATION_VERIFICATION.md) | 输入、证据、生成状态与验证入口 |
 | [生成场景](GENERATED_COMBAT_SCENARIOS.md) | 场景生成与材料 |
 | [第三方适配](third-party/README.md) | 外部登记合同与封闭入口 |

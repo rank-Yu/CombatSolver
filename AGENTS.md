@@ -38,6 +38,7 @@ CombatSolver 是《杀戮尖塔 2》的单人战斗路线求解器 Mod，使用 
 - 批量回放“找到更优世界线”报告、筛选有效策略缺口并做小批次策略迭代：`.agents/skills/strategy-replay-iteration/SKILL.md`。
 - 卡牌、Power、遗物、药水、球、怪物、死亡/召唤、选牌、RNG、Fork 或跨回合语义：`.agents/skills/combat-semantic-change/SKILL.md`。
 - Beam、评分、剪枝、Pareto、转置、预算、分配、GC 或实机卡顿：`.agents/skills/search-performance-optimization/SKILL.md`。
+- Flash 搜索后端（`src/Engine/InCombat/Flash/`、`src/Search/FlashBeam/`、`BeamSolveDispatch`、Flash 差分测试）：`.agents/skills/flash-search/SKILL.md`。
 - Search/Runtime/UI/Testing/registry 的职责迁移、结构拆分和依赖边界：`.agents/skills/architecture-boundary-refactor/SKILL.md`。
 - 玩家可见 UI 文案、胶囊附加信息和中英本地化：`.agents/skills/ui-localization/SKILL.md`；新增文案同时维护中文与英文。
 - 版本提升、发布 ZIP、版本标签、创意工坊上传、GitHub 同步、干净安装或“可发布”结论：`.agents/skills/release-gate/SKILL.md`。
@@ -53,6 +54,7 @@ CombatSolver 是《杀戮尖塔 2》的单人战斗路线求解器 Mod，使用 
 - [开发笔记](docs/DEVELOPMENT_NOTES.md)：当前未发布行为变化与历史入口。
 - [第三方 Mod 适配手册](docs/third-party/README.md)：面向外部 Mod 作者的登记点总表、登记纪律与验收标准；同时是「哪些位置还是封闭开关」的单一维护入口。
 - `tools/inspection/verify-refactor-boundaries.ps1`（Windows / PowerShell 7）与 `tools/inspection/verify-refactor-boundaries.sh`（Linux / Bash）：当前架构边界的等价可执行门禁。
+- [Flash 搜索后端](docs/flash-search/README.md)：可选结构体状态搜索后端的设计规格、准入与校验合同。
 - `tools/search/OfflineSearchHarness/`：不启动 Godot、在普通 .NET 进程里批量跑搜索的离线宿主，用法与口径见 [离线搜索宿主](docs/OFFLINE_SEARCH_HARNESS.md)。只产指标，不做正确性验收。
 
 源码与当前可重跑结果优先于历史说明。职责发生变化时，同一提交更新 `docs/ARCHITECTURE.md`、相关 skill 和结构门禁，避免多份地图继续漂移。
@@ -97,6 +99,7 @@ CombatSolver 是《杀戮尖塔 2》的单人战斗路线求解器 Mod，使用 
 - gameplay mod subscriber 在主线程分段捕获。已适配来源消费根/分支状态；未知 gameplay subscriber 显式拒绝，不浅拷贝 live 所有权。
 - Search 不得引用 `SolverSettings.Current`、`Entry.Logger`、`SolverController`、UI 或无人测试 runner；通过 `SearchPolicySnapshot`、`SearchDiagnosticsSink` 和 `SearchFramePressureSignal` 注入。
 - 同一战斗语义只能有一个权威实现。新增效果前沿完整调用链检查 mirror、spec、support 与 `SimulatedCombatState`，避免双结算。
+- Flash 内核（`src/Engine/InCombat/Flash/`）是受校验的派生实现，不是第二个权威：语义以现有引擎为准，每项语义必须通过与现有引擎的严格差分；Flash 搜出的路线部署前由现有引擎从同一根完整回放核对。两者不一致时修正 Flash；现有引擎与原版不一致时先修现有引擎，Flash 再跟随。
 
 ## 7. 错误处理
 
