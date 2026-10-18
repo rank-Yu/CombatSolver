@@ -68,6 +68,7 @@ internal static class FlashScoreBridge
             DoomPowerId = PowerId<DoomPower>(),
             SleightOfFleshPowerId = PowerId<SleightOfFleshPower>(),
             RetainHandPowerId = PowerId<RetainHandPower>(),
+            FreeAttackPowerId = PowerId<FreeAttackPower>(),
             IllusionPowerId = PowerId<IllusionPower>(),
             BodySlamCardId = CardId<BodySlam>(),
             BufferPowerId = PowerId<MegaCrit.Sts2.Core.Models.Powers.BufferPower>(),

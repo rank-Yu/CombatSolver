@@ -113,11 +113,12 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
                     _claimed.Add(state);
                 }
                 break;
-            // RupturePower.Aux0..2 are the pending card play's Strength, marker and last damage's
-            // card-source flag; all three are zero at every non-terminal action boundary. The existing
-            // engine keeps the same pending information in RupturePredictionState.StrengthByCard, a map
-            // keyed by CardModel that only holds the in-flight card play. A stable boundary therefore
-            // has an empty map: claim it, and reject a state captured in the middle of a play.
+            // RupturePower.Aux0/Aux1 are the pending card play's Strength and its marker; both are zero
+            // at every non-terminal action boundary. The damage card source is read directly from
+            // FlashDamageResult (no staged Aux2). The existing engine keeps the same pending
+            // information in RupturePredictionState.StrengthByCard, a map keyed by CardModel that only
+            // holds the in-flight card play. A stable boundary therefore has an empty map: claim it,
+            // and reject a state captured in the middle of a play.
             case RupturePower:
             {
                 // A stale entry can outlive a model remap under the old instance; every entry of this
@@ -179,6 +180,13 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
             // (StatefulRelicState Current/Previous; RecordRelicCardPlayed and CompleteRelicsAfterSideTurnEnd).
             case ArtOfWar:
                 (target.Counter, target.Aux) = ClaimStatefulRelic(relic);
+                break;
+            // RuinedHelmet.UsedThisCombat = the existing engine's StatefulRelicState.Current
+            // (ModifyPowerAmountForRuinedHelmet sets it to 1 after doubling; the live field is not
+            // written by the simulator). The Flash definition consumes the flag directly.
+            case RuinedHelmet:
+                if (ClaimStatefulRelic(relic).Current != 0)
+                    target.Flags |= FlashRelicFlags.UsedThisCombat;
                 break;
             // BurningSticks.Counter = was used this combat (BurningSticksPredictionState.WasUsedThisCombat).
             case BurningSticks sticks:

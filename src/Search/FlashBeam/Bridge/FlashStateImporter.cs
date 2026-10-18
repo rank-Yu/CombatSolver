@@ -68,7 +68,7 @@ internal static class FlashStateImporter
         if (simulator.State.GetOsty(player) != null)
             throw new FlashImportException(FlashRejection.UnrepresentableState, "Osty");
 
-        ImportCounters(ref battle, combat, player);
+        ImportCounters(ref battle, simulator, combat, player);
 
         ImportRng(ref battle, simulator.Rng);
         IReadOnlyList<Creature> known = combat.KnownEnemies;
@@ -112,7 +112,8 @@ internal static class FlashStateImporter
         Flags = FlashCreatureFlags.Present | (lostHpThisTurn ? FlashCreatureFlags.LostHpThisTurn : FlashCreatureFlags.None),
     };
 
-    private static void ImportCounters(ref FlashBattle battle, SimulatedCombatState combat, Player player)
+    private static void ImportCounters(ref FlashBattle battle, CombatPredictionSimulator simulator,
+        SimulatedCombatState combat, Player player)
     {
         Creature owner = player.Creature;
         battle.SetCounter(FlashCounter.CardsPlayedThisTurn, combat.GetCardsPlayedThisTurn(owner));
@@ -134,6 +135,19 @@ internal static class FlashStateImporter
         battle.SetCounter(FlashCounter.EnergySpentThisTurn, combat.GetEnergySpentThisTurn(player));
         battle.SetCounter(FlashCounter.CumulativeHpLost, combat.GetCumulativeHpLost(owner));
         battle.SetCounter(FlashCounter.RecoveredHp, combat.GetRecoveredHp(owner));
+        // CalculatedVarSpecRegistry.CountUnblockedDamageEvents: root history plus the predicted
+        // DamageReceived entries for this player.
+        int unblockedEvents = combat.GetUnblockedHitsBeforePrediction(owner);
+        foreach (CombatPredictionHistoryEntry entry in simulator.History)
+        {
+            if (entry is CombatPredictionDamageReceivedEntry damage
+                && damage.Receiver == owner
+                && damage.Result.UnblockedDamage > 0)
+            {
+                unblockedEvents++;
+            }
+        }
+        battle.SetCounter(FlashCounter.PlayerUnblockedDamageEvents, unblockedEvents);
         battle.SetCounter(FlashCounter.LongTermResourceValue, combat.LongTermResourceValue);
         battle.SetCounter(FlashCounter.AngerCopiesGenerated, combat.AngerCopiesGenerated);
         battle.SetCounter(FlashCounter.DeathSaveRelicHpRestored, combat.DeathSaveRelicHpRestored);
