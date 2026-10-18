@@ -33,7 +33,7 @@ internal static class FlashStateImporter
             throw new FlashImportException(FlashRejection.PendingChoice, "模拟器有待处理选择");
         if (combat.DescribeFlashUnrepresentableState() is { } unrepresentable)
             throw new FlashImportException(FlashRejection.UnrepresentableState, unrepresentable);
-        FlashStateProjections projections = new(simulator.StateStore, combat);
+        FlashStateProjections projections = new(simulator.StateStore, simulator.State, combat);
 
         FlashBattle battle = default;
         SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(player);
@@ -59,7 +59,8 @@ internal static class FlashStateImporter
             battle.Flags |= FlashBattleFlags.PlayerTurnEndRequested;
         // K5 compares the snapshot's uncompensated risk, not the raw history flag: compensated
         // MethodMirrorIncomplete entries (CardOnPlayCompensationCatalog and friends) leave
-        // snapshot.HasRisk false. The kernel only records uncompensated UnresolvedPlayerChoice risk.
+        // snapshot.HasRisk false. Discovery/Splash are in that catalog, so the kernel never raises
+        // the flag for their generated options; only the imported root's risk is represented.
         if (hasRisk)
             battle.Flags |= FlashBattleFlags.HasRisk;
         battle.MaxHandSize = checked((byte)combat.GetMaxHandSize(player));
@@ -395,6 +396,7 @@ internal static class FlashStateImporter
             BaseCost = checked((sbyte)card.EnergyCost._base),
             BaseStarCost = checked((sbyte)card.BaseStarCost),
             ReplayCount = checked((byte)card.BaseReplayCount),
+            IsClone = card.IsClone,
         };
         // Root cards were present at _liveCardsAtSnapshot, so the one-time check can never apply to
         // them; marking them checked is equivalent to the existing engine's first normalization and

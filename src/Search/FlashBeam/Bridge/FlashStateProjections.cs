@@ -6,6 +6,7 @@ using CombatSolver.Engine.InCombat.Mirrors.Hooks.Card;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Damage;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Death;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.TurnEnd;
+using CombatSolver.Engine.InCombat.Simulation;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Models;
@@ -27,7 +28,8 @@ namespace CombatSolver.FlashBeam;
 /// matching Flash definition maintains the slot; the differential probe compares the projection after
 /// every step, which catches a projection that reads the wrong value.
 /// </remarks>
-internal sealed class FlashStateProjections(PredictionStateStore store, SimulatedCombatState combat)
+internal sealed class FlashStateProjections(PredictionStateStore store, CombatPredictionState combatState,
+    SimulatedCombatState combat)
 {
     private readonly HashSet<object> _claimed = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<RelicModel> _claimedRelicStates = new(ReferenceEqualityComparer.Instance);
@@ -436,6 +438,19 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
             // CurlUpPower consumes itself in AfterCardPlayed; the store entry keeps Consumed and the
             // cleared card. AfterDamageReceived/AfterCardPlayed only visit a positive effective power.
             if (model is CurlUpPower { Amount: 0 } && state is CurlUpPredictionState)
+            {
+                continue;
+            }
+            // Retired power states left behind by HandlePlayerDeath -> RemovePowersAfterDeath: the
+            // power amount reaches zero but the store entry keeps its accumulated value. Every
+            // reader is a hook of that power and only visits positive EffectivePowers entries; the
+            // global CardPlayPair cleanup only removes in-flight CardPlay keys. The player is dead,
+            // so no further card play, draw or turn phase can reach them.
+            if (model is PowerModel { Amount: 0 } retired
+                && retired.Owner.Player is not null
+                && combatState.GetCreature(retired.Owner).IsDead
+                && state is DarkEmbracePredictionState or JugglingPredictionState
+                    or HellraiserPredictionState or RupturePredictionState or CardPlayPairPredictionState)
             {
                 continue;
             }

@@ -5,6 +5,7 @@
 | [strategy](strategy/) | `p0.json`、`p2.json` 与 roots/ 的两对代表请求/规格：当前固定策略、预算和输入 |
 | [novelty](novelty/) | 固定训练/留存局面与排序配置 |
 | [runtime-gc](runtime-gc/) | GC 启动配置和压力局面 |
+| [flash-decks](flash-decks/) | 生成牌组上的 Flash 准入与差分回归输入（`request.json` + `spec.json`） |
 
 修改路径时同步请求内的 `generatedScenarioPath`。历史记录中的哈希仍指当时输入；语义内容与历史验证范围保持各自来源。
 
