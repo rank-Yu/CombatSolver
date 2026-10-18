@@ -36,19 +36,7 @@ internal static class FlashActionTranslator
                     if (string.Equals(CardChoiceSupport.ChoiceCardKey(hand[prior]), stateKey, StringComparison.Ordinal))
                         stateOccurrence++;
                 }
-                Creature? target = action.Target == FlashLimits.NoOwner
-                    ? null
-                    : combat.KnownEnemies[action.Target - FlashLimits.FirstEnemyOwner];
-                int targetIndex = -1;
-                if (target != null)
-                {
-                    IReadOnlyList<Creature> enemies = simulator.State.Enemies;
-                    for (int index = 0; index < enemies.Count; index++)
-                    {
-                        if (ReferenceEquals(enemies[index], target))
-                            targetIndex = index;
-                    }
-                }
+                (Creature? target, int targetIndex) = Target(snapshot, action.Target);
                 return new PlanAction(
                     PlanActionKind.PlayCard,
                     turn,
@@ -61,8 +49,38 @@ internal static class FlashActionTranslator
                     CardStateOccurrence: stateOccurrence,
                     CardEnchantmentId: card.Preview.Enchantment?.Id.Entry ?? "",
                     CardUpgradeLevel: card.Preview.CurrentUpgradeLevel);
+            case FlashActionKind.UsePotion:
+            {
+                // EnumeratePlannedPotionActions keys a potion by slot, id and target.
+                var potion = combat.GetPotionAtSlot(player, action.PotionSlot)
+                    ?? throw new InvalidOperationException($"药水槽位 {action.PotionSlot} 在旧引擎中为空。");
+                (Creature? potionTarget, int potionTargetIndex) = Target(snapshot, action.Target);
+                return new PlanAction(
+                    PlanActionKind.UsePotion,
+                    turn,
+                    TargetIndex: potionTargetIndex,
+                    TargetCombatId: potionTarget?.CombatId,
+                    PotionSlot: action.PotionSlot,
+                    PotionId: potion.Id.Entry);
+            }
             default:
                 throw new FlashUnsupportedException($"动作 {action.Kind} 的翻译尚未实现。");
         }
+    }
+
+    /// <summary>The enemy behind a Flash owner and its index in the existing engine's enemy list (-1 for none).</summary>
+    private static (Creature? Target, int Index) Target(SimulationSnapshot snapshot, byte owner)
+    {
+        if (owner == FlashLimits.NoOwner)
+            return (null, -1);
+        SimulatedCombatState combat = (SimulatedCombatState)snapshot.Simulator.State.CombatState;
+        Creature target = combat.KnownEnemies[owner - FlashLimits.FirstEnemyOwner];
+        IReadOnlyList<Creature> enemies = snapshot.Simulator.State.Enemies;
+        for (int index = 0; index < enemies.Count; index++)
+        {
+            if (ReferenceEquals(enemies[index], target))
+                return (target, index);
+        }
+        return (target, -1);
     }
 }

@@ -5,7 +5,7 @@ namespace CombatSolver.FlashBeam;
 
 /// <summary>
 /// Replays a Flash action, choices included, through the existing engine. Each Flash selection is
-/// a bit set over the request\x27s options; the existing engine\x27s pending request supplies the same
+/// a bit set over the request's options; the existing engine's pending request supplies the same
 /// options in the same order, and <see cref="CombatBeamSolver.ReplayWithChoicesForFlash"/> turns the
 /// selection into plan tokens and places it as the existing search would.
 /// </summary>
@@ -24,7 +24,7 @@ internal static class FlashChoiceTranslator
 
     /// <summary>
     /// Differences between a Flash request (options are positions in <paramref name="partial"/>, the
-    /// battle at the time of the request) and the existing engine\x27s pending request and spec.
+    /// battle at the time of the request) and the existing engine's pending request and spec.
     /// </summary>
     public static List<string> CompareRequest(in FlashBattle partial, in FlashChoiceRequest flash,
         TurnStartChoiceRequest request, CardChoiceSpec spec)

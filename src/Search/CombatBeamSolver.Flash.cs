@@ -16,8 +16,34 @@ internal sealed partial class CombatBeamSolver
         => Replay(actions, parent, parent?.Turn ?? 0, countTransition: false, allowExecutionCapture: false);
 
     /// <summary>
+    /// The existing search's potion constraints at <paramref name="root"/>, as plain values for the Flash
+    /// search: per slot whether an explicit use is offered (<see cref="PotionOnUseSupport.CanSearch"/> and
+    /// <see cref="AllowsPotionUse"/>) and its strategic HP cost, the earliest search turn
+    /// (<c>node.Turn</c> units) and the maximum number of explicit uses.
+    /// </summary>
+    internal (bool[] Allowed, int[] Costs, int? EarliestTurn, int? MaximumUses) CapturePotionPolicyForFlash(SimulationSnapshot snapshot)
+    {
+        SimulatedCombatState combat = (SimulatedCombatState)snapshot.Simulator.State.CombatState;
+        bool[] allowed = new bool[root.PotionSlotCount];
+        int[] costs = new int[root.PotionSlotCount];
+        for (int slot = 0; slot < allowed.Length; slot++)
+        {
+            MegaCrit.Sts2.Core.Models.PotionModel? potion = combat.GetPotionAtSlot(_player, slot);
+            if (potion == null)
+                continue;
+            allowed[slot] = combat.IsPotionAvailable(_player, slot)
+                && PotionOnUseSupport.CanSearch(potion)
+                && AllowsPotionUse(slot, potion.Id.Entry);
+            bool renewable = potion is MegaCrit.Sts2.Core.Models.Potions.PotionShapedRock
+                && combat.RelicsOf(_player).OfType<MegaCrit.Sts2.Core.Models.Relics.PetrifiedToad>().Any(static relic => !relic.IsMelted);
+            costs[slot] = combat.IsFreeEntropicPotionAtSlot(_player, slot) ? 0 : PotionUsePolicy.StrategicHpCost(potion, renewable);
+        }
+        return (allowed, costs, _earliestPotionTurn, _maximumPotionUses);
+    }
+
+    /// <summary>
     /// Replays one action from <paramref name="parent"/>, answering each card choice the existing
-    /// engine asks for with the next of <paramref name="selections"/> (bit sets over the request\x27s
+    /// engine asks for with the next of <paramref name="selections"/> (bit sets over the request's
     /// spec options, in option order). Each answer is placed on the action exactly as the existing
     /// search places a resolved branch (<see cref="AppendPendingChoice"/>), with the first
     /// source-less request of a card play as its primary choice. <paramref name="inspect"/> sees each

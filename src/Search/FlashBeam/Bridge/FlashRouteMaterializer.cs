@@ -56,12 +56,12 @@ internal static class FlashRouteMaterializer
         }
         TimeSpan admission = watch.Elapsed;
 
-        FlashBeamOptions options = flashOptions ?? new FlashBeamOptions(
+        FlashBeamOptions options = (flashOptions ?? new FlashBeamOptions(
             profile.BeamWidth,
             profile.MaxExpandedNodes,
             MaxTurns: 64,
             TimeSpan.FromMilliseconds(profile.SoftTimeBudgetMilliseconds),
-            root.InitialPlayerMaxHp);
+            root.InitialPlayerMaxHp)) with { Potions = PotionPolicy(replay, rootSnapshot, battle) };
         FlashBeamResult search = new FlashBeamSolver(rules, options).Solve(battle, cancellationToken);
 
         watch.Restart();
@@ -100,5 +100,22 @@ internal static class FlashRouteMaterializer
         SolverResult result = new CombatBeamSolver(root, displayNames, battleDamage, policy, cancellationToken,
             searchProfile: materializeProfile, fixedPrefixActions: plan).Solve();
         return new FlashSolveOutcome(result, FlashRejection.None, "", search, plan, admission, verification, watch.Elapsed);
+    }
+
+    /// <summary>The existing search's potion constraints at the root, in Flash player-turn units.</summary>
+    private static FlashPotionPolicy PotionPolicy(CombatBeamSolver replay, SimulationSnapshot rootSnapshot, in FlashBattle battle)
+    {
+        (bool[] allowed, int[] costs, int? earliestTurn, int? maximumUses) = replay.CapturePotionPolicyForFlash(rootSnapshot);
+        byte mask = 0;
+        int[] slotCosts = new int[FlashLimits.PotionSlots];
+        for (int slot = 0; slot < allowed.Length && slot < FlashLimits.PotionSlots; slot++)
+        {
+            if (allowed[slot])
+                mask |= (byte)(1 << slot);
+            slotCosts[slot] = costs[slot];
+        }
+        // node.Turn and FlashBattle.PlayerTurn advance together from the root.
+        int earliest = earliestTurn is { } turn ? turn - rootSnapshot.Turn + battle.PlayerTurn : int.MinValue;
+        return new FlashPotionPolicy(mask, earliest, maximumUses, slotCosts);
     }
 }

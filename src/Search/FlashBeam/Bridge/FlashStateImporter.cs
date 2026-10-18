@@ -32,9 +32,7 @@ internal static class FlashStateImporter
             throw new FlashImportException(FlashRejection.PendingChoice, "模拟器有待处理选择");
         if (combat.DescribeFlashUnrepresentableState() is { } unrepresentable)
             throw new FlashImportException(FlashRejection.UnrepresentableState, unrepresentable);
-        string[] storeEntries = simulator.StateStore.DescribeEntryTypesForFlash().ToArray();
-        if (storeEntries.Length > 0)
-            throw new FlashImportException(FlashRejection.UnrepresentableState, "StateStore: " + string.Join(", ", storeEntries));
+        FlashStateProjections projections = new(simulator.StateStore, combat);
 
         FlashBattle battle = default;
         SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(player);
@@ -69,11 +67,12 @@ internal static class FlashStateImporter
         ImportRng(ref battle, simulator.Rng);
         IReadOnlyList<Creature> known = combat.KnownEnemies;
         ImportEnemies(ref battle, simulator, combat, known, rules, processedDeaths);
-        ImportPowers(ref battle, combat, player, known);
+        ImportPowers(ref battle, combat, player, known, projections);
         ImportCards(ref battle, playerState, rules);
-        ImportRelics(ref battle, combat, player);
+        ImportRelics(ref battle, combat, player, projections);
         ImportPotions(ref battle, combat, player);
         ImportOrbs(ref battle, playerState);
+        projections.RequireAllClaimed();
         return battle;
     }
 
@@ -188,7 +187,8 @@ internal static class FlashStateImporter
         }
     }
 
-    private static void ImportPowers(ref FlashBattle battle, SimulatedCombatState combat, Player player, IReadOnlyList<Creature> known)
+    private static void ImportPowers(ref FlashBattle battle, SimulatedCombatState combat, Player player, IReadOnlyList<Creature> known,
+        FlashStateProjections projections)
     {
         IReadOnlyList<PowerModel> powers = combat.EffectivePowers();
         // Group by owner index while keeping the existing listener order within each owner.
@@ -215,6 +215,8 @@ internal static class FlashStateImporter
                 flags |= FlashPowerFlags.SkipNextDurationTick;
             if (combat.HasMonsterDurationSkipForFlash(power.Owner, power.GetType()))
                 flags |= FlashPowerFlags.SkipNextTickFromMonster;
+            if (def.MarksJustAppliedByEnemy && power is MegaCrit.Sts2.Core.Models.Powers.RitualPower { _wasJustAppliedByEnemy: true })
+                flags |= FlashPowerFlags.WasJustAppliedByEnemy;
             battle.Powers[index] = new FlashPower
             {
                 Id = id,
@@ -225,6 +227,7 @@ internal static class FlashStateImporter
                 Amount = power.Amount,
                 AmountOnTurnStart = power.AmountOnTurnStart,
             };
+            projections.ProjectPower(power, ref battle.Powers[index]);
         }
     }
 
@@ -305,7 +308,8 @@ internal static class FlashStateImporter
         return result;
     }
 
-    private static void ImportRelics(ref FlashBattle battle, SimulatedCombatState combat, Player player)
+    private static void ImportRelics(ref FlashBattle battle, SimulatedCombatState combat, Player player,
+        FlashStateProjections projections)
     {
         IReadOnlyList<RelicModel> relics = combat.RelicsOf(player);
         if (relics.Count > FlashLimits.Relics)
@@ -321,6 +325,7 @@ internal static class FlashStateImporter
                 Id = id,
                 Flags = relic.IsMelted ? FlashRelicFlags.Melted : FlashRelicFlags.None,
             };
+            projections.ProjectRelic(relic, ref battle.Relics[index]);
         }
     }
 

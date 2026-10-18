@@ -1,3 +1,4 @@
+using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Flash;
 using CombatSolver.Engine.InCombat.Simulation;
@@ -16,6 +17,14 @@ namespace CombatSolver.FlashBeam;
 /// </summary>
 internal static class FlashRulesCompiler
 {
+    private static readonly Lazy<Dictionary<string, RelicModel>> CanonicalRelics = new(() =>
+        ModelDb.All.OfType<RelicModel>().GroupBy(relic => relic.Id.Entry, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal));
+
+    private static readonly Lazy<Dictionary<string, PotionModel>> CanonicalPotions = new(() =>
+        ModelDb.All.OfType<PotionModel>().GroupBy(potion => potion.Id.Entry, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal));
+
     private static readonly Lazy<Dictionary<string, PowerModel>> CanonicalPowers = new(() =>
         ModelDb.All.OfType<PowerModel>().GroupBy(power => power.Id.Entry, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal));
@@ -36,6 +45,10 @@ internal static class FlashRulesCompiler
         }
         foreach (string nativeId in PowerIdsWithVars())
             AddPowerVars(builder, nativeId);
+        for (ushort id = 0; id < FlashRegistry.PotionCount; id++)
+            AddPotionStats(builder, id);
+        for (ushort id = 0; id < FlashRegistry.RelicCount; id++)
+            AddRelicVars(builder, id);
         AddGeneratedCardClosure(builder, player);
         IReadOnlyList<Creature> known = combat.KnownEnemies;
         if (known.Count > FlashLimits.Enemies)
@@ -167,6 +180,55 @@ internal static class FlashRulesCompiler
             if (def.VarNames.Count > 0)
                 yield return def.NativeId;
         }
+    }
+
+    /// <summary>The named dynamic variables of the canonical relic.</summary>
+    private static void AddRelicVars(FlashRulesBuilder builder, ushort id)
+    {
+        FlashRelicDef def = FlashRegistry.Relic(id);
+        if (def.VarNames.Count == 0)
+            return;
+        RelicModel canonical = CanonicalRelics.Value.TryGetValue(def.NativeId, out RelicModel? relic)
+            ? relic
+            : throw new InvalidOperationException($"原版没有遗物 {def.NativeId}。");
+        decimal[] vars = new decimal[def.VarNames.Count];
+        for (int index = 0; index < vars.Length; index++)
+        {
+            vars[index] = canonical.DynamicVars.TryGetValue(def.VarNames[index], out var variable)
+                ? variable.BaseValue
+                : throw new InvalidOperationException($"遗物 {def.NativeId} 没有动态变量 {def.VarNames[index]}。");
+        }
+        builder.SetRelicVars(id, vars);
+    }
+
+    /// <summary>Target type and named variables (with their value props) of the canonical potion.</summary>
+    private static void AddPotionStats(FlashRulesBuilder builder, ushort id)
+    {
+        FlashPotionDef def = FlashRegistry.Potion(id);
+        PotionModel canonical = CanonicalPotions.Value.TryGetValue(def.NativeId, out PotionModel? potion)
+            ? potion
+            : throw new InvalidOperationException($"原版没有药水 {def.NativeId}。");
+        decimal[] vars = new decimal[def.VarNames.Count];
+        FlashValueProps[] props = new FlashValueProps[vars.Length];
+        for (int index = 0; index < vars.Length; index++)
+        {
+            var variable = canonical.DynamicVars.TryGetValue(def.VarNames[index], out var found)
+                ? found
+                : throw new InvalidOperationException($"药水 {def.NativeId} 没有动态变量 {def.VarNames[index]}。");
+            vars[index] = variable.BaseValue;
+            props[index] = variable switch
+            {
+                DamageVar damage => (FlashValueProps)(byte)damage.Props,
+                BlockVar block => (FlashValueProps)(byte)block.Props,
+                _ => FlashValueProps.None,
+            };
+        }
+        builder.SetPotion(id, new FlashPotionStats
+        {
+            Target = (FlashTargetType)(byte)canonical.TargetType,
+            Vars = vars,
+            VarProps = props,
+        });
     }
 
     private static void AddPowerVars(FlashRulesBuilder builder, string nativeId)

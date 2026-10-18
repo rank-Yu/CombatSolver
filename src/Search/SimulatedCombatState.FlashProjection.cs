@@ -28,6 +28,17 @@ internal sealed partial class SimulatedCombatState
 
     internal int CardsExhaustedThisTurnForFlash(Creature actor) => GetCardsExhaustedThisTurn(actor);
 
+    /// <summary>Relics whose stateful state some reader consumes (<c>IsStatefulRelic</c>) and that hold a state.</summary>
+    internal IEnumerable<RelicModel> StatefulRelicKeysForFlash()
+        => _statefulRelicStates == null ? [] : _statefulRelicStates.Keys.Where(IsStatefulRelic).ToArray();
+
+    /// <summary>The stateful relic state as the existing engine reads it (captured lazily from the root relic).</summary>
+    internal (int Current, int Previous) StatefulRelicStateForFlash(RelicModel relic)
+    {
+        StatefulRelicState state = GetStatefulRelicState(relic);
+        return (state.Current, state.Previous);
+    }
+
     internal bool IsPrimaryEnemyForFlash(Creature creature)
         => ((CombatSolver.Engine.Common.ICombatPredictionCreatureSemantics)this).IsPrimaryEnemy(creature);
 
@@ -79,16 +90,9 @@ internal sealed partial class SimulatedCombatState
             return nameof(_drawNextTurn);
         if (_freeEntropicPotions is { Count: > 0 })
             return nameof(_freeEntropicPotions);
-        // Root capture may record inert states for relics outside IsStatefulRelic; only states that
-        // some reader consumes matter, and those relics have no Flash definition yet.
-        if (_statefulRelicStates != null)
-        {
-            foreach (RelicModel relic in _statefulRelicStates.Keys)
-            {
-                if (IsStatefulRelic(relic))
-                    return $"{nameof(_statefulRelicStates)}:{relic.Id.Entry}";
-            }
-        }
+        // Stateful relic states are claimed by the Flash bridge's relic projections
+        // (StatefulRelicKeysForFlash); root capture may also record inert states for relics outside
+        // IsStatefulRelic, which no reader consumes.
         if (_escapedCreatures.Count > 0)
             return nameof(_escapedCreatures);
         if (_returnToHandNextTurn is { Count: > 0 })

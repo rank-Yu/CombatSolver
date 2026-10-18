@@ -1,10 +1,12 @@
+using MegaCrit.Sts2.Core.Models;
+
 namespace CombatSolver.Engine.Common;
 
 internal sealed partial class PredictionStateStore
 {
-    /// <summary>Entry types currently stored, for the Flash bridge's representability check.</summary>
-    internal IEnumerable<string> DescribeEntryTypesForFlash()
+    /// <summary>Every stored entry (model keys are already resolved), for the Flash bridge's state projection.</summary>
+    internal IEnumerable<(AbstractModel Model, object State)> EntriesForFlash()
         => _states == null
             ? []
-            : _states.Keys.Select(key => $"{key.StateType.Name}@{key.Model.Id.Entry}").Distinct();
+            : _states.Select(entry => (entry.Key.Model, entry.Value));
 }
