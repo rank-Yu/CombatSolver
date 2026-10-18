@@ -179,8 +179,36 @@ internal static class FlashStateImporter
             enemy.Slot = (byte)index;
             enemy.DeathPhase = (FlashDeathPhase)(byte)combat.DeathPhaseForFlash(creature);
             enemy.CombatId = creature.CombatId ?? throw new FlashImportException(FlashRejection.UnrepresentableState, "敌人没有 CombatId");
-            enemy.Move = checked((byte)machine.NodeIndex(ai.Current.Id));
-            enemy.ForcedMove = byte.MaxValue;
+            if (ai.Current.Id == FlashKernel.StunnedNodeId)
+            {
+                // SimulatedCombatState.ForceStunnedMove builds a fresh MoveState outside the machine's
+                // States table (MonsterAi.cs:76-86). Its dynamic follow-up becomes ForcedMove.
+                string followUp = ai.Current.FollowUpState?.Id ?? ai.Current.FollowUpStateId
+                    ?? throw new FlashImportException(FlashRejection.UnrepresentableState,
+                        $"{monster.Id.Entry} 的 STUNNED 没有后继行动");
+                if (followUp == FlashKernel.StunnedNodeId)
+                    throw new FlashImportException(FlashRejection.UnrepresentableState,
+                        $"{monster.Id.Entry} 的 STUNNED 后继仍是 STUNNED");
+                int followUpNode = -1;
+                for (int node = 0; node < machine.Nodes.Length; node++)
+                {
+                    if (machine.Nodes[node].NativeId == followUp)
+                    {
+                        followUpNode = node;
+                        break;
+                    }
+                }
+                if (followUpNode < 0)
+                    throw new FlashImportException(FlashRejection.UnrepresentableState,
+                        $"{monster.Id.Entry} 的 STUNNED 后继 {followUp} 不在状态机中");
+                enemy.Move = checked((byte)machine.StunnedNode);
+                enemy.ForcedMove = checked((byte)followUpNode);
+            }
+            else
+            {
+                enemy.Move = checked((byte)machine.NodeIndex(ai.Current.Id));
+                enemy.ForcedMove = byte.MaxValue;
+            }
             if (ai.NeedsInitialRoll)
                 enemy.Flags |= FlashEnemyFlags.NeedsInitialRoll;
             if (combat.WillSkipNextMoveForFlash(creature))

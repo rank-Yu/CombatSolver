@@ -48,6 +48,15 @@ internal sealed partial class SimulatedCombatState
     /// attack hits, Doom appliers, Fetch plays, enemy per-turn counts) are not listed: only content that
     /// reads them makes them matter, and such content has no Flash definition.
     /// </summary>
+    /// <summary>
+    /// Private monster integers Flash leaves out because no resolution path reads them. The only one is
+    /// <c>LagavulinMatriarch._isAwake</c>: AsleepPower and the STUNNED move write it, but only
+    /// <see cref="DescribePredictedMonsterState"/> (state fingerprint and continuation text) reads it; move
+    /// selection reads the AsleepPower amount (<c>BranchMonsterAi.ResolveConditional</c>).
+    /// </summary>
+    private static bool IsInertMonsterIntStateForFlash((Creature Creature, string Name) key)
+        => key.Name == "_isAwake" && key.Creature.Monster?.GetType().Name == "LagavulinMatriarch";
+
     internal string? DescribeFlashUnrepresentableState()
     {
         if (HasPendingChoice || _activeActionChoices != null)
@@ -72,7 +81,7 @@ internal sealed partial class SimulatedCombatState
             return "unsettling lamp";
         if (_nemesisShouldApplyIntangible is { Count: > 0 })
             return nameof(_nemesisShouldApplyIntangible);
-        if (_monsterIntStates is { Count: > 0 })
+        if (_monsterIntStates != null && _monsterIntStates.Keys.Any(key => !IsInertMonsterIntStateForFlash(key)))
             return nameof(_monsterIntStates);
         if (_aeonglassAdditionalStrength is { Count: > 0 } || _aeonglassWitherUpgradeCount is { Count: > 0 })
             return "aeonglass";

@@ -78,6 +78,20 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
                 target.Aux0 = (int)(Claim<HardenedShellPredictionState>(power)?.DamageReceivedThisTurn
                     ?? hardened.GetInternalData<HardenedShellPower.Data>().damageReceivedThisTurn);
                 break;
+            // VigorPower.Aux0 is the amount captured by the Flash definition for the current attack and is
+            // zero at every action boundary. The existing engine keeps the same pair (AttackCommand,
+            // amountWhenAttackStarted) in VigorPowerMirrors' private State; an idle state has no
+            // unmodelled value, and a capture in progress is not an action boundary.
+            case VigorPower vigor:
+                foreach ((AbstractModel model, object state) in store.EntriesForFlash())
+                {
+                    if (!ReferenceEquals(model, vigor) || !VigorPowerMirrors.OwnsStateForFlash(state))
+                        continue;
+                    if (!VigorPowerMirrors.IsIdleStateForFlash(state))
+                        throw new FlashImportException(FlashRejection.UnrepresentableState, "活力攻击结算进行中");
+                    _claimed.Add(state);
+                }
+                break;
             // RagePower has no private state; its stale PowerAmountPredictionState after the turn-end
             // removal is inert (amount equals the removed power's amount) and stays unclaimed.
             default:
@@ -243,6 +257,9 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
     /// the combat, and an enemy that left never returns: native summons always create a new creature
     /// (<c>CreatureCmd.Add</c> callers; only the player's pet is re-added), so the entry can no longer
     /// be read.</item>
+    /// <item>the idle private <c>VigorPowerMirrors.State</c> of a removed (zero-amount) VigorPower: the
+    /// engine reads the state only while that power is attached to a creature (the Flash
+    /// <c>VigorPower</c> definition mirrors it through Aux0).</item>
     /// </list>
     /// </summary>
     public void RequireAllClaimed()
@@ -252,6 +269,11 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
             if (_claimed.Contains(state))
                 continue;
             if (state is PowerAmountPredictionState amount && model is PowerModel power && amount.Amount == power.Amount)
+                continue;
+            // VigorPower removes itself when the attack it modified completes, but the store keeps
+            // VigorPowerMirrors' private State keyed by the retired model (Amount == 0). An idle state is
+            // inert; a live Vigor is claimed by the ProjectPower case above.
+            if (model is VigorPower { Amount: 0 } && VigorPowerMirrors.IsIdleStateForFlash(state))
                 continue;
             if (model is PowerModel { Owner: { Side: CombatSide.Enemy } owner } && !combat.ContainsCreature(owner))
                 continue;

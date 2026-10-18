@@ -67,6 +67,13 @@ internal static class VigorPowerMirrors
         return power.Amount;
     }
 
+    /// <summary>Flash projection: whether <paramref name="state"/> is this mirror's private state.</summary>
+    internal static bool OwnsStateForFlash(object state) => state is State;
+
+    /// <summary>Flash projection: the private state holds no capture of an attack in progress.</summary>
+    internal static bool IsIdleStateForFlash(object state)
+        => state is State { CommandToModify: null, AmountWhenAttackStarted: 0 };
+
     private static State GetState(VigorPower power, CombatMirrorContext context)
     {
         return context.StateStore.Get<State>(power);

@@ -17,5 +17,6 @@
 | PR 审查 | [索引](pr/README.md) |
 | 研究与提案 | [研究](research) / [提案](proposals) |
 | 社区阶段证据 | [目录](community) |
+| Flash 搜索 | [目录](flash-search/README.md) |
 
 现行指南统一从 [文档总目录](../README.md) 进入。配套 JSON 与 fixture 随报告保留；发布日志继续由 [releases](../releases/README.md) 维护。

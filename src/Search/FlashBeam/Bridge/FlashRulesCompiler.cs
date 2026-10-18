@@ -262,10 +262,10 @@ internal static class FlashRulesCompiler
         Dictionary<string, int> index = new(StringComparer.Ordinal);
         for (int position = 0; position < ids.Count; position++)
             index[ids[position]] = position;
-        if (ids.Count > 64)
+        if (ids.Count + 1 > 64)
             throw new FlashImportException(FlashRejection.Capacity, $"{monster.Id.Entry} 状态数 {ids.Count}");
 
-        FlashMonsterNode[] nodes = new FlashMonsterNode[ids.Count];
+        FlashMonsterNode[] nodes = new FlashMonsterNode[ids.Count + 1];
         for (int position = 0; position < ids.Count; position++)
         {
             MonsterState state = states[position];
@@ -302,6 +302,16 @@ internal static class FlashRulesCompiler
         int initial = ai.Machine._initialState is { } initialState
             ? index[initialState.Id]
             : throw new FlashImportException(FlashRejection.UnsupportedMonster, $"{monster.Id.Entry} 没有初始状态");
+        // Synthetic STUNNED node, appended after the registered states and the unregistered initial
+        // branch so every native node keeps its index. Its follow-up is the dynamic
+        // FlashEnemy.ForcedMove (SimulatedCombatState.MonsterAi.cs:76-86).
+        int stunned = ids.Count;
+        nodes[stunned] = new FlashMonsterNode
+        {
+            NativeId = FlashKernel.StunnedNodeId,
+            Kind = FlashMonsterNodeKind.Move,
+            MustPerformOnceBeforeTransitioning = true,
+        };
         int[] staticInts = new int[def.StaticIntNames.Count];
         for (int position = 0; position < staticInts.Length; position++)
         {
@@ -310,14 +320,18 @@ internal static class FlashRulesCompiler
                 ? value
                 : throw new FlashImportException(FlashRejection.UnsupportedMonster, $"{monster.Id.Entry} 没有静态值 {name}");
         }
-        return new FlashMonsterRules { Nodes = nodes, InitialNode = initial, StaticInts = staticInts };
+        return new FlashMonsterRules
+        {
+            Nodes = nodes,
+            InitialNode = initial,
+            StunnedNode = stunned,
+            StaticInts = staticInts,
+        };
     }
 
     private static FlashMonsterNode CompileMove(MoveState move, BranchMonsterStaticSnapshot statics,
         Dictionary<string, int> index, MonsterModel monster)
     {
-        if (move.MustPerformOnceBeforeTransitioning)
-            throw new FlashImportException(FlashRejection.UnsupportedMonster, $"{monster.Id.Entry}.{move.Id} 必须执行一次");
         string? followUp = move.FollowUpState?.Id ?? move.FollowUpStateId;
         IReadOnlyList<BranchMonsterAttack> attacks = statics.AttacksByMove.TryGetValue(move.Id, out var captured) ? captured : [];
         return new FlashMonsterNode
@@ -325,6 +339,7 @@ internal static class FlashRulesCompiler
             NativeId = move.Id,
             Kind = FlashMonsterNodeKind.Move,
             FollowUp = followUp != null && index.TryGetValue(followUp, out int target) ? target : -1,
+            MustPerformOnceBeforeTransitioning = move.MustPerformOnceBeforeTransitioning,
             Attacks = attacks.Select(attack => new FlashMonsterAttack(attack.BaseDamage, attack.Repeats)).ToArray(),
         };
     }
