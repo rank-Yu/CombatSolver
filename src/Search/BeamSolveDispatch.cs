@@ -62,7 +62,7 @@ internal static class BeamSolveDispatch
                     ProgressCallback = null,
                 });
                 request.Policy.Diagnostics.Info(
-                    $"[CombatSolver/Flash] FLASH_SHADOW purpose={request.Purpose} "
+                    $"[CombatSolver/Flash] FLASH_SHADOW purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
                     + $"existing=[{Describe(existing, existingTime)}] flash=[{Describe(flash, watch.Elapsed)}] "
                     + $"same_route={SameRoute(existing, flash.Outcome?.Result)}");
                 return existing;
@@ -75,11 +75,11 @@ internal static class BeamSolveDispatch
                 if (flash.Outcome?.Result is { } adopted)
                 {
                     request.Policy.Diagnostics.Info(
-                        $"[CombatSolver/Flash] FLASH_ADOPTED purpose={request.Purpose} flash=[{Describe(flash, flashTime)}]");
+                        $"[CombatSolver/Flash] FLASH_ADOPTED purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} flash=[{Describe(flash, flashTime)}]");
                     return adopted;
                 }
                 request.Policy.Diagnostics.Info(
-                    $"[CombatSolver/Flash] FLASH_FALLBACK purpose={request.Purpose} flash=[{Describe(flash, flashTime)}]");
+                    $"[CombatSolver/Flash] FLASH_FALLBACK purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} flash=[{Describe(flash, flashTime)}]");
                 return SolveExisting(request);
             }
             default:
@@ -110,7 +110,7 @@ internal static class BeamSolveDispatch
                     PolicyOverride = Isolated(EffectivePolicy(request)),
                 });
                 EffectivePolicy(request).Diagnostics.Info(
-                    $"[CombatSolver/Flash] FLASH_SHADOW purpose={request.Purpose} prefix={request.Prefix.Length} "
+                    $"[CombatSolver/Flash] FLASH_SHADOW purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} prefix={request.Prefix.Length} "
                     + $"existing=[{Describe(existing, existingTime)}] flash=[{Describe(flash, watch.Elapsed)}] "
                     + $"same_route={SameRoute(existing, flash.Outcome?.Result)}");
                 return existing;
@@ -123,12 +123,12 @@ internal static class BeamSolveDispatch
                 if (flash.Outcome?.Result is { } adopted)
                 {
                     EffectivePolicy(request).Diagnostics.Info(
-                        $"[CombatSolver/Flash] FLASH_ADOPTED purpose={request.Purpose} "
+                        $"[CombatSolver/Flash] FLASH_ADOPTED purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
                         + $"prefix={request.Prefix.Length} flash=[{Describe(flash, flashTime)}]");
                     return adopted;
                 }
                 EffectivePolicy(request).Diagnostics.Info(
-                    $"[CombatSolver/Flash] FLASH_FALLBACK purpose={request.Purpose} "
+                    $"[CombatSolver/Flash] FLASH_FALLBACK purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
                     + $"prefix={request.Prefix.Length} flash=[{Describe(flash, flashTime)}]");
                 return SolveExistingContinuation(request);
             }
@@ -326,8 +326,13 @@ internal static class BeamSolveDispatch
             + $"admission_ms={outcome.AdmissionTime.TotalMilliseconds:0} search_ms={search.Elapsed.TotalMilliseconds:0} "
             + $"verify_ms={outcome.VerificationTime.TotalMilliseconds:0} materialize_ms={outcome.MaterializationTime.TotalMilliseconds:0} "
             + $"flash_expanded={search.ExpandedNodes} flash_transitions={search.Transitions} "
-            + $"flash_pruned={search.PrunedIncumbents}");
+            + $"flash_pruned={search.PrunedIncumbents} flash_capacity_pruned={search.CapacityPruned}");
     }
+
+    private static string IncumbentText(PrimarySearchIncumbent? incumbent)
+        => incumbent is { } value
+            ? string.Create(CultureInfo.InvariantCulture, $"{value.StrategicHpDeficit}@{value.CombatEndedTurn}")
+            : "-";
 
     private static string SameRoute(SolverResult existing, SolverResult? flash)
     {
