@@ -181,8 +181,6 @@ internal static class FlashStateImporter
             if (!FlashRegistry.TryPower(power.Id.Entry, out ushort id))
                 throw new FlashImportException(FlashRejection.UnsupportedPower, power.Id.Entry);
             FlashPowerDef def = FlashRegistry.Power(id);
-            if (power._target != null)
-                throw new FlashImportException(FlashRejection.UnsupportedPower, $"{power.Id.Entry} 带目标");
             FlashPowerFlags flags = FlashPowerFlags.None;
             if (def.UsesNativeDurationSkip && power.SkipNextDurationTick)
                 flags |= FlashPowerFlags.SkipNextDurationTick;
@@ -193,7 +191,7 @@ internal static class FlashStateImporter
                 Id = id,
                 Owner = owner,
                 Applier = power.Applier == null ? FlashLimits.NoOwner : Owner(power.Applier, player, known),
-                Target = FlashLimits.NoOwner,
+                Target = power._target == null ? FlashLimits.NoOwner : Owner(power._target, player, known),
                 Flags = flags,
                 Amount = power.Amount,
                 AmountOnTurnStart = power.AmountOnTurnStart,

@@ -72,6 +72,7 @@ internal static class FlashDifferentialProbe
         }
 
         int walkTransitions = 0, walkFailed = 0, terminals = 0;
+        Dictionary<string, int> endings = new(StringComparer.Ordinal);
         for (int seed = 1; seed <= walks; seed++)
         {
             Random random = new(seed);
@@ -83,6 +84,7 @@ internal static class FlashDifferentialProbe
                 if (!FlashKernel.IsInProgress(battle) || snapshot.BoundaryReason != SearchBoundaryReason.None)
                 {
                     terminals++;
+                    endings[$"{battle.Outcome}/{snapshot.BoundaryReason}"] = endings.GetValueOrDefault($"{battle.Outcome}/{snapshot.BoundaryReason}") + 1;
                     break;
                 }
                 count = FlashKernel.LegalActions(battle, rules, actions);
@@ -114,8 +116,9 @@ internal static class FlashDifferentialProbe
         summary["walkFailed"] = walkFailed;
         summary["walkTerminals"] = terminals;
         summary["choiceSkipped"] = choiceSkipped;
+        summary["walkEndings"] = endings;
         report.Insert(0, $"SUMMARY oneStep={oneStepChecked} failed={oneStepFailed} walkTransitions={walkTransitions} "
-            + $"walkFailed={walkFailed} terminals={terminals} choiceSkipped={choiceSkipped}");
+            + $"walkFailed={walkFailed} terminals={terminals} choiceSkipped={choiceSkipped} endings={string.Join(",", endings.Select(item => $"{item.Key}:{item.Value}"))}");
         File.WriteAllLines(Path.Combine(outputDirectory, "flash-diff.txt"), report);
         return summary;
     }

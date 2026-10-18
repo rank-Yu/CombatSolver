@@ -152,6 +152,8 @@ internal static class Program
                 InfusedCoreChecks.Run(combat!, options.OutputDirectory);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_DIFF") == "1")
                 payload["flashDiff"] = FlashDifferentialProbe.Run(combat!, options.OutputDirectory);
+            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_SOLVE") == "1")
+                payload["flashSolve"] = FlashSolveProbe.Run(combat!, options, loop);
             payload["budget"] = DescribeBudget(options);
             payload["root"] = OfflineCombat.DescribeRoot(combat!);
             string diagnostics = ModRuntime.DescribeStart(combat!);
