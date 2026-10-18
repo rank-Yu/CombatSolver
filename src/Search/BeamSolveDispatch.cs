@@ -126,7 +126,8 @@ internal static class BeamSolveDispatch
                 request.CancellationToken,
                 potionPolicyOverride: request.PotionPolicyOverride,
                 progressCallback: request.ProgressCallback,
-                purpose: request.Purpose), null);
+                purpose: request.Purpose,
+                primaryIncumbent: request.PrimaryIncumbent), null);
         }
         catch (FlashVerificationException ex)
         {
@@ -155,7 +156,8 @@ internal static class BeamSolveDispatch
             $"status=verified {Describe(outcome.Result, elapsed)} "
             + $"admission_ms={outcome.AdmissionTime.TotalMilliseconds:0} search_ms={search.Elapsed.TotalMilliseconds:0} "
             + $"verify_ms={outcome.VerificationTime.TotalMilliseconds:0} materialize_ms={outcome.MaterializationTime.TotalMilliseconds:0} "
-            + $"flash_expanded={search.ExpandedNodes} flash_transitions={search.Transitions}");
+            + $"flash_expanded={search.ExpandedNodes} flash_transitions={search.Transitions} "
+            + $"flash_pruned={search.PrunedIncumbents}");
     }
 
     private static string SameRoute(SolverResult existing, SolverResult? flash)

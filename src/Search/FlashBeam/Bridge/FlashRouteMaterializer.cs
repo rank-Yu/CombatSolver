@@ -48,21 +48,25 @@ internal static class FlashRouteMaterializer
         FlashBeamOptions? flashOptions = null,
         SolverPotionPolicy? potionPolicyOverride = null,
         Action<SolverProgress>? progressCallback = null,
-        DirectSearchPurpose? purpose = null)
+        DirectSearchPurpose? purpose = null,
+        PrimarySearchIncumbent? primaryIncumbent = null)
     {
         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
         Player player = root.PlayerIdentity;
         CombatBeamSolver replay = new(root, displayNames, battleDamage, policy, cancellationToken,
             searchProfile: profile, potionPolicyOverride: potionPolicyOverride);
         SimulationSnapshot rootSnapshot = replay.ReplayForFlash([], null);
+        FlashPruningRequest pruning = replay.CapturePruningRequestForFlash();
         FlashRules rules;
         FlashBattle battle;
         FlashScorer scorer;
+        FlashBoundFeatures bound;
         try
         {
             rules = FlashRulesCompiler.Compile(rootSnapshot.Simulator, player);
             battle = FlashStateImporter.Import(rootSnapshot, player, rules);
             scorer = FlashScoreBridge.Create(root, policy, profile, rootSnapshot, player, rules, battle);
+            bound = FlashBoundBridge.Create(root, policy, rootSnapshot, player, rules, battle, pruning);
         }
         catch (FlashImportException ex)
         {
@@ -70,6 +74,10 @@ internal static class FlashRouteMaterializer
         }
         TimeSpan admission = watch.Elapsed;
 
+        // node.Turn and FlashBattle.PlayerTurn advance together from the root (see PotionPolicy).
+        PrimarySearchIncumbent? incumbent = primaryIncumbent is { } seed
+            ? seed with { CombatEndedTurn = seed.CombatEndedTurn - rootSnapshot.Turn + battle.PlayerTurn }
+            : null;
         FlashBeamOptions options = (flashOptions ?? new FlashBeamOptions(
             checked(profile.BeamWidth * ProfileWidthScale),
             checked(profile.MaxExpandedNodes * ProfileWidthScale),
@@ -82,6 +90,10 @@ internal static class FlashRouteMaterializer
             Ordering = new FlashRouteOrdering(root.InitialPlayerHp, root.InitialPlayerMaxHp, root.BossHpRelief,
                 root.PostCombatRelicHeal),
             HpTargetStop = HpTargetStop(policy, battleDamage, potionPolicyOverride),
+            Bound = bound,
+            Incumbent = incumbent,
+            EffectivePotionPolicy = pruning.EffectivePotionPolicy,
+            MinimumPotionUses = pruning.MinimumPotionUses,
         };
         FlashBeamResult search = new FlashBeamSolver(rules, options).Solve(battle, cancellationToken);
 

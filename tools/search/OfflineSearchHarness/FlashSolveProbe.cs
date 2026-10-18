@@ -87,6 +87,7 @@ internal static class FlashSolveProbe
             materializationMs = flash.MaterializationTime.TotalMilliseconds,
             routeLength = flash.Plan.Count,
             flash.Search.BestIsVictory,
+            flash.Search.PrunedIncumbents,
         };
         return summary;
     }

@@ -65,7 +65,11 @@ internal static class FlashDifferentialProbe
         {
             report.Add($"SCORE REJECTED {ex.Reason}: {ex.Detail}");
         }
-        ScoreCheck scores = new(scorer, report);
+        FlashBoundFeatures? bound = null;
+        if (scorer != null)
+            bound = FlashBoundBridge.Create(root, policy, rootSnapshot, player, rules, flashRoot,
+                solver.CapturePruningRequestForFlash());
+        ScoreCheck scores = new(scorer, bound, solver, report);
         scores.Check(rootSnapshot, flashRoot, 0, "ROOT");
 
         FlashAction[] actions = new FlashAction[FlashKernel.MaxLegalActions];
@@ -161,13 +165,23 @@ internal static class FlashDifferentialProbe
         summary["scoreFailed"] = scores.Failed;
         summary["scoreSkippedBoundary"] = scores.SkippedBoundary;
         summary["scoreFailedFields"] = scores.FailedFields;
+        summary["bound"] = scores.BoundStatus;
+        summary["boundChecked"] = scores.BoundChecked;
+        summary["boundFailed"] = scores.BoundFailed;
+        summary["boundFailedFields"] = scores.BoundFailedFields;
         report.Insert(0, $"SUMMARY oneStep={oneStepChecked} failed={oneStepFailed} walkTransitions={walkTransitions} "
             + $"walkFailed={walkFailed} terminals={terminals} choiceActions={choiceActions} choiceCapped={choiceCapped} "
             + $"choiceDeadEnds={choiceDeadEnds} endings={string.Join(",", endings.Select(item => $"{item.Key}:{item.Value}"))} "
             + $"score={(scorer == null ? "rejected" : "checked")} scoreChecked={scores.Checked} scoreFailed={scores.Failed} "
-            + $"scoreSkippedBoundary={scores.SkippedBoundary}");
+            + $"scoreSkippedBoundary={scores.SkippedBoundary} "
+            + (scores.BoundStatus == "checked"
+                ? $"bound=checked boundChecked={scores.BoundChecked} boundFailed={scores.BoundFailed}"
+                : $"bound=disabled({scores.BoundStatus})"));
         if (scores.FailedFields.Count > 0)
             report.Insert(1, "K4 FIELDS " + string.Join(",", scores.FailedFields
+                .OrderByDescending(item => item.Value).Select(item => $"{item.Key}:{item.Value}")));
+        if (scores.BoundFailedFields.Count > 0)
+            report.Insert(1, "K5 FIELDS " + string.Join(",", scores.BoundFailedFields
                 .OrderByDescending(item => item.Value).Select(item => $"{item.Key}:{item.Value}")));
         File.WriteAllLines(Path.Combine(outputDirectory, "flash-diff.txt"), report);
         return summary;
@@ -175,8 +189,12 @@ internal static class FlashDifferentialProbe
 
     private sealed record Outcome(SimulationSnapshot? OldChild, FlashBattle FlashChild, List<string> Diff);
 
-    /// <summary>K4: the Flash evaluation of a state whose projection matched must equal the existing snapshot's.</summary>
-    private sealed class ScoreCheck(FlashScorer? scorer, List<string> report)
+    /// <summary>
+    /// K4 and K5: the Flash evaluation and the incumbent lower-bound inputs of every projected state must
+    /// equal the existing snapshot's. States the existing engine stopped at a search boundary are skipped.
+    /// </summary>
+    private sealed class ScoreCheck(
+        FlashScorer? scorer, FlashBoundFeatures? bound, CombatBeamSolver solver, List<string> report)
     {
         private const int ReportedMismatches = 20;
 
@@ -189,31 +207,78 @@ internal static class FlashDifferentialProbe
 
         public Dictionary<string, int> FailedFields { get; } = new(StringComparer.Ordinal);
 
+        public int BoundChecked { get; private set; }
+
+        public int BoundFailed { get; private set; }
+
+        public Dictionary<string, int> BoundFailedFields { get; } = new(StringComparer.Ordinal);
+
+        public string BoundStatus => bound == null ? "score_rejected" : bound.Enabled ? "checked" : bound.DisabledReason;
+
         public void Check(SimulationSnapshot old, in FlashBattle flash, int actionCount, string label)
         {
-            if (scorer == null)
-                return;
             if (old.BoundaryReason != SearchBoundaryReason.None)
             {
                 SkippedBoundary++;
                 return;
             }
+            FlashScoreFeatures? flashFeatures = scorer?.Features(flash, actionCount);
+            CheckScore(old, flash, flashFeatures, label);
+            CheckBound(old, flash, flashFeatures, label);
+        }
+
+        private void CheckScore(SimulationSnapshot old, in FlashBattle flash,
+            FlashScoreFeatures? flashFeatures, string label)
+        {
+            if (flashFeatures is not { } features)
+                return;
             Checked++;
-            List<string> diff = FlashScoreFeatures.Diff(FlashScoreProjection.FromSnapshot(old), scorer.Features(flash, actionCount));
+            List<string> diff = FlashScoreFeatures.Diff(FlashScoreProjection.FromSnapshot(old), features);
             if (diff.Count == 0)
                 return;
             Failed++;
             foreach (string line in diff)
-            {
-                string field = line[..line.IndexOf(' ')];
-                FailedFields[field] = FailedFields.GetValueOrDefault(field) + 1;
-            }
+                FailedFields[Field(line)] = FailedFields.GetValueOrDefault(Field(line)) + 1;
             if (Failed <= ReportedMismatches)
             {
                 report.Add($"K4 MISMATCH {label}");
                 report.AddRange(diff.Select(line => "  " + line));
             }
         }
+
+        private void CheckBound(SimulationSnapshot old, in FlashBattle flash,
+            FlashScoreFeatures? flashFeatures, string label)
+        {
+            if (bound is not { Enabled: true } || flashFeatures is not { } features)
+                return;
+            BoundChecked++;
+            FlashBoundValues oldValues = new(
+                HasRisk: old.HasRisk,
+                FutureHealPotential: old.FutureHealPotential,
+                RemainingHealingPotential: solver.PrimaryIncumbentRemainingHealingPotential(old) ?? int.MaxValue,
+                FutureHealUsed: solver.PrimaryIncumbentFutureHealPotential(old),
+                CumulativePlayerHpLost: old.CumulativePlayerHpLost,
+                RecoveredPlayerHp: old.RecoveredPlayerHp,
+                PlayerHp: old.PlayerHp,
+                PlayerMaxHp: old.PlayerMaxHp,
+                DeathSaveHpRestored: old.DeathSaveHpRestored,
+                ExplicitPotionStrategicCost: old.ExplicitPotionStrategicCost,
+                StrategicHpLowerBound: solver.PrimaryIncumbentHpLowerBound(old));
+            FlashBoundValues flashValues = bound.Evaluate(flash, features.ExplicitPotionStrategicCost);
+            List<string> diff = FlashBoundFeatures.Diff(oldValues, flashValues);
+            if (diff.Count == 0)
+                return;
+            BoundFailed++;
+            foreach (string line in diff)
+                BoundFailedFields[Field(line)] = BoundFailedFields.GetValueOrDefault(Field(line)) + 1;
+            if (BoundFailed <= ReportedMismatches)
+            {
+                report.Add($"K5 MISMATCH {label}");
+                report.AddRange(diff.Select(line => "  " + line));
+            }
+        }
+
+        private static string Field(string line) => line[..line.IndexOf(' ')];
     }
 
     /// <summary>A fully specified action, the Flash requests it answered (with the partial battle at each request) and its result.</summary>

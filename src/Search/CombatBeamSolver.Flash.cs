@@ -101,4 +101,42 @@ internal sealed partial class CombatBeamSolver
             child.ReleaseSimulator();
         }
     }
+
+    /// <summary>
+    /// The existing primary member's incumbent settings, frozen for the Flash bound. The Flash bridge uses the
+    /// same values so its lower bound and potion-cost gate are evaluated with the existing search's semantics.
+    /// </summary>
+    internal FlashPruningRequest CapturePruningRequestForFlash()
+        => new(_potionPolicy, _forceAllPotionsDisabled, _maximumPotionUses, _minimumPotionUses,
+            _strategicBossHpRelief);
+
+    /// <summary>
+    /// <c>RemainingHealingPotential</c> as the primary member applies it, or null when the existing solver
+    /// passes no remaining-healing function. K5 compares the Flash port against this.
+    /// </summary>
+    internal int? PrimaryIncumbentRemainingHealingPotential(SimulationSnapshot snapshot)
+        => root.CanCertifyRemainingHealing || root.UsesKnownNativeHealingPolicy
+            ? RemainingHealingPotential(snapshot)
+            : null;
+
+    /// <summary>The exact <c>futureHealPotential</c> argument <c>ApplyPrimaryIncumbentBoundCore</c> uses.</summary>
+    internal int PrimaryIncumbentFutureHealPotential(SimulationSnapshot snapshot)
+    {
+        int baseline = PrimaryIncumbentRemainingHealingPotential(snapshot) ?? int.MaxValue;
+        return root.UsesComponentHealingCertificate && policy.RelicTargets.Count == 0
+            ? baseline
+            : Math.Min(baseline, snapshot.FutureHealPotential);
+    }
+
+    internal int PrimaryIncumbentHpLowerBound(SimulationSnapshot snapshot)
+        => StrategicHpLowerBound(snapshot, _strategicBossHpRelief,
+            PrimaryIncumbentFutureHealPotential(snapshot));
 }
+
+/// <summary>The existing primary member's incumbent policy, frozen for the Flash bound.</summary>
+internal readonly record struct FlashPruningRequest(
+    SolverPotionPolicy EffectivePotionPolicy,
+    bool ForceAllPotionsDisabled,
+    int? MaximumPotionUses,
+    int MinimumPotionUses,
+    BossHpRelief StrategicBossHpRelief);
