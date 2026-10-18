@@ -24,6 +24,21 @@ internal static class OrichalcumMirrors
         }
     }
 
+    /// <summary>
+    /// The latched trigger as the Flash bridge projects it: the stored entry when present (returned for claiming),
+    /// otherwise false, which is what a newly created entry holds.
+    /// </summary>
+    internal static bool ShouldTriggerForFlash(PredictionStateStore store, RelicModel relic, out object? entry)
+    {
+        if (store.TryGetReadOnly(relic, out State? state))
+        {
+            entry = state;
+            return state!.ShouldTrigger;
+        }
+        entry = null;
+        return false;
+    }
+
     private static State GetState(RelicModel relic, BeforeSideTurnEndMirrorContext context)
     {
         return context.StateStore.Get<State>(relic);
