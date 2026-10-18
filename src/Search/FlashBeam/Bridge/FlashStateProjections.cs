@@ -113,6 +113,25 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
                     _claimed.Add(state);
                 }
                 break;
+            // RupturePower.Aux0..2 are the pending card play's Strength, marker and last damage's
+            // card-source flag; all three are zero at every non-terminal action boundary. The existing
+            // engine keeps the same pending information in RupturePredictionState.StrengthByCard, a map
+            // keyed by CardModel that only holds the in-flight card play. A stable boundary therefore
+            // has an empty map: claim it, and reject a state captured in the middle of a play.
+            case RupturePower:
+            {
+                // A stale entry can outlive a model remap under the old instance; every entry of this
+                // power is empty at a stable boundary and is inert once empty.
+                foreach ((AbstractModel model, object state) in store.EntriesForFlash())
+                {
+                    if (state is not RupturePredictionState pending || model is not RupturePower)
+                        continue;
+                    if (pending.StrengthByCard.Count != 0)
+                        throw new FlashImportException(FlashRejection.UnrepresentableState, "撕裂结算进行中");
+                    _claimed.Add(state);
+                }
+                break;
+            }
             // RagePower has no private state; its stale PowerAmountPredictionState after the turn-end
             // removal is inert (amount equals the removed power's amount) and stays unclaimed.
             default:
