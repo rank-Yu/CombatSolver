@@ -36,6 +36,7 @@ internal static class FlashRulesCompiler
         }
         foreach (string nativeId in PowerIdsWithVars())
             AddPowerVars(builder, nativeId);
+        AddGeneratedCardClosure(builder, player);
         IReadOnlyList<Creature> known = combat.KnownEnemies;
         if (known.Count > FlashLimits.Enemies)
             throw new FlashImportException(FlashRejection.Capacity, $"敌人数 {known.Count}");
@@ -88,6 +89,50 @@ internal static class FlashRulesCompiler
             Vars = vars,
         };
     }
+
+    /// <summary>
+    /// Adds canonical stats for every card that supported content declares it can generate, following
+    /// the declarations transitively. Undefined generated cards reject the root (UnsupportedClosure).
+    /// </summary>
+    private static void AddGeneratedCardClosure(FlashRulesBuilder builder, Player player)
+    {
+        Queue<(string CardId, int Upgrade)> pending = new();
+        HashSet<(string, int)> seen = [];
+        void Declare(FlashContentDef def)
+        {
+            foreach ((string cardId, int upgrade) in def.GeneratedCards)
+            {
+                if (seen.Add((cardId, upgrade)))
+                    pending.Enqueue((cardId, upgrade));
+            }
+        }
+        for (ushort id = 0; id < FlashRegistry.CardCount; id++)
+            Declare(FlashRegistry.Card(id));
+        for (ushort id = 0; id < FlashRegistry.PowerCount; id++)
+            Declare(FlashRegistry.Power(id));
+        for (ushort id = 0; id < FlashRegistry.MonsterCount; id++)
+            Declare(FlashRegistry.Monster(id));
+        for (ushort id = 0; id < FlashRegistry.RelicCount; id++)
+            Declare(FlashRegistry.Relic(id));
+        while (pending.Count > 0)
+        {
+            (string cardId, int upgrade) = pending.Dequeue();
+            if (!FlashRegistry.TryCard(cardId, out ushort id))
+                throw new FlashImportException(FlashRejection.UnsupportedClosure, $"生成卡 {cardId} 没有 Flash 定义");
+            if (!builder.HasCard(id, upgrade))
+            {
+                CardModel canonical = CanonicalCards.Value.TryGetValue(cardId, out CardModel? card)
+                    ? card
+                    : throw new FlashImportException(FlashRejection.UnsupportedClosure, $"原版没有卡牌 {cardId}");
+                builder.SetCard(id, upgrade, CanonicalStats(canonical, upgrade, player));
+            }
+            Declare(FlashRegistry.Card(id));
+        }
+    }
+
+    private static readonly Lazy<Dictionary<string, CardModel>> CanonicalCards = new(() =>
+        ModelDb.All.OfType<CardModel>().GroupBy(card => card.Id.Entry, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal));
 
     private static IEnumerable<string> PowerIdsWithVars()
     {
