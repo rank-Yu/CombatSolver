@@ -1,6 +1,7 @@
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Flash;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks;
+using CombatSolver.Engine.InCombat.Mirrors.Hooks.Attack;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Card;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Damage;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Death;
@@ -61,6 +62,21 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
             case SlowPower slow:
                 target.Aux0 = Claim<CounterPredictionState>(power)?.Value
                     ?? slow.DynamicVars["SlowAmount"].IntValue;
+                break;
+            // SkittishPower.Aux0 = HasGainedBlockThisTurn (AfterAttackMirrors.HandleSkittishPower,
+            // captured by SkittishPredictionState; without an entry the constructor reads the live
+            // internal-data flag).
+            case SkittishPower skittish:
+                target.Aux0 = (Claim<SkittishPredictionState>(power)?.HasGainedBlockThisTurn
+                    ?? skittish.HasGainedBlockThisTurn) ? 1 : 0;
+                break;
+            // HardenedShellPower.Aux0 = damageReceivedThisTurn
+            // (AfterDamageReceivedMirrors.HandleHardenedShellPower and
+            // ModifyHpLostMirrors.HandleHardenedShellPower use HardenedShellPredictionState; without
+            // an entry the constructor reads the model's internal data).
+            case HardenedShellPower hardened:
+                target.Aux0 = (int)(Claim<HardenedShellPredictionState>(power)?.DamageReceivedThisTurn
+                    ?? hardened.GetInternalData<HardenedShellPower.Data>().damageReceivedThisTurn);
                 break;
             // RagePower has no private state; its stale PowerAmountPredictionState after the turn-end
             // removal is inert (amount equals the removed power's amount) and stays unclaimed.
