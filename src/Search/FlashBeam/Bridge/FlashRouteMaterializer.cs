@@ -49,10 +49,12 @@ internal static class FlashRouteMaterializer
         SimulationSnapshot rootSnapshot = replay.ReplayForFlash([], null);
         FlashRules rules;
         FlashBattle battle;
+        FlashScorer scorer;
         try
         {
             rules = FlashRulesCompiler.Compile(rootSnapshot.Simulator, player);
             battle = FlashStateImporter.Import(rootSnapshot, player, rules);
+            scorer = FlashScoreBridge.Create(root, policy, profile, rootSnapshot, player, rules, battle);
         }
         catch (FlashImportException ex)
         {
@@ -65,7 +67,11 @@ internal static class FlashRouteMaterializer
             profile.MaxExpandedNodes,
             MaxTurns: 64,
             TimeSpan.FromMilliseconds(profile.SoftTimeBudgetMilliseconds),
-            root.InitialPlayerMaxHp)) with { Potions = PotionPolicy(replay, rootSnapshot, battle) };
+            root.InitialPlayerMaxHp)) with
+        {
+            Potions = PotionPolicy(replay, rootSnapshot, battle),
+            Scorer = scorer,
+        };
         FlashBeamResult search = new FlashBeamSolver(rules, options).Solve(battle, cancellationToken);
 
         watch.Restart();

@@ -127,6 +127,18 @@ internal static class FlashStateImporter
         battle.SetCounter(FlashCounter.EnergySpentThisTurn, combat.GetEnergySpentThisTurn(player));
         battle.SetCounter(FlashCounter.CumulativeHpLost, combat.GetCumulativeHpLost(owner));
         battle.SetCounter(FlashCounter.RecoveredHp, combat.GetRecoveredHp(owner));
+        battle.SetCounter(FlashCounter.LongTermResourceValue, combat.LongTermResourceValue);
+        battle.SetCounter(FlashCounter.AngerCopiesGenerated, combat.AngerCopiesGenerated);
+        battle.SetCounter(FlashCounter.DeathSaveRelicHpRestored, combat.DeathSaveRelicHpRestored);
+        battle.SetCounter(FlashCounter.DeathSavePotionHpRestored, combat.DeathSavePotionHpRestored);
+        battle.SetCounter(FlashCounter.DeathSaveUseCount, combat.DeathSaveUseCount);
+        int automaticPotionUseCount = 0;
+        foreach (PredictedPotionUse use in combat.PotionUses)
+        {
+            if (use.Automatic)
+                automaticPotionUseCount = checked(automaticPotionUseCount + 1);
+        }
+        battle.SetCounter(FlashCounter.AutomaticPotionUseCount, automaticPotionUseCount);
     }
 
     private static void ImportRng(ref FlashBattle battle, CombatPredictionRngSet rng)

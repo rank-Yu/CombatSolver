@@ -12,6 +12,8 @@ namespace OfflineSearchHarness;
 /// multi-turn random walks (K2, random legal selections) between the existing engine and the Flash
 /// kernel. Equality is byte equality of the projected <see cref="FlashBattle"/>; every choice the
 /// existing engine asks for must also match the Flash request (options, order, bounds, effect, timing).
+/// K4: on every state whose projection matched, the <see cref="FlashScorer"/> evaluation must equal
+/// the existing snapshot's (<see cref="FlashScoreFeatures.Diff"/>).
 /// Writes <c>flash-diff.txt</c> and returns a summary for <c>harness-result.json</c>.
 /// </summary>
 internal static class FlashDifferentialProbe
@@ -54,6 +56,17 @@ internal static class FlashDifferentialProbe
         summary["admitted"] = true;
         report.Add("ROOT");
         report.AddRange(FlashBattleDump.Lines(flashRoot).Select(line => "  " + line));
+        FlashScorer? scorer = null;
+        try
+        {
+            scorer = FlashScoreBridge.Create(root, policy, policy.Profile, rootSnapshot, player, rules, flashRoot);
+        }
+        catch (FlashImportException ex)
+        {
+            report.Add($"SCORE REJECTED {ex.Reason}: {ex.Detail}");
+        }
+        ScoreCheck scores = new(scorer, report);
+        scores.Check(rootSnapshot, flashRoot, 0, "ROOT");
 
         FlashAction[] actions = new FlashAction[FlashKernel.MaxLegalActions];
         int oneStepChecked = 0, oneStepFailed = 0, choiceActions = 0, choiceCapped = 0, choiceDeadEnds = 0;
@@ -79,6 +92,10 @@ internal static class FlashDifferentialProbe
                     oneStepFailed++;
                     report.Add($"K1 MISMATCH {completion.Action} choices={Selections(completion.Action)}");
                     report.AddRange(outcome.Diff.Select(line => "  " + line));
+                }
+                else
+                {
+                    scores.Check(outcome.OldChild!, outcome.FlashChild, 1, $"K1 {completion.Action} choices={Selections(completion.Action)}");
                 }
             }
         }
@@ -125,6 +142,7 @@ internal static class FlashDifferentialProbe
                     }
                     break;
                 }
+                scores.Check(outcome.OldChild!, outcome.FlashChild, 1, $"K2 seed={seed} step={step} path={string.Join(" > ", path)}");
                 snapshot = outcome.OldChild!;
                 battle = outcome.FlashChild;
             }
@@ -139,14 +157,64 @@ internal static class FlashDifferentialProbe
         summary["choiceCapped"] = choiceCapped;
         summary["choiceDeadEnds"] = choiceDeadEnds;
         summary["walkEndings"] = endings;
+        summary["scoreChecked"] = scores.Checked;
+        summary["scoreFailed"] = scores.Failed;
+        summary["scoreSkippedBoundary"] = scores.SkippedBoundary;
+        summary["scoreFailedFields"] = scores.FailedFields;
         report.Insert(0, $"SUMMARY oneStep={oneStepChecked} failed={oneStepFailed} walkTransitions={walkTransitions} "
             + $"walkFailed={walkFailed} terminals={terminals} choiceActions={choiceActions} choiceCapped={choiceCapped} "
-            + $"choiceDeadEnds={choiceDeadEnds} endings={string.Join(",", endings.Select(item => $"{item.Key}:{item.Value}"))}");
+            + $"choiceDeadEnds={choiceDeadEnds} endings={string.Join(",", endings.Select(item => $"{item.Key}:{item.Value}"))} "
+            + $"score={(scorer == null ? "rejected" : "checked")} scoreChecked={scores.Checked} scoreFailed={scores.Failed} "
+            + $"scoreSkippedBoundary={scores.SkippedBoundary}");
+        if (scores.FailedFields.Count > 0)
+            report.Insert(1, "K4 FIELDS " + string.Join(",", scores.FailedFields
+                .OrderByDescending(item => item.Value).Select(item => $"{item.Key}:{item.Value}")));
         File.WriteAllLines(Path.Combine(outputDirectory, "flash-diff.txt"), report);
         return summary;
     }
 
     private sealed record Outcome(SimulationSnapshot? OldChild, FlashBattle FlashChild, List<string> Diff);
+
+    /// <summary>K4: the Flash evaluation of a state whose projection matched must equal the existing snapshot's.</summary>
+    private sealed class ScoreCheck(FlashScorer? scorer, List<string> report)
+    {
+        private const int ReportedMismatches = 20;
+
+        public int Checked { get; private set; }
+
+        public int Failed { get; private set; }
+
+        /// <summary>States the existing engine stopped at a search boundary; their snapshot skips the threat projection.</summary>
+        public int SkippedBoundary { get; private set; }
+
+        public Dictionary<string, int> FailedFields { get; } = new(StringComparer.Ordinal);
+
+        public void Check(SimulationSnapshot old, in FlashBattle flash, int actionCount, string label)
+        {
+            if (scorer == null)
+                return;
+            if (old.BoundaryReason != SearchBoundaryReason.None)
+            {
+                SkippedBoundary++;
+                return;
+            }
+            Checked++;
+            List<string> diff = FlashScoreFeatures.Diff(FlashScoreProjection.FromSnapshot(old), scorer.Features(flash, actionCount));
+            if (diff.Count == 0)
+                return;
+            Failed++;
+            foreach (string line in diff)
+            {
+                string field = line[..line.IndexOf(' ')];
+                FailedFields[field] = FailedFields.GetValueOrDefault(field) + 1;
+            }
+            if (Failed <= ReportedMismatches)
+            {
+                report.Add($"K4 MISMATCH {label}");
+                report.AddRange(diff.Select(line => "  " + line));
+            }
+        }
+    }
 
     /// <summary>A fully specified action, the Flash requests it answered (with the partial battle at each request) and its result.</summary>
     private sealed record Completion(FlashAction Action, List<(FlashChoiceRequest Request, FlashBattle Partial)> Requests,

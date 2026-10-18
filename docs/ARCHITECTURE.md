@@ -49,6 +49,7 @@
 | `PrimaryIncumbentTable` / `ResourceIncumbentPolicy` | 同根同政策的资源桶见证、未来收益上界与认证回退 |
 | `BeamSolveDispatch` | 协调器主搜索成员的后端分发（Off/Shadow/On）、Shadow 隔离与回落 |
 | `FlashBeam/Bridge/` / `CombatBeamSolver.Flash.cs` / `CardChoiceSupport.Flash.cs` | Flash 准入、规则编译、旧引擎状态投影、动作与选择翻译；旧引擎回放入口与选择令牌生成（[Flash 规格](flash-search/README.md)） |
+| `FlashBeam/FlashBeamSolver.cs` / `FlashBeam/Scoring/` | FlashBeam 搜索；从 `FlashBattle` 计算的状态评估（移植 `Snapshot` 与 `BeamRankScore`，逐内容数值表由 `Bridge/FlashScoreBridge` 在根上编译），Scoring 不引用原版模型类型 |
 
 成员共享原请求账本；预算准入、候选合法性和取优由所属策略决定。分支状态不承担 Beam 政策；中途保路和终局比较保持明确入口。药水反事实与强制用药的硬准入先于质量比较。终局可选用药遵守机会成本门槛，获胜且减少复活消耗或追回资源时保留对应政策例外；`RouteQualityPolicy.PotionPolicy` 为审计、组合成员和后置搜索统一比较战略战损加可选药水成本，成长与回合数在其后比较。固定前缀构造实际父链，EndTurn 从模拟前后状态生成 `TurnOutcome`。
 
