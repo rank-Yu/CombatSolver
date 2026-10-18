@@ -71,6 +71,8 @@ internal static class FlashRouteMaterializer
         {
             Potions = PotionPolicy(replay, rootSnapshot, battle),
             Scorer = scorer,
+            Ordering = new FlashRouteOrdering(root.InitialPlayerHp, root.InitialPlayerMaxHp, root.BossHpRelief,
+                root.PostCombatRelicHeal),
         };
         FlashBeamResult search = new FlashBeamSolver(rules, options).Solve(battle, cancellationToken);
 
