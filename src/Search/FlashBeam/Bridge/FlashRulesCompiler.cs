@@ -253,7 +253,12 @@ internal static class FlashRulesCompiler
         FlashMonsterDef def = FlashRegistry.Monster(monsterId);
         BranchMonsterAiState ai = combat.GetMonsterAiStateForFlash(creature);
         MonsterMoveStateMachine machine = ai.Machine;
-        List<string> ids = machine.States.Keys.ToList();
+        List<MonsterState> states = machine.States.Values.ToList();
+        // A native initial branch may live outside States (PhantasmalGardener's INIT_MOVE); it is
+        // compiled after the registered states so their indices stay those of States.
+        if (machine._initialState is { } unregistered && !machine.States.ContainsKey(unregistered.Id))
+            states.Add(unregistered);
+        List<string> ids = states.Select(state => state.Id).ToList();
         Dictionary<string, int> index = new(StringComparer.Ordinal);
         for (int position = 0; position < ids.Count; position++)
             index[ids[position]] = position;
@@ -263,7 +268,7 @@ internal static class FlashRulesCompiler
         FlashMonsterNode[] nodes = new FlashMonsterNode[ids.Count];
         for (int position = 0; position < ids.Count; position++)
         {
-            MonsterState state = machine.States[ids[position]];
+            MonsterState state = states[position];
             nodes[position] = state switch
             {
                 MoveState move => CompileMove(move, ai.Static, index, monster),
