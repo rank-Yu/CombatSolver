@@ -52,11 +52,19 @@ internal static class FlashRulesCompiler
 
     private static void AddCard(FlashRulesBuilder builder, CardModel card, Player player)
     {
-        ushort id = CardId(card);
-        int upgrade = card.CurrentUpgradeLevel;
-        if (builder.HasCard(id, upgrade))
-            return;
-        builder.SetCard(id, upgrade, CanonicalStats(card.CanonicalInstance, upgrade, player));
+        AddStatsWithUpgrade(builder, CardId(card), card.CurrentUpgradeLevel, card.CanonicalInstance, player);
+    }
+
+    /// <summary>
+    /// Adds the stats of <paramref name="upgrade"/> and, for an upgradable card, of the next level, so
+    /// in-combat upgrades (<c>FlashKernel.UpgradeCard</c>) find their target level.
+    /// </summary>
+    private static void AddStatsWithUpgrade(FlashRulesBuilder builder, ushort id, int upgrade, CardModel canonical, Player player)
+    {
+        if (!builder.HasCard(id, upgrade))
+            builder.SetCard(id, upgrade, CanonicalStats(canonical, upgrade, player));
+        if (upgrade < canonical.MaxUpgradeLevel && !builder.HasCard(id, upgrade + 1))
+            builder.SetCard(id, upgrade + 1, CanonicalStats(canonical, upgrade + 1, player));
     }
 
     /// <summary>Values of the canonical card upgraded <paramref name="upgrade"/> times.</summary>
@@ -86,6 +94,7 @@ internal static class FlashRulesCompiler
             StarCost = copy.BaseStarCost,
             StarCostsX = copy.HasStarCostX,
             Keywords = FlashStateImporter.MapKeywords(copy.Keywords),
+            MaxUpgradeLevel = copy.MaxUpgradeLevel,
             Tags = MapTags(copy.Tags),
             Vars = vars,
         };
@@ -120,13 +129,10 @@ internal static class FlashRulesCompiler
             (string cardId, int upgrade) = pending.Dequeue();
             if (!FlashRegistry.TryCard(cardId, out ushort id))
                 throw new FlashImportException(FlashRejection.UnsupportedClosure, $"生成卡 {cardId} 没有 Flash 定义");
-            if (!builder.HasCard(id, upgrade))
-            {
-                CardModel canonical = CanonicalCards.Value.TryGetValue(cardId, out CardModel? card)
-                    ? card
-                    : throw new FlashImportException(FlashRejection.UnsupportedClosure, $"原版没有卡牌 {cardId}");
-                builder.SetCard(id, upgrade, CanonicalStats(canonical, upgrade, player));
-            }
+            CardModel canonical = CanonicalCards.Value.TryGetValue(cardId, out CardModel? card)
+                ? card
+                : throw new FlashImportException(FlashRejection.UnsupportedClosure, $"原版没有卡牌 {cardId}");
+            AddStatsWithUpgrade(builder, id, upgrade, canonical, player);
             Declare(FlashRegistry.Card(id));
         }
     }

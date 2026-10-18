@@ -8,7 +8,8 @@ namespace CombatSolver.FlashBeam;
 /// <summary>
 /// Turns a Flash action into the existing engine's <see cref="PlanAction"/> at the same state.
 /// Cards are located by hand position in the existing engine and keyed exactly as
-/// <c>EnumeratePlannedCardActions</c> keys them.
+/// <c>EnumeratePlannedCardActions</c> keys them. Choices are not included: <see cref="FlashChoiceTranslator"/>
+/// appends them while replaying the action through the existing engine.
 /// </summary>
 internal static class FlashActionTranslator
 {
@@ -20,12 +21,8 @@ internal static class FlashActionTranslator
         switch (action.Kind)
         {
             case FlashActionKind.EndTurn:
-                if (action.ChoiceCount != 0)
-                    throw new FlashUnsupportedException("回合开始选择的翻译尚未实现。");
                 return new PlanAction(PlanActionKind.EndTurn, turn);
             case FlashActionKind.PlayCard:
-                if (action.ChoiceCount != 0)
-                    throw new FlashUnsupportedException("出牌选择的翻译尚未实现。");
                 IReadOnlyList<PredictedCard> hand = simulator.State.GetPlayerCombatState(player).Hand.Cards;
                 PredictedCard card = hand[action.HandIndex];
                 string cardId = card.Preview.Id.Entry;

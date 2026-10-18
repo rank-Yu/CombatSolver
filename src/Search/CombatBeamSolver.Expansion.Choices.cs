@@ -969,6 +969,50 @@ internal sealed partial class CombatBeamSolver
         return !MatchesPrimaryChoice(request, primaryChoiceSpec);
     }
 
+    /// <summary>
+    /// Places one resolved branch of a pending request on <paramref name="action"/>: round-transition
+    /// choices go to <see cref="PlanAction.TurnStartChoices"/>, the played card's own unresolved choice
+    /// becomes <see cref="PlanAction.Choice"/>, and every other action choice is appended to
+    /// <see cref="PlanAction.NestedChoices"/> (counted before the primary while it is still missing).
+    /// </summary>
+    private static PlanAction AppendPendingChoice(
+        PlanAction action,
+        TurnStartChoiceRequest request,
+        PlanCardChoice branch,
+        bool turnResolution,
+        PrimaryChoiceMatch? unresolvedPrimaryChoice)
+    {
+        bool primaryChoice = !turnResolution
+            && action.Choice == null
+            && string.IsNullOrEmpty(request.SourceId)
+            && (unresolvedPrimaryChoice == null
+                || MatchesPrimaryChoice(request, unresolvedPrimaryChoice));
+        IReadOnlyList<PlanCardChoice> existing = turnResolution
+            ? action.TurnStartChoices ?? []
+            : action.NestedChoices ?? [];
+        List<PlanCardChoice> next = new(existing.Count + 1);
+        next.AddRange(existing);
+        PlanCardChoice resolvedBranch = branch with
+        {
+            SourceId = request.SourceId,
+            ContextId = request.ContextId,
+            Timing = request.Timing,
+        };
+        if (!primaryChoice)
+            next.Add(resolvedBranch);
+        return turnResolution
+            ? action with { TurnStartChoices = next }
+            : primaryChoice
+                ? action with { Choice = resolvedBranch }
+                : action with
+                {
+                    NestedChoices = next,
+                    NestedChoicesBeforePrimary = action.Choice == null
+                        ? action.NestedChoicesBeforePrimary + 1
+                        : action.NestedChoicesBeforePrimary,
+                };
+    }
+
     private static bool MatchesPrimaryChoice(
         TurnStartChoiceRequest request,
         CardChoiceSpec? primaryChoiceSpec)
@@ -1158,40 +1202,11 @@ internal sealed partial class CombatBeamSolver
                 // belongs to the round transition, not the card's own choice sequence.
                 || request.Timing is PlanChoiceTiming.PlayerTurnEnd
                     or PlanChoiceTiming.EnemyTurn or PlanChoiceTiming.PlayerTurnStart;
-            bool primaryChoice = !turnResolution
-                && action.Choice == null
-                && string.IsNullOrEmpty(request.SourceId)
-                && (unresolvedPrimaryChoice == null
-                    || MatchesPrimaryChoice(request, unresolvedPrimaryChoice));
-            IReadOnlyList<PlanCardChoice> existing = turnResolution
-                ? action.TurnStartChoices ?? []
-                : action.NestedChoices ?? [];
             List<PendingChoiceReplayBranch> resolvedBranches = new(branches.Count);
             foreach (PlanCardChoice branch in branches)
             {
-                List<PlanCardChoice> next = new(existing.Count + 1);
-                next.AddRange(existing);
-                PlanCardChoice resolvedBranch = branch with
-                {
-                    SourceId = request.SourceId,
-                    ContextId = request.ContextId,
-                    Timing = request.Timing,
-                };
-                if (!primaryChoice)
-                    next.Add(resolvedBranch);
-                PlanAction resolvedAction = turnResolution
-                    ? action with { TurnStartChoices = next }
-                    : primaryChoice
-                        ? action with { Choice = resolvedBranch }
-                        : action with
-                        {
-                            NestedChoices = next,
-                            NestedChoicesBeforePrimary = action.Choice == null
-                                ? action.NestedChoicesBeforePrimary + 1
-                                : action.NestedChoicesBeforePrimary,
-                        };
                 resolvedBranches.Add(new PendingChoiceReplayBranch(
-                    resolvedAction,
+                    AppendPendingChoice(action, request, branch, turnResolution, unresolvedPrimaryChoice),
                     PruneInvalidBranch: true));
             }
             if (identityChangingLayer)

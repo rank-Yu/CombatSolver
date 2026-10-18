@@ -71,9 +71,16 @@ internal static class FlashRouteMaterializer
         for (int step = 0; step < search.BestRoute.Length; step++)
         {
             FlashAction action = search.BestRoute[step];
-            PlanAction planned = FlashActionTranslator.ToPlanAction(snapshot, player, action);
+            PlanAction planned;
+            try
+            {
+                snapshot = FlashChoiceTranslator.Replay(replay, snapshot, player, action, out planned);
+            }
+            catch (FlashChoiceMismatchException ex)
+            {
+                throw new FlashVerificationException(step, [ex.Message]);
+            }
             plan.Add(planned);
-            snapshot = replay.ReplayForFlash([planned], snapshot);
             if (FlashKernel.Step(ref state, action, rules, out _) != FlashStepResult.Completed)
                 throw new InvalidOperationException("已选路线的 Flash 动作缺少选择。");
             FlashBattle projected = FlashStateImporter.Import(snapshot, player, rules);
