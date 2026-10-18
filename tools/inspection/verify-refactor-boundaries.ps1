@@ -327,15 +327,17 @@ if (-not $postSearchSource.Contains('RunEarlyPotionPairRescue(context, selected)
     $violations.Add('Early potion pair rescue is not a post-search pass')
 }
 $continuationSchedulerSource = Get-Content -LiteralPath (Join-Path $repositoryRoot 'src/Search/FrontierContinuationScheduler.cs') -Raw
+$beamSolveDispatchSource = Get-Content -LiteralPath (Join-Path $repositoryRoot 'src/Search/BeamSolveDispatch.cs') -Raw
 if (-not $postSearchSource.Contains('new FrontierContinuationScheduler(context).Run(') -or
     -not $continuationSchedulerSource.Contains('RequestWindow(') -or
-    -not $continuationSchedulerSource.Contains('fixedPrefixActions: request.Prefix')) {
+    -not $beamSolveDispatchSource.Contains('fixedPrefixActions: request.Prefix')) {
     $violations.Add('Early potion pair rescue bypasses the frontier continuation scheduler')
 }
 if (-not $continuationSchedulerSource.Contains('SolverResult Dispatch(ContinuationSearchRequest request)') -or
     -not $continuationSchedulerSource.Contains('result = Dispatch(request);') -or
-    -not $continuationSchedulerSource.Contains('CombatBeamSolver CreateSolver(ContinuationSearchRequest request)')) {
-    $violations.Add('Frontier continuation request does not own solver construction')
+    -not $continuationSchedulerSource.Contains('BeamSolveDispatch.SolveContinuation(request)') -or
+    -not $beamSolveDispatchSource.Contains('SolveExistingContinuation(ContinuationSearchRequest request)')) {
+    $violations.Add('Frontier continuation request does not route through the backend dispatch')
 }
 if (-not $postSearchSource.Contains('new EarlierCopyDelayedDamageContinuationSource(') -or
     -not $postSearchSource.Contains('context, selected.BestNode.Actions)')) {
@@ -2177,7 +2179,7 @@ if (-not (Select-String -LiteralPath (Join-Path $repositoryRoot 'tools/search/Co
     $violations.Add('Search loss query must group by solver and boundary identity')
 }
 foreach ($boundary in @(
-    @('src/Search/FrontierContinuationScheduler.cs', 'attributionPurpose: request.Purpose'),
+    @('src/Search/BeamSolveDispatch.cs', 'attributionPurpose: request.Purpose'),
     @('src/Search/SearchRequestWorkTotals.cs', 'AttributionSnapshot()')
 )) {
     if (-not (Select-String -LiteralPath (Join-Path $repositoryRoot $boundary[0]) -SimpleMatch $boundary[1] -Quiet)) {

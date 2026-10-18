@@ -16,6 +16,18 @@ internal sealed partial class CombatBeamSolver
         => Replay(actions, parent, parent?.Turn ?? 0, countTransition: false, allowExecutionCapture: false);
 
     /// <summary>
+    /// Replays this solver's fixed prefix from <paramref name="rootSnapshot"/> through the existing
+    /// search's own fixed-prefix path and returns the state at its end. Returns null when the existing
+    /// search rejects the prefix. The replay takes ownership of <paramref name="rootSnapshot"/>; callers
+    /// that still need the request root keep a second root replay alive (see FlashRouteMaterializer).
+    /// </summary>
+    internal SimulationSnapshot? ReplayFixedPrefixForFlash(SimulationSnapshot rootSnapshot)
+    {
+        SearchNode seed = CreateOpeningSearchSeed(rootSnapshot);
+        return ApplyFixedPrefix(seed)?.Snapshot;
+    }
+
+    /// <summary>
     /// The existing search's potion constraints at <paramref name="root"/>, as plain values for the Flash
     /// search: per slot whether an explicit use is offered (<see cref="PotionOnUseSupport.CanSearch"/> and
     /// <see cref="AllowsPotionUse"/>) and its strategic HP cost, the earliest search turn

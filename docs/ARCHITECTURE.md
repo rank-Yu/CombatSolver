@@ -47,7 +47,7 @@
 | `.StateEvaluation.cs` / `.Terminal.cs` | 评分特征、终局回放和回合结果 |
 | `SimulatedCombatState*.cs` | 分支战斗状态与动作语义 |
 | `PrimaryIncumbentTable` / `ResourceIncumbentPolicy` | 同根同政策的资源桶见证、未来收益上界与认证回退 |
-| `BeamSolveDispatch` | 协调器主搜索成员的后端分发（Off/Shadow/On）、Shadow 隔离与回落 |
+| `BeamSolveDispatch` | 协调器主搜索成员与干净固定前缀续接的后端分发（Off/Shadow/On）、Shadow 隔离与回落 |
 | `FlashBeam/Bridge/` / `CombatBeamSolver.Flash.cs` / `CardChoiceSupport.Flash.cs` | Flash 准入、规则编译、旧引擎状态投影、动作与选择翻译；旧引擎回放入口与选择令牌生成（[Flash 规格](flash-search/README.md)） |
 | `FlashBeam/FlashBeamSolver.cs` / `FlashBeam/Scoring/` | FlashBeam 搜索；从 `FlashBattle` 计算的状态评估（移植 `Snapshot` 与 `BeamRankScore`，逐内容数值表由 `Bridge/FlashScoreBridge` 在根上编译），Scoring 不引用原版模型类型 |
 

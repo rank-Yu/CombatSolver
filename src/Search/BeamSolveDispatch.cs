@@ -35,7 +35,9 @@ internal sealed record BeamSolveRequest(
 /// The beam-width portfolio members (<see cref="DirectSearchPurpose.PrimaryBeam"/> and
 /// <see cref="DirectSearchPurpose.RefinementBeam"/>) consult <see cref="SearchPolicySnapshot.FlashMode"/>;
 /// members whose profile switches Flash does not model (continuous threat ranking, contextual ranking)
-/// are rejected at admission and fall back. Audits, plan searches and scouts do not come through here.
+/// are rejected at admission and fall back. Fixed-prefix continuations go through
+/// <see cref="SolveContinuation"/> under the same mode; only clean requests are offered to Flash.
+/// Audits, plan searches and scouts do not come through here.
 /// </summary>
 internal static class BeamSolveDispatch
 {
@@ -85,6 +87,100 @@ internal static class BeamSolveDispatch
     }
 
     /// <summary>
+    /// A fixed-prefix continuation solve. Only a "clean" request (no explicit potion policy, no potion
+    /// baseline, no plan commitment, no early-turn scout, no earliest-potion restriction) is offered to
+    /// Flash; anything else goes straight to the existing solver without a Flash log line.
+    /// </summary>
+    public static SolverResult SolveContinuation(ContinuationSearchRequest request)
+    {
+        FlashSearchMode mode = CanTakeOver(request) ? EffectivePolicy(request).FlashMode : FlashSearchMode.Off;
+        switch (mode)
+        {
+            case FlashSearchMode.Off:
+                return SolveExistingContinuation(request);
+            case FlashSearchMode.Shadow:
+            {
+                Stopwatch watch = Stopwatch.StartNew();
+                SolverResult existing = SolveExistingContinuation(request);
+                TimeSpan existingTime = watch.Elapsed;
+                watch.Restart();
+                FlashAttempt flash = SolveFlashContinuation(request with
+                {
+                    PolicyOverride = Isolated(EffectivePolicy(request)),
+                });
+                EffectivePolicy(request).Diagnostics.Info(
+                    $"[CombatSolver/Flash] FLASH_SHADOW purpose={request.Purpose} prefix={request.Prefix.Length} "
+                    + $"existing=[{Describe(existing, existingTime)}] flash=[{Describe(flash, watch.Elapsed)}] "
+                    + $"same_route={SameRoute(existing, flash.Outcome?.Result)}");
+                return existing;
+            }
+            case FlashSearchMode.On:
+            {
+                Stopwatch watch = Stopwatch.StartNew();
+                FlashAttempt flash = SolveFlashContinuation(request);
+                TimeSpan flashTime = watch.Elapsed;
+                if (flash.Outcome?.Result is { } adopted)
+                {
+                    EffectivePolicy(request).Diagnostics.Info(
+                        $"[CombatSolver/Flash] FLASH_ADOPTED purpose={request.Purpose} "
+                        + $"prefix={request.Prefix.Length} flash=[{Describe(flash, flashTime)}]");
+                    return adopted;
+                }
+                EffectivePolicy(request).Diagnostics.Info(
+                    $"[CombatSolver/Flash] FLASH_FALLBACK purpose={request.Purpose} "
+                    + $"prefix={request.Prefix.Length} flash=[{Describe(flash, flashTime)}]");
+                return SolveExistingContinuation(request);
+            }
+            default:
+                throw new InvalidOperationException($"Unknown Flash search mode {mode}.");
+        }
+    }
+
+    private static SearchPolicySnapshot EffectivePolicy(ContinuationSearchRequest request)
+        => request.PolicyOverride ?? request.Context.Policy;
+
+    /// <summary>
+    /// The "clean request" gate. The existing solver's other potion and continuation switches change
+    /// its policy, ordering or scheduling in ways Flash does not model, so those requests are never
+    /// offered to Flash and never produce a Flash log line.
+    /// </summary>
+    private static bool CanTakeOver(ContinuationSearchRequest request)
+    {
+        if (request.MaximumPotionUses is not (null or 0)
+            || request.MinimumPotionUses is not (null or 0)
+            || request.PotionFreePolicyBaseline != null
+            || request.Commitment != null
+            || request.EarlyTurnScoutDepth != 0
+            || request.EarlyTurnScoutObserver != null
+            || request.EarliestPotionTurn != null)
+        {
+            return false;
+        }
+        return PotionFree(request);
+    }
+
+    /// <summary>
+    /// Whether the request cannot spend an explicit potion. A forced directive can require one even
+    /// under a disabled default policy, and a RequireAtLeastOne policy is never a potion-free request.
+    /// </summary>
+    private static bool PotionFree(ContinuationSearchRequest request)
+    {
+        if (request.PotionPolicyOverride == SolverPotionPolicy.Disabled)
+            return true;
+        SearchPolicySnapshot policy = EffectivePolicy(request);
+        if (policy.PotionStrategy.HasForcedDirectives)
+            return false;
+        if (request.PotionPolicyOverride == SolverPotionPolicy.RequireAtLeastOne
+            || policy.PotionPolicy == SolverPotionPolicy.RequireAtLeastOne)
+        {
+            return false;
+        }
+        // A zero maximum means no explicit potion can be enumerated, matching the existing solver.
+        return request.MaximumPotionUses == 0
+            || policy.PotionPolicy == SolverPotionPolicy.Disabled;
+    }
+
+    /// <summary>
     /// The policy a Shadow Flash solve runs under. Nothing it does may reach the request's shared
     /// state: work totals, the shared incumbent table, takeover requests and the replay solvers'
     /// own diagnostics stay with the existing search, so Shadow returns what Off would.
@@ -110,6 +206,30 @@ internal static class BeamSolveDispatch
             primaryIncumbent: request.PrimaryIncumbent,
             directSearchPurpose: request.Purpose).Solve();
 
+    /// <summary>The existing solver's fixed-prefix continuation path; Off must stay byte-identical.</summary>
+    private static SolverResult SolveExistingContinuation(ContinuationSearchRequest request)
+    {
+        SearchPassContext input = request.Context;
+        return new CombatBeamSolver(
+            input.Root, input.DisplayNames, input.BattleDamage,
+            request.PolicyOverride ?? input.Policy,
+            input.CancellationToken,
+            request.ProgressCallbackOverride ?? input.ProgressCallback,
+            request.Profile,
+            potionPolicyOverride: request.PotionPolicyOverride,
+            potionFreePolicyBaseline: request.PotionFreePolicyBaseline,
+            maximumPotionUses: request.MaximumPotionUses,
+            fixedPrefixActions: request.Prefix,
+            resetFixedPrefixSchedulingBaseline: request.ResetFixedPrefixSchedulingBaseline,
+            minimumPotionUses: request.MinimumPotionUses,
+            primaryIncumbent: request.PrimaryIncumbent,
+            earliestPotionTurn: request.EarliestPotionTurn,
+            planCommitment: request.Commitment,
+            earlyTurnScoutDepth: request.EarlyTurnScoutDepth,
+            earlyTurnScoutObserver: request.EarlyTurnScoutObserver,
+            attributionPurpose: request.Purpose).Solve();
+    }
+
     /// <summary>
     /// One Flash solve. A rejected root comes back as an outcome without a result; a verification
     /// mismatch discards the whole Flash route. Any other failure is a Flash defect and propagates.
@@ -129,6 +249,34 @@ internal static class BeamSolveDispatch
                 progressCallback: request.ProgressCallback,
                 purpose: request.Purpose,
                 primaryIncumbent: request.PrimaryIncumbent), null);
+        }
+        catch (FlashVerificationException ex)
+        {
+            return new FlashAttempt(null, ex);
+        }
+    }
+
+    private static FlashAttempt SolveFlashContinuation(ContinuationSearchRequest request)
+    {
+        try
+        {
+            return new FlashAttempt(FlashRouteMaterializer.Solve(
+                request.Context.Root,
+                request.Context.DisplayNames,
+                request.Context.BattleDamage,
+                EffectivePolicy(request),
+                request.Profile,
+                request.Context.CancellationToken,
+                potionPolicyOverride: request.PotionPolicyOverride,
+                // ProgressCallbackOverride and ResetFixedPrefixSchedulingBaseline stay with the
+                // existing solver; the Flash search never reports progress or reads the reset flag.
+                progressCallback: null,
+                primaryIncumbent: request.PrimaryIncumbent,
+                fixedPrefixActions: request.Prefix,
+                maximumPotionUses: request.MaximumPotionUses,
+                minimumPotionUses: request.MinimumPotionUses,
+                earliestPotionTurn: request.EarliestPotionTurn,
+                continuationPurpose: request.Purpose), null);
         }
         catch (FlashVerificationException ex)
         {

@@ -74,40 +74,16 @@ internal sealed class FrontierContinuationScheduler(SearchPassContext context)
 {
     private readonly HashSet<(ContinuationPurpose Purpose, string Prefix)> _seen = [];
 
-    private static CombatBeamSolver CreateSolver(ContinuationSearchRequest request)
-    {
-        SearchPassContext input = request.Context;
-        return new CombatBeamSolver(
-            input.Root, input.DisplayNames, input.BattleDamage,
-            request.PolicyOverride ?? input.Policy,
-            input.CancellationToken,
-            request.ProgressCallbackOverride ?? input.ProgressCallback,
-            request.Profile,
-            potionPolicyOverride: request.PotionPolicyOverride,
-            potionFreePolicyBaseline: request.PotionFreePolicyBaseline,
-            maximumPotionUses: request.MaximumPotionUses,
-            fixedPrefixActions: request.Prefix,
-            resetFixedPrefixSchedulingBaseline: request.ResetFixedPrefixSchedulingBaseline,
-            minimumPotionUses: request.MinimumPotionUses,
-            primaryIncumbent: request.PrimaryIncumbent,
-            earliestPotionTurn: request.EarliestPotionTurn,
-            planCommitment: request.Commitment,
-            earlyTurnScoutDepth: request.EarlyTurnScoutDepth,
-            earlyTurnScoutObserver: request.EarlyTurnScoutObserver,
-            attributionPurpose: request.Purpose);
-    }
-
     internal SolverResult Dispatch(ContinuationSearchRequest request)
-        => CreateSolver(request).Solve();
+        => BeamSolveDispatch.SolveContinuation(request);
 
     internal SolverResult? DispatchOptional(
         ContinuationSearchRequest request,
         string diagnostic)
     {
-        CombatBeamSolver solver = CreateSolver(request);
         try
         {
-            return solver.Solve();
+            return BeamSolveDispatch.SolveContinuation(request);
         }
         catch (PotionPolicyUnsatisfiedException)
         {

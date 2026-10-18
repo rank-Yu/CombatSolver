@@ -49,22 +49,58 @@ internal static class FlashRouteMaterializer
         SolverPotionPolicy? potionPolicyOverride = null,
         Action<SolverProgress>? progressCallback = null,
         DirectSearchPurpose? purpose = null,
-        PrimarySearchIncumbent? primaryIncumbent = null)
+        PrimarySearchIncumbent? primaryIncumbent = null,
+        IReadOnlyList<PlanAction>? fixedPrefixActions = null,
+        int? maximumPotionUses = null,
+        int? minimumPotionUses = null,
+        int? earliestPotionTurn = null,
+        ContinuationPurpose? continuationPurpose = null)
     {
         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
         Player player = root.PlayerIdentity;
+        IReadOnlyList<PlanAction> prefix = fixedPrefixActions ?? [];
+        int prefixLength = prefix.Count;
         CombatBeamSolver replay = new(root, displayNames, battleDamage, policy, cancellationToken,
-            searchProfile: profile, potionPolicyOverride: potionPolicyOverride);
+            searchProfile: profile, potionPolicyOverride: potionPolicyOverride,
+            maximumPotionUses: maximumPotionUses,
+            fixedPrefixActions: prefix,
+            minimumPotionUses: minimumPotionUses,
+            earliestPotionTurn: earliestPotionTurn);
         SimulationSnapshot rootSnapshot = replay.ReplayForFlash([], null);
         FlashPruningRequest pruning = replay.CapturePruningRequestForFlash();
+        // The existing solver's _run.Initial* values come from the request root, so the evaluation
+        // and bound frozen tables keep reading rootSnapshot even when the search starts at a prefix end.
+        SimulationSnapshot searchRootSnapshot = rootSnapshot;
+        if (prefixLength > 0)
+        {
+            // ApplyFixedPrefix releases the snapshots it walks, so replay the prefix on a second root
+            // snapshot and keep rootSnapshot alive for the frozen tables.
+            SimulationSnapshot prefixRoot = replay.ReplayForFlash([], null);
+            SimulationSnapshot? prefixEnd;
+            try
+            {
+                prefixEnd = replay.ReplayFixedPrefixForFlash(prefixRoot);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return new FlashSolveOutcome(null, FlashRejection.UnsupportedRequest,
+                    $"固定前缀无法回放：{ex.Message}", null, [], watch.Elapsed, TimeSpan.Zero, TimeSpan.Zero);
+            }
+            if (prefixEnd == null)
+            {
+                return new FlashSolveOutcome(null, FlashRejection.UnsupportedRequest,
+                    "固定前缀无法回放", null, [], watch.Elapsed, TimeSpan.Zero, TimeSpan.Zero);
+            }
+            searchRootSnapshot = prefixEnd;
+        }
         FlashRules rules;
         FlashBattle battle;
         FlashScorer scorer;
         FlashBoundFeatures bound;
         try
         {
-            rules = FlashRulesCompiler.Compile(rootSnapshot.Simulator, player);
-            battle = FlashStateImporter.Import(rootSnapshot, player, rules);
+            rules = FlashRulesCompiler.Compile(searchRootSnapshot.Simulator, player);
+            battle = FlashStateImporter.Import(searchRootSnapshot, player, rules);
             scorer = FlashScoreBridge.Create(root, policy, profile, rootSnapshot, player, rules, battle);
             bound = FlashBoundBridge.Create(root, policy, rootSnapshot, player, rules, battle, pruning);
         }
@@ -74,9 +110,11 @@ internal static class FlashRouteMaterializer
         }
         TimeSpan admission = watch.Elapsed;
 
-        // node.Turn and FlashBattle.PlayerTurn advance together from the root (see PotionPolicy).
+        // Incumbent and potion turns stay in request-root units: the fixed prefix is already part of
+        // the existing solver's request, so it must not shift the comparison base.
+        int rootPlayerTurn = prefixLength == 0 ? battle.PlayerTurn : rootSnapshot.Turn;
         PrimarySearchIncumbent? incumbent = primaryIncumbent is { } seed
-            ? seed with { CombatEndedTurn = seed.CombatEndedTurn - rootSnapshot.Turn + battle.PlayerTurn }
+            ? seed with { CombatEndedTurn = seed.CombatEndedTurn - rootSnapshot.Turn + rootPlayerTurn }
             : null;
         FlashBeamOptions options = (flashOptions ?? new FlashBeamOptions(
             checked(profile.BeamWidth * ProfileWidthScale),
@@ -85,7 +123,7 @@ internal static class FlashRouteMaterializer
             TimeSpan.FromMilliseconds(profile.SoftTimeBudgetMilliseconds),
             root.InitialPlayerMaxHp)) with
         {
-            Potions = PotionPolicy(replay, rootSnapshot, battle),
+            Potions = PotionPolicy(replay, rootSnapshot, rootPlayerTurn),
             Scorer = scorer,
             Ordering = new FlashRouteOrdering(root.InitialPlayerHp, root.InitialPlayerMaxHp, root.BossHpRelief,
                 root.PostCombatRelicHeal),
@@ -94,12 +132,16 @@ internal static class FlashRouteMaterializer
             Incumbent = incumbent,
             EffectivePotionPolicy = pruning.EffectivePotionPolicy,
             MinimumPotionUses = pruning.MinimumPotionUses,
+            InitialActionCount = prefixLength,
         };
         FlashBeamResult search = new FlashBeamSolver(rules, options).Solve(battle, cancellationToken);
 
         watch.Restart();
-        List<PlanAction> plan = new(search.BestRoute.Length);
-        SimulationSnapshot snapshot = rootSnapshot;
+        // The verified route is the fixed prefix plus the Flash route; the existing solver replays the
+        // whole plan from the request root and packages it.
+        List<PlanAction> plan = new(prefixLength + search.BestRoute.Length);
+        plan.AddRange(prefix);
+        SimulationSnapshot snapshot = searchRootSnapshot;
         FlashBattle state = battle;
         for (int step = 0; step < search.BestRoute.Length; step++)
         {
@@ -141,7 +183,14 @@ internal static class FlashRouteMaterializer
         };
         SolverResult result = new CombatBeamSolver(root, displayNames, battleDamage, policy, cancellationToken,
             progressCallback, materializeProfile, potionPolicyOverride: potionPolicyOverride,
-            fixedPrefixActions: plan, directSearchPurpose: purpose).Solve();
+            maximumPotionUses: maximumPotionUses,
+            fixedPrefixActions: plan,
+            minimumPotionUses: minimumPotionUses,
+            // The primary-member materializer did not seed the incumbent; keep that path unchanged.
+            primaryIncumbent: continuationPurpose == null ? null : primaryIncumbent,
+            earliestPotionTurn: earliestPotionTurn,
+            attributionPurpose: continuationPurpose,
+            directSearchPurpose: purpose).Solve();
         return new FlashSolveOutcome(result, FlashRejection.None, "", search, plan, admission, verification, watch.Elapsed);
     }
 
@@ -164,7 +213,8 @@ internal static class FlashRouteMaterializer
             policy.MinimumRequiredPotionUses(battleDamage.PotionsUsedSoFar));
     }
 
-    private static FlashPotionPolicy PotionPolicy(CombatBeamSolver replay, SimulationSnapshot rootSnapshot, in FlashBattle battle)
+    private static FlashPotionPolicy PotionPolicy(CombatBeamSolver replay, SimulationSnapshot rootSnapshot,
+        int rootPlayerTurn)
     {
         (bool[] allowed, int[] costs, int? earliestTurn, int? maximumUses) = replay.CapturePotionPolicyForFlash(rootSnapshot);
         byte mask = 0;
@@ -175,8 +225,8 @@ internal static class FlashRouteMaterializer
                 mask |= (byte)(1 << slot);
             slotCosts[slot] = costs[slot];
         }
-        // node.Turn and FlashBattle.PlayerTurn advance together from the root.
-        int earliest = earliestTurn is { } turn ? turn - rootSnapshot.Turn + battle.PlayerTurn : int.MinValue;
+        // The earliest turn is in request-root units; a fixed prefix must not shift it.
+        int earliest = earliestTurn is { } turn ? turn - rootSnapshot.Turn + rootPlayerTurn : int.MinValue;
         return new FlashPotionPolicy(mask, earliest, maximumUses, slotCosts);
     }
 }

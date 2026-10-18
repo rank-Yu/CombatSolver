@@ -241,13 +241,14 @@ if ! rg -Fq 'RunEarlyPotionPairRescue(context, selected)' "$repository_root/src/
 fi
 if ! rg -Fq 'new FrontierContinuationScheduler(context).Run(' "$repository_root/src/Search/CombatSearchCoordinator.PostSearch.cs" ||
    ! rg -Fq 'RequestWindow(' "$repository_root/src/Search/FrontierContinuationScheduler.cs" ||
-   ! rg -Fq 'fixedPrefixActions: request.Prefix' "$repository_root/src/Search/FrontierContinuationScheduler.cs"; then
+   ! rg -Fq 'fixedPrefixActions: request.Prefix' "$repository_root/src/Search/BeamSolveDispatch.cs"; then
     violations+=("Early potion pair rescue bypasses the frontier continuation scheduler")
 fi
 if ! rg -Fq 'SolverResult Dispatch(ContinuationSearchRequest request)' "$repository_root/src/Search/FrontierContinuationScheduler.cs" ||
    ! rg -Fq 'result = Dispatch(request);' "$repository_root/src/Search/FrontierContinuationScheduler.cs" ||
-   ! rg -Fq 'CombatBeamSolver CreateSolver(ContinuationSearchRequest request)' "$repository_root/src/Search/FrontierContinuationScheduler.cs"; then
-    violations+=("Frontier continuation request does not own solver construction")
+   ! rg -Fq 'BeamSolveDispatch.SolveContinuation(request)' "$repository_root/src/Search/FrontierContinuationScheduler.cs" ||
+   ! rg -Fq 'SolveExistingContinuation(ContinuationSearchRequest request)' "$repository_root/src/Search/BeamSolveDispatch.cs"; then
+    violations+=("Frontier continuation request does not route through the backend dispatch")
 fi
 if ! rg -Fq 'new EarlierCopyDelayedDamageContinuationSource(' "$repository_root/src/Search/CombatSearchCoordinator.PostSearch.cs" ||
    ! rg -Fq 'context, selected.BestNode.Actions)' "$repository_root/src/Search/CombatSearchCoordinator.PostSearch.cs"; then
@@ -1714,7 +1715,7 @@ require_fixed "$repository_root/src/Search/SearchPolicySnapshot.cs" 'DefaultTran
 
 # Contextual estimates may influence intermediate ordering only; loading stays outside workers.
 require_fixed "$repository_root/tools/search/ContextualOrdering/first_loss.py" "key = (o['solverId'], o['boundaryId'])" 'search loss query must group by solver and boundary identity'
-require_fixed "$search_root/FrontierContinuationScheduler.cs" 'attributionPurpose: request.Purpose' 'missing request work attribution boundary'
+require_fixed "$search_root/BeamSolveDispatch.cs" 'attributionPurpose: request.Purpose' 'missing request work attribution boundary'
 require_fixed "$search_root/SearchRequestWorkTotals.cs" 'AttributionSnapshot()' 'missing request work attribution boundary'
 require_fixed "$repository_root/tools/replay/CheckpointTool/StrategySessionRunner.cs" 'timeout-progress.json' 'strategy session timeout must preserve its last progress snapshot'
 require_fixed "$repository_root/src/Testing/Host/DevelopmentMonitorPublisher.cs" '["memberMaxNodes"] = progress?.MaxNodes' 'timeout progress must include the active member node limit'
