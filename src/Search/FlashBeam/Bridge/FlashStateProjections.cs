@@ -3,6 +3,7 @@ using CombatSolver.Engine.InCombat.Flash;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Card;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Damage;
+using CombatSolver.Engine.InCombat.Mirrors.Hooks.Death;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.TurnEnd;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
@@ -52,6 +53,13 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
                 break;
             case InfernoPower inferno:
                 target.Aux0 = inferno.DynamicVars["SelfDamage"].IntValue;
+                break;
+            // SlowPower.Aux0 = the private SlowAmount counter (AfterCardPlayedMirrors.HandleSlowPower
+            // and ModifyDamageMirrors.HandleSlowPower use a CounterPredictionState; without an entry
+            // the constructor reads DynamicVars["SlowAmount"].BaseValue).
+            case SlowPower slow:
+                target.Aux0 = Claim<CounterPredictionState>(power)?.Value
+                    ?? slow.DynamicVars["SlowAmount"].IntValue;
                 break;
             // RagePower has no private state; its stale PowerAmountPredictionState after the turn-end
             // removal is inert (amount equals the removed power's amount) and stays unclaimed.
@@ -164,6 +172,23 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
             // VenerableTeaSet.Counter = pending pre-combat tea (StatefulRelicState
             // Current = GainEnergyInNextCombat).
             case VenerableTeaSet:
+                target.Counter = ClaimStatefulRelic(relic).Current;
+                break;
+            // BeatingRemnant.Counter = damage received this turn
+            // (AfterDamageReceivedMirrors.HandleBeatingRemnant keeps it in
+            // BeatingRemnantPredictionState; without an entry the constructor reads the live field).
+            case BeatingRemnant remnant:
+                target.Counter = (int)(Claim<BeatingRemnantPredictionState>(relic)?.DamageReceivedThisTurn
+                    ?? remnant._damageReceivedThisTurn);
+                break;
+            // LizardTail.Counter = WasUsed (DeathPreventerMirrors.LizardTailMirrors uses
+            // LizardTailPredictionState.WasUsed; without an entry the live property is the source).
+            case LizardTail tail:
+                target.Counter = (Claim<LizardTailPredictionState>(relic)?.WasUsed ?? tail.WasUsed) ? 1 : 0;
+                break;
+            // RedSkull.Counter = the engine's StrengthApplied flag held in StatefulRelicState
+            // (AfterCurrentHpChangedMirrors.HandleRedSkull through GetRedSkullStrengthApplied).
+            case RedSkull:
                 target.Counter = ClaimStatefulRelic(relic).Current;
                 break;
             default:

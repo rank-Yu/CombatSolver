@@ -87,7 +87,16 @@ internal static class FlashRouteMaterializer
             plan.Add(planned);
             if (FlashKernel.Step(ref state, action, rules, out _) != FlashStepResult.Completed)
                 throw new InvalidOperationException("已选路线的 Flash 动作缺少选择。");
-            FlashBattle projected = FlashStateImporter.Import(snapshot, player, rules);
+            FlashBattle projected;
+            try
+            {
+                projected = FlashStateImporter.Import(snapshot, player, rules);
+            }
+            catch (FlashImportException ex)
+            {
+                // The existing engine reached a state Flash cannot represent, so this step cannot be verified.
+                throw new FlashVerificationException(step, [$"旧引擎状态无法投影：{ex.Reason} {ex.Detail}"]);
+            }
             if (!FlashFingerprint.Equal(projected, state))
                 throw new FlashVerificationException(step, FlashBattleDump.Diff(projected, state, "old", "flash"));
         }
