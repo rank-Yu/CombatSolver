@@ -49,6 +49,8 @@ internal static class FlashScoreBridge
             PotionStrategicCost = potionCosts,
             InitialPlayerMaxHp = root.InitialPlayerMaxHp,
             IsActEndingBoss = root.IsActEndingBoss,
+            BaseScoreOnly = profile.BaseScoreOnly,
+            BeamWeightPerturbation = profile.BeamWeightPerturbation,
             IgnoreLongTermRewards = policy.IgnoreLongTermRewards,
             TheftPolicy = policy.TheftPolicy,
             InitialEnemyCount = root.Enemies.Count,
@@ -94,12 +96,8 @@ internal static class FlashScoreBridge
             throw Reject("StrategicEffectMirrors", "第三方战略效果登记表非空");
         if (!CardRemovalValueMirrors.IsEmpty)
             throw Reject("CardRemovalValueMirrors", "卡牌移除估值登记表非空，牌库杂质判定未移植");
-        if (profile.BaseScoreOnly)
-            throw Reject("Profile.BaseScoreOnly", "仅基础分的中途排序未移植");
         if (profile.ContinuousThreatRanking)
             throw Reject("Profile.ContinuousThreatRanking", "连续致命意图定价未移植");
-        if (profile.BeamWeightPerturbation is { } perturbation)
-            throw Reject("Profile.BeamWeightPerturbation", $"权重扰动 {perturbation.Term}×{perturbation.Scale} 未移植");
         if (profile.ContextualRanking != null)
             throw Reject("Profile.ContextualRanking", "上下文排序模型未移植");
         if (TheftApplicable(root))

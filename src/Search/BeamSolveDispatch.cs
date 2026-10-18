@@ -34,8 +34,8 @@ internal sealed record BeamSolveRequest(
 /// The single point where a coordinator Beam solve picks its backend (docs/flash-search/search.md §4).
 /// The beam-width portfolio members (<see cref="DirectSearchPurpose.PrimaryBeam"/> and
 /// <see cref="DirectSearchPurpose.RefinementBeam"/>) consult <see cref="SearchPolicySnapshot.FlashMode"/>;
-/// members whose profile switches Flash does not model (base-score-only, weight perturbation) are rejected
-/// at admission and fall back. Audits, plan searches and scouts do not come through here.
+/// members whose profile switches Flash does not model (continuous threat ranking, contextual ranking)
+/// are rejected at admission and fall back. Audits, plan searches and scouts do not come through here.
 /// </summary>
 internal static class BeamSolveDispatch
 {
