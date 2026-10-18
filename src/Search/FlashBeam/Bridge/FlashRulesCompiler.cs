@@ -86,6 +86,7 @@ internal static class FlashRulesCompiler
             StarCost = copy.BaseStarCost,
             StarCostsX = copy.HasStarCostX,
             Keywords = FlashStateImporter.MapKeywords(copy.Keywords),
+            Tags = MapTags(copy.Tags),
             Vars = vars,
         };
     }
@@ -133,6 +134,24 @@ internal static class FlashRulesCompiler
     private static readonly Lazy<Dictionary<string, CardModel>> CanonicalCards = new(() =>
         ModelDb.All.OfType<CardModel>().GroupBy(card => card.Id.Entry, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal));
+
+    private static FlashCardTag MapTags(IEnumerable<MegaCrit.Sts2.Core.Entities.Cards.CardTag> tags)
+    {
+        FlashCardTag result = FlashCardTag.None;
+        foreach (var tag in tags)
+        {
+            result |= tag switch
+            {
+                MegaCrit.Sts2.Core.Entities.Cards.CardTag.Strike => FlashCardTag.Strike,
+                MegaCrit.Sts2.Core.Entities.Cards.CardTag.Defend => FlashCardTag.Defend,
+                MegaCrit.Sts2.Core.Entities.Cards.CardTag.Minion => FlashCardTag.Minion,
+                MegaCrit.Sts2.Core.Entities.Cards.CardTag.OstyAttack => FlashCardTag.OstyAttack,
+                MegaCrit.Sts2.Core.Entities.Cards.CardTag.Shiv => FlashCardTag.Shiv,
+                _ => throw new FlashImportException(FlashRejection.UnsupportedCard, $"卡牌标签 {tag}"),
+            };
+        }
+        return result;
+    }
 
     private static IEnumerable<string> PowerIdsWithVars()
     {
