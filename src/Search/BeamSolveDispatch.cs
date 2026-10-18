@@ -32,15 +32,16 @@ internal sealed record BeamSolveRequest(
 
 /// <summary>
 /// The single point where a coordinator Beam solve picks its backend (docs/flash-search/search.md §4).
-/// Only <see cref="DirectSearchPurpose.PrimaryBeam"/> requests consult
-/// <see cref="SearchPolicySnapshot.FlashMode"/>; refinement members, audits and scouts keep the
-/// existing solver because their profile switches have no Flash counterpart.
+/// The beam-width portfolio members (<see cref="DirectSearchPurpose.PrimaryBeam"/> and
+/// <see cref="DirectSearchPurpose.RefinementBeam"/>) consult <see cref="SearchPolicySnapshot.FlashMode"/>;
+/// members whose profile switches Flash does not model (base-score-only, weight perturbation) are rejected
+/// at admission and fall back. Audits, plan searches and scouts do not come through here.
 /// </summary>
 internal static class BeamSolveDispatch
 {
     public static SolverResult Solve(BeamSolveRequest request)
     {
-        FlashSearchMode mode = request.Purpose == DirectSearchPurpose.PrimaryBeam
+        FlashSearchMode mode = request.Purpose is DirectSearchPurpose.PrimaryBeam or DirectSearchPurpose.RefinementBeam
             ? request.Policy.FlashMode : FlashSearchMode.Off;
         switch (mode)
         {
