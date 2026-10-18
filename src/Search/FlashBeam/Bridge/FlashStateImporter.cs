@@ -69,6 +69,7 @@ internal static class FlashStateImporter
         ImportEnemies(ref battle, simulator, combat, known, rules, processedDeaths);
         ImportPowers(ref battle, combat, player, known, projections);
         ImportCards(ref battle, playerState, rules);
+        RejectRunListenerDeckCards(player);
         ImportRelics(ref battle, combat, player, projections);
         ImportPotions(ref battle, combat, player);
         ImportOrbs(ref battle, playerState);
@@ -121,6 +122,8 @@ internal static class FlashStateImporter
         battle.SetCounter(FlashCounter.CardsExhaustedThisTurn, combat.CardsExhaustedThisTurnForFlash(owner));
         battle.SetCounter(FlashCounter.CardsDiscardedThisTurn, combat.GetCardsDiscardedThisTurn(owner));
         battle.SetCounter(FlashCounter.PlayerAttacksThisTurn, combat.GetCreatureAttacksThisTurn(owner));
+        battle.SetCounter(FlashCounter.NonHandDrawsThisTurn, combat.GetNonHandDrawsThisTurn(player));
+        battle.SetCounter(FlashCounter.StatusCardsDrawnThisTurn, combat.GetStatusCardsDrawnThisTurn(player));
         battle.SetCounter(FlashCounter.EnergySpentThisTurn, combat.GetEnergySpentThisTurn(player));
         battle.SetCounter(FlashCounter.CumulativeHpLost, combat.GetCumulativeHpLost(owner));
         battle.SetCounter(FlashCounter.RecoveredHp, combat.GetRecoveredHp(owner));
@@ -228,6 +231,20 @@ internal static class FlashStateImporter
                 AmountOnTurnStart = power.AmountOnTurnStart,
             };
             projections.ProjectPower(power, ref battle.Powers[index]);
+        }
+    }
+
+    /// <summary>
+    /// The existing engine dispatches some hooks over the run listeners, which include the deck versions of cards;
+    /// Flash dispatches over the combat listeners only, so a deck card implementing one of those hooks rejects the root.
+    /// </summary>
+    private static void RejectRunListenerDeckCards(Player player)
+    {
+        foreach (CardModel card in player.Deck.Cards)
+        {
+            if (FlashRegistry.TryCard(card.Id.Entry, out ushort id)
+                && (FlashRegistry.Card(id).Hooks & FlashHookMask.RunListenerHooks) != 0)
+                throw new FlashImportException(FlashRejection.UnsupportedCard, $"牌组卡 {card.Id.Entry} 带有局外监听 Hook");
         }
     }
 
