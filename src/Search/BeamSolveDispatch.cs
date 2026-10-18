@@ -1,3 +1,4 @@
+using CombatSolver.Engine.InCombat.Flash;
 using System.Diagnostics;
 using System.Globalization;
 using CombatSolver.FlashBeam;
@@ -254,6 +255,14 @@ internal static class BeamSolveDispatch
         {
             return new FlashAttempt(null, ex);
         }
+        catch (FlashUnsupportedException ex)
+        {
+            return new FlashAttempt(null, null, $"unsupported {ex.Message}");
+        }
+        catch (FlashCapacityException ex)
+        {
+            return new FlashAttempt(null, null, $"capacity {ex.Message}");
+        }
     }
 
     private static FlashAttempt SolveFlashContinuation(ContinuationSearchRequest request)
@@ -282,6 +291,14 @@ internal static class BeamSolveDispatch
         {
             return new FlashAttempt(null, ex);
         }
+        catch (FlashUnsupportedException ex)
+        {
+            return new FlashAttempt(null, null, $"unsupported {ex.Message}");
+        }
+        catch (FlashCapacityException ex)
+        {
+            return new FlashAttempt(null, null, $"capacity {ex.Message}");
+        }
     }
 
     private static string Describe(SolverResult result, TimeSpan elapsed)
@@ -296,6 +313,9 @@ internal static class BeamSolveDispatch
         if (attempt.Mismatch is { } mismatch)
             return string.Create(CultureInfo.InvariantCulture,
                 $"status=mismatch ms={elapsed.TotalMilliseconds:0} step={mismatch.Step} detail={mismatch.Message}");
+        if (attempt.Boundary is { } boundary)
+            return string.Create(CultureInfo.InvariantCulture,
+                $"status=boundary ms={elapsed.TotalMilliseconds:0} detail={boundary}");
         FlashSolveOutcome outcome = attempt.Outcome!;
         if (outcome.Result == null)
             return string.Create(CultureInfo.InvariantCulture,
@@ -326,5 +346,12 @@ internal static class BeamSolveDispatch
         return "true";
     }
 
-    private sealed record FlashAttempt(FlashSolveOutcome? Outcome, FlashVerificationException? Mismatch);
+    /// <summary>
+    /// One Flash attempt. <paramref name="Boundary"/> is set when the Flash search itself reached a state
+    /// the derived kernel does not model (<see cref="FlashUnsupportedException"/>) or a capacity limit
+    /// (<see cref="FlashCapacityException"/>): like an admission rejection, the request falls back to the
+    /// existing solver, which is the authoritative implementation.
+    /// </summary>
+    private sealed record FlashAttempt(FlashSolveOutcome? Outcome, FlashVerificationException? Mismatch,
+        string? Boundary = null);
 }

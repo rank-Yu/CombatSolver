@@ -78,13 +78,23 @@ internal static class FlashDifferentialProbe
         scores.Check(rootSnapshot, flashRoot, 0, "ROOT");
 
         FlashAction[] actions = new FlashAction[FlashKernel.MaxLegalActions];
-        int oneStepChecked = 0, oneStepFailed = 0, choiceActions = 0, choiceCapped = 0, choiceDeadEnds = 0;
+        int oneStepChecked = 0, oneStepFailed = 0, choiceActions = 0, choiceCapped = 0, choiceDeadEnds = 0, unsupported = 0;
         int count = FlashKernel.LegalActions(flashRoot, rules, actions);
         for (int index = 0; index < count; index++)
         {
             List<Completion> completions = [];
-            if (Complete(rules, flashRoot, actions[index], [], completions))
-                choiceCapped++;
+            try
+            {
+                if (Complete(rules, flashRoot, actions[index], [], completions))
+                    choiceCapped++;
+            }
+            catch (FlashUnsupportedException ex)
+            {
+                // A Flash boundary, not a divergence: production falls back to the existing solver.
+                if (unsupported++ == 0)
+                    report.Add($"UNSUPPORTED K1 {actions[index]}: {ex.Message}");
+                continue;
+            }
             foreach (Completion completion in completions)
             {
                 if (completion.DeadEnd)
@@ -128,7 +138,17 @@ internal static class FlashDifferentialProbe
                 count = FlashKernel.LegalActions(battle, rules, actions);
                 // Favour card plays so walks reach deeper hands, deaths and shuffles.
                 FlashAction action = count > 1 && random.Next(4) != 0 ? actions[random.Next(count - 1)] : actions[random.Next(count)];
-                Completion completion = CompleteRandomly(rules, battle, action, random);
+                Completion completion;
+                try
+                {
+                    completion = CompleteRandomly(rules, battle, action, random);
+                }
+                catch (FlashUnsupportedException ex)
+                {
+                    if (unsupported++ == 0)
+                        report.Add($"UNSUPPORTED K2 seed={seed} step={step}: {ex.Message}");
+                    break;
+                }
                 path.Add($"{completion.Action}{(completion.Requests.Count > 0 ? " " + Selections(completion.Action) : "")}");
                 if (completion.DeadEnd)
                 {
@@ -173,6 +193,7 @@ internal static class FlashDifferentialProbe
         summary["bound"] = scores.BoundStatus;
         summary["boundChecked"] = scores.BoundChecked;
         summary["boundFailed"] = scores.BoundFailed;
+        summary["unsupported"] = unsupported;
         summary["boundFailedFields"] = scores.BoundFailedFields;
         report.Insert(0, $"SUMMARY oneStep={oneStepChecked} failed={oneStepFailed} walkTransitions={walkTransitions} "
             + $"walkFailed={walkFailed} terminals={terminals} choiceActions={choiceActions} choiceCapped={choiceCapped} "
@@ -181,7 +202,7 @@ internal static class FlashDifferentialProbe
             + $"scoreSkippedBoundary={scores.SkippedBoundary} "
             + (scores.BoundStatus == "checked"
                 ? $"bound=checked boundChecked={scores.BoundChecked} boundFailed={scores.BoundFailed}"
-                : $"bound=disabled({scores.BoundStatus})"));
+                : $"bound=disabled({scores.BoundStatus})") + $" unsupported={unsupported}");
         if (scores.FailedFields.Count > 0)
             report.Insert(1, "K4 FIELDS " + string.Join(",", scores.FailedFields
                 .OrderByDescending(item => item.Value).Select(item => $"{item.Key}:{item.Value}")));
