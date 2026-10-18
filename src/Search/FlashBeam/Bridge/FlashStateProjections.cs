@@ -132,6 +132,37 @@ internal sealed class FlashStateProjections(PredictionStateStore store, Simulate
                 }
                 break;
             }
+            // HellraiserPower keeps infiniteAutoPlaysThisTurn in HellraiserPredictionState. Every
+            // admitted root has finite-HP enemies (WaterfallGiant's infinite display HP is not
+            // admitted), so the native finite branch resets the counter on every draw and the only
+            // representable stable value is zero.
+            case HellraiserPower:
+            {
+                foreach ((AbstractModel model, object state) in store.EntriesForFlash())
+                {
+                    if (!ReferenceEquals(model, power) || state is not HellraiserPredictionState hellraiser)
+                        continue;
+                    if (hellraiser.InfiniteAutoPlaysThisTurn != 0)
+                        throw new FlashImportException(FlashRejection.UnrepresentableState,
+                            "Hellraiser 无限生命自动打出计数非零");
+                    _claimed.Add(state);
+                }
+                break;
+            }
+            // CalamityPower pairs an Attack play with the power amount in CardPlayPairPredictionState.
+            // The pair is removed by AfterCardPlayed, so a stable boundary has an empty map.
+            case CalamityPower:
+            {
+                foreach ((AbstractModel model, object state) in store.EntriesForFlash())
+                {
+                    if (!ReferenceEquals(model, power) || state is not CardPlayPairPredictionState pair)
+                        continue;
+                    if (pair.Amounts.Count != 0)
+                        throw new FlashImportException(FlashRejection.UnrepresentableState, "灾厄结算进行中");
+                    _claimed.Add(state);
+                }
+                break;
+            }
             // RagePower has no private state; its stale PowerAmountPredictionState after the turn-end
             // removal is inert (amount equals the removed power's amount) and stays unclaimed.
             default:

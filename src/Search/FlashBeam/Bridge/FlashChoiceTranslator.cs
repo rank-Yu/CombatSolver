@@ -34,8 +34,9 @@ internal static class FlashChoiceTranslator
         int maxTake = Math.Min(spec.MaxCount, spec.Options.Count);
         if (flash.Effect.ToString() != spec.Effect.ToString())
             differences.Add($"效果 old={spec.Effect} flash={flash.Effect}");
-        if (flash.Source.ToString() != spec.SourcePile.ToString())
-            differences.Add($"来源牌堆 old={spec.SourcePile} flash={flash.Source}");
+        string flashSource = flash.SourceIsNone ? "None" : flash.Source.ToString();
+        if (flashSource != spec.SourcePile.ToString())
+            differences.Add($"来源牌堆 old={spec.SourcePile} flash={flashSource}");
         if (flash.Timing.ToString() != request.Timing.ToString())
             differences.Add($"时机 old={request.Timing} flash={flash.Timing}");
         if (flash.MinCount != minTake || flash.MaxCount != maxTake)
@@ -45,7 +46,9 @@ internal static class FlashChoiceTranslator
         int shared = Math.Min(flash.OptionCount, spec.Options.Count);
         for (int index = 0; index < shared; index++)
         {
-            FlashCard card = partial.Cards[flash.Options[index]];
+            FlashCard card = flash.OptionsAreGenerated
+                ? flash.GeneratedOptions[index]
+                : partial.Cards[flash.Options[index]];
             string flashId = FlashRegistry.Card(card.Id).NativeId;
             var option = spec.Options[index].Preview;
             if (flashId != option.Id.Entry || card.Upgrade != option.CurrentUpgradeLevel)

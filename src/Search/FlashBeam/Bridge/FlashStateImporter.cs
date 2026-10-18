@@ -17,10 +17,11 @@ namespace CombatSolver.FlashBeam;
 internal static class FlashStateImporter
 {
     public static FlashBattle Import(SimulationSnapshot snapshot, Player player, FlashRules rules)
-        => Import(snapshot.Simulator, player, rules, snapshot.ShufflesCrossed, snapshot.ProcessedEnemyDeaths);
+        => Import(snapshot.Simulator, player, rules, snapshot.ShufflesCrossed, snapshot.ProcessedEnemyDeaths,
+            snapshot.HasRisk);
 
     public static FlashBattle Import(CombatPredictionSimulator simulator, Player player, FlashRules rules,
-        int shufflesCrossed, IReadOnlySet<uint> processedDeaths)
+        int shufflesCrossed, IReadOnlySet<uint> processedDeaths, bool hasRisk)
     {
         // The existing engine's per-turn counter getters fill their caches from root history on first
         // read. Reading a private fork keeps the caller's state, which other workers may fork, untouched.
@@ -56,6 +57,11 @@ internal static class FlashStateImporter
             battle.Flags |= FlashBattleFlags.PlayerHooksActive;
         if (combat.PlayerTurnEndRequestedForFlash)
             battle.Flags |= FlashBattleFlags.PlayerTurnEndRequested;
+        // K5 compares the snapshot's uncompensated risk, not the raw history flag: compensated
+        // MethodMirrorIncomplete entries (CardOnPlayCompensationCatalog and friends) leave
+        // snapshot.HasRisk false. The kernel only records uncompensated UnresolvedPlayerChoice risk.
+        if (hasRisk)
+            battle.Flags |= FlashBattleFlags.HasRisk;
         battle.MaxHandSize = checked((byte)combat.GetMaxHandSize(player));
 
         battle.Player = Vitals(simulator.State.GetCreature(player.Creature), combat.HasLostHpThisTurn(player.Creature));

@@ -1,11 +1,14 @@
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using CombatSolver.Engine.Common;
+using CombatSolver.Engine.InCombat.Extensions;
 using CombatSolver.Engine.InCombat.Flash;
 using CombatSolver.Engine.InCombat.Simulation;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Factories;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Modifiers;
 using MegaCrit.Sts2.Core.MonsterMoves;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
@@ -50,14 +53,14 @@ internal static class FlashRulesCompiler
             AddPotionStats(builder, id);
         for (ushort id = 0; id < FlashRegistry.RelicCount; id++)
             AddRelicVars(builder, id);
-        AddGeneratedCardClosure(builder, player);
         IReadOnlyList<Creature> known = combat.KnownEnemies;
         if (known.Count > FlashLimits.Enemies)
             throw new FlashImportException(FlashRejection.Capacity, $"敌人数 {known.Count}");
+        List<ushort> spawnClosure = SpawnClosure(known);
+        AddGeneratedCardClosure(builder, simulator, combat, player, spawnClosure);
         builder.RootEnemyCount = known.Count;
         builder.HasEncounter = combat.Encounter != null;
         builder.EncounterSlots = combat.EncounterSlotsForFlash.ToArray();
-        List<ushort> spawnClosure = SpawnClosure(known);
         if (known.Count + spawnClosure.Count > FlashLimits.MonsterRules)
             throw new FlashImportException(FlashRejection.Capacity,
                 $"怪物规则 {known.Count}+{spawnClosure.Count}");
@@ -200,37 +203,173 @@ internal static class FlashRulesCompiler
     /// Adds canonical stats for every card that supported content declares it can generate, following
     /// the declarations transitively. Undefined generated cards reject the root (UnsupportedClosure).
     /// </summary>
-    private static void AddGeneratedCardClosure(FlashRulesBuilder builder, Player player)
+    private static void AddGeneratedCardClosure(FlashRulesBuilder builder, CombatPredictionSimulator simulator,
+        SimulatedCombatState combat, Player player, IReadOnlyList<ushort> spawnClosure)
     {
-        Queue<(string CardId, int Upgrade)> pending = new();
-        HashSet<(string, int)> seen = [];
+        Queue<(string CardId, int Upgrade)> pendingCards = new();
+        Queue<string> pendingPools = new();
+        Queue<string> pendingPowers = new();
+        HashSet<(string, int)> seenCards = [];
+        HashSet<string> seenPools = new(StringComparer.Ordinal);
+        HashSet<string> seenPowerDefs = new(StringComparer.Ordinal);
+        bool needsPotionPool = false;
         void Declare(FlashContentDef def)
         {
+            needsPotionPool |= def.GeneratesRandomPotion;
             foreach ((string cardId, int upgrade) in def.GeneratedCards)
             {
-                if (seen.Add((cardId, upgrade)))
-                    pending.Enqueue((cardId, upgrade));
+                if (seenCards.Add((cardId, upgrade)))
+                    pendingCards.Enqueue((cardId, upgrade));
+            }
+            foreach (string pool in def.GeneratedCardPools)
+            {
+                if (seenPools.Add(pool))
+                    pendingPools.Enqueue(pool);
+            }
+            foreach (string power in def.AppliedPowers)
+                pendingPowers.Enqueue(power);
+        }
+        // The closure starts from the root's reachable content, as admission's reachability rule
+        // requires: a pool only has to be representable for a root that can actually use it.
+        SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(player);
+        foreach (SimCardPile pile in new[] { playerState.Hand, playerState.DrawPile, playerState.DiscardPile,
+                     playerState.ExhaustPile, playerState.PlayPile })
+        {
+            foreach (PredictedCard card in pile.Cards)
+            {
+                if (FlashRegistry.TryCard(card.Preview.Id.Entry, out ushort id))
+                    Declare(FlashRegistry.Card(id));
             }
         }
-        for (ushort id = 0; id < FlashRegistry.CardCount; id++)
-            Declare(FlashRegistry.Card(id));
-        for (ushort id = 0; id < FlashRegistry.PowerCount; id++)
-            Declare(FlashRegistry.Power(id));
-        for (ushort id = 0; id < FlashRegistry.MonsterCount; id++)
-            Declare(FlashRegistry.Monster(id));
-        for (ushort id = 0; id < FlashRegistry.RelicCount; id++)
-            Declare(FlashRegistry.Relic(id));
-        while (pending.Count > 0)
+        foreach (PowerModel power in combat.EffectivePowers())
         {
-            (string cardId, int upgrade) = pending.Dequeue();
-            if (!FlashRegistry.TryCard(cardId, out ushort id))
+            if (FlashRegistry.TryPower(power.Id.Entry, out ushort id))
+                Declare(FlashRegistry.Power(id));
+        }
+        foreach (RelicModel relic in combat.RelicsOf(player))
+        {
+            if (FlashRegistry.TryRelic(relic.Id.Entry, out ushort id))
+                Declare(FlashRegistry.Relic(id));
+        }
+        for (int slot = 0; slot < combat.PotionSlotCountForFlash(player); slot++)
+        {
+            if (combat.GetPotionAtSlot(player, slot) is { } potion
+                && FlashRegistry.TryPotion(potion.Id.Entry, out ushort id))
+                Declare(FlashRegistry.Potion(id));
+        }
+        foreach (Creature enemy in combat.KnownEnemies)
+        {
+            if (enemy.Monster is { } monster && FlashRegistry.TryMonster(monster.Id.Entry, out ushort id))
+                Declare(FlashRegistry.Monster(id));
+        }
+        foreach (ushort monsterId in spawnClosure)
+            Declare(FlashRegistry.Monster(monsterId));
+        while (pendingCards.Count > 0 || pendingPools.Count > 0 || pendingPowers.Count > 0)
+        {
+            while (pendingPowers.Count > 0)
+            {
+                string powerId = pendingPowers.Dequeue();
+                if (!seenPowerDefs.Add(powerId))
+                    continue;
+                if (!FlashRegistry.TryPower(powerId, out ushort powerInternalId))
+                    throw new FlashImportException(FlashRejection.UnsupportedClosure,
+                        $"生成 Power {powerId} 没有 Flash 定义");
+                Declare(FlashRegistry.Power(powerInternalId));
+            }
+            while (pendingPools.Count > 0)
+            {
+                string poolKey = pendingPools.Dequeue();
+                ushort[] pool = FreezeCardPool(poolKey, player);
+                builder.SetCardPool(poolKey, pool);
+                foreach (ushort id in pool)
+                {
+                    Declare(FlashRegistry.Card(id));
+                    CardModel poolCanonical = CanonicalCards.Value.TryGetValue(FlashRegistry.Card(id).NativeId,
+                        out CardModel? canonicalCard)
+                        ? canonicalCard
+                        : throw new FlashImportException(FlashRejection.UnsupportedClosure,
+                            $"原版没有卡牌 {FlashRegistry.Card(id).NativeId}");
+                    AddStatsWithUpgrade(builder, id, 0, poolCanonical, player);
+                }
+            }
+            if (pendingCards.Count == 0)
+                break;
+            (string cardId, int upgrade) = pendingCards.Dequeue();
+            if (!FlashRegistry.TryCard(cardId, out ushort cardInternalId))
                 throw new FlashImportException(FlashRejection.UnsupportedClosure, $"生成卡 {cardId} 没有 Flash 定义");
             CardModel canonical = CanonicalCards.Value.TryGetValue(cardId, out CardModel? card)
                 ? card
                 : throw new FlashImportException(FlashRejection.UnsupportedClosure, $"原版没有卡牌 {cardId}");
-            AddStatsWithUpgrade(builder, id, upgrade, canonical, player);
-            Declare(FlashRegistry.Card(id));
+            AddStatsWithUpgrade(builder, cardInternalId, upgrade, canonical, player);
+            Declare(FlashRegistry.Card(cardInternalId));
         }
+        if (needsPotionPool)
+            builder.SetPotionPool(FreezePotionPool(player));
+    }
+
+    /// <summary>
+    /// <c>PotionFactory.CreateRandomPotionInCombat</c>'s option pool: the character and shared potion
+    /// pools' unlocked options, filtered by <c>CanBeGeneratedInCombat</c>, in that order.
+    /// </summary>
+    private static ushort[] FreezePotionPool(Player player)
+    {
+        List<PotionModel> options = PotionFactory.GetPotionOptions(player)
+            .Where(static potion => potion.CanBeGeneratedInCombat)
+            .ToList();
+        ushort[] ids = new ushort[options.Count];
+        for (int index = 0; index < options.Count; index++)
+        {
+            PotionModel potion = options[index];
+            if (!FlashRegistry.TryPotion(potion.Id.Entry, out ushort id))
+                throw new FlashImportException(FlashRejection.UnsupportedClosure,
+                    $"随机药水 {potion.Id.Entry} 没有 Flash 定义");
+            ids[index] = id;
+        }
+        return ids;
+    }
+
+    /// <summary>
+    /// Freezes one generation pool with the same query order the existing engine uses at the call site
+    /// (<c>Player.GetUnlockedCards</c> + <c>FilterForCombatAndPlayerCount</c>, then the caller predicate).
+    /// </summary>
+    private static ushort[] FreezeCardPool(string poolKey, Player player)
+    {
+        CardMultiplayerConstraint constraint = player.RunState.CardMultiplayerConstraint;
+        IEnumerable<CardModel> cards = poolKey switch
+        {
+            FlashCardPools.CharacterAll => player.GetUnlockedCharacterCards(constraint),
+            FlashCardPools.CharacterAttacks => player.GetUnlockedCharacterCards(constraint)
+                .Where(static card => card.Type == CardType.Attack),
+            FlashCardPools.CharacterZeroCost => player.GetUnlockedCharacterCards(constraint)
+                .Where(static card => card.EnergyCost is { Canonical: 0, CostsX: false }),
+            FlashCardPools.ColorlessAll => player.GetUnlockedColorlessCards(constraint),
+            FlashCardPools.ColorlessExceptJackOfAllTrades => player.GetUnlockedColorlessCards(constraint)
+                .Where(static card => card is not JackOfAllTrades),
+            FlashCardPools.OtherCharacterAttacks => OtherCharacterAttacks(player, constraint),
+            _ => throw new FlashImportException(FlashRejection.UnsupportedClosure, $"未知卡池 {poolKey}"),
+        };
+        List<CardModel> candidates = cards.FilterForCombatAndPlayerCount(constraint).ToList();
+        ushort[] ids = new ushort[candidates.Count];
+        for (int index = 0; index < candidates.Count; index++)
+        {
+            CardModel candidate = candidates[index];
+            if (!FlashRegistry.TryCard(candidate.Id.Entry, out ushort id))
+                throw new FlashImportException(FlashRejection.UnsupportedClosure,
+                    $"生成卡 {candidate.Id.Entry} 没有 Flash 定义（卡池 {poolKey}）");
+            ids[index] = id;
+        }
+        return ids;
+    }
+
+    /// <summary><c>SplashOnPlay</c>'s pool choice: every unlocked character pool except the player's own when there is more than one.</summary>
+    private static IEnumerable<CardModel> OtherCharacterAttacks(Player player, CardMultiplayerConstraint constraint)
+    {
+        List<CardPoolModel> pools = player.UnlockState.CharacterCardPools.ToList();
+        if (pools.Count > 1)
+            pools.Remove(player.Character.CardPool);
+        return pools
+            .SelectMany(pool => player.GetUnlockedCards(pool, constraint))
+            .Where(static card => card.Type == CardType.Attack);
     }
 
     private static readonly Lazy<Dictionary<string, CardModel>> CanonicalCards = new(() =>
@@ -309,6 +448,7 @@ internal static class FlashRulesCompiler
         builder.SetPotion(id, new FlashPotionStats
         {
             Target = (FlashTargetType)(byte)canonical.TargetType,
+            Rarity = (FlashPotionRarity)(byte)canonical.Rarity,
             Vars = vars,
             VarProps = props,
         });
