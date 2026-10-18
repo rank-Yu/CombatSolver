@@ -26,13 +26,16 @@ internal sealed partial class SimulatedCombatState
 
     internal int PotionSlotCountForFlash(Player player) => PotionSlotCount(player);
 
+    internal int CardsExhaustedThisTurnForFlash(Creature actor) => GetCardsExhaustedThisTurn(actor);
+
     internal bool IsPrimaryEnemyForFlash(Creature creature)
         => ((CombatSolver.Engine.Common.ICombatPredictionCreatureSemantics)this).IsPrimaryEnemy(creature);
 
     /// <summary>
-    /// Names the first branch state Flash does not model, or null. Counters that every card play
-    /// updates are not listed: only the content that reads them makes them matter, and such content
-    /// has no Flash definition.
+    /// Names the first branch state Flash does not model, or null. The per-turn counters Flash tracks
+    /// are projected by the importer; the remaining counters (stars gained, non-hand draws, powered
+    /// attack hits, Doom appliers, Fetch plays, enemy per-turn counts) are not listed: only content that
+    /// reads them makes them matter, and such content has no Flash definition.
     /// </summary>
     internal string? DescribeFlashUnrepresentableState()
     {

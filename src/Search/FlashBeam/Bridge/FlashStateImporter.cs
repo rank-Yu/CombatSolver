@@ -22,6 +22,9 @@ internal static class FlashStateImporter
     public static FlashBattle Import(CombatPredictionSimulator simulator, Player player, FlashRules rules,
         int shufflesCrossed, IReadOnlySet<uint> processedDeaths)
     {
+        // The existing engine's per-turn counter getters fill their caches from root history on first
+        // read. Reading a private fork keeps the caller's state, which other workers may fork, untouched.
+        simulator = simulator.Fork();
         SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
         if (combat.Players.Count != 1)
             throw new FlashImportException(FlashRejection.MultiPlayer, $"玩家数 {combat.Players.Count}");
@@ -57,12 +60,11 @@ internal static class FlashStateImporter
             battle.Flags |= FlashBattleFlags.PlayerTurnEndRequested;
         battle.MaxHandSize = checked((byte)combat.GetMaxHandSize(player));
 
-        battle.Player = Vitals(simulator.State.GetCreature(player.Creature));
+        battle.Player = Vitals(simulator.State.GetCreature(player.Creature), combat.HasLostHpThisTurn(player.Creature));
         if (simulator.State.GetOsty(player) != null)
             throw new FlashImportException(FlashRejection.UnrepresentableState, "Osty");
 
-        battle.SetCounter(FlashCounter.CumulativeHpLost, combat.GetCumulativeHpLost(player.Creature));
-        battle.SetCounter(FlashCounter.RecoveredHp, combat.GetRecoveredHp(player.Creature));
+        ImportCounters(ref battle, combat, player);
 
         ImportRng(ref battle, simulator.Rng);
         IReadOnlyList<Creature> known = combat.KnownEnemies;
@@ -95,8 +97,35 @@ internal static class FlashStateImporter
         return result;
     }
 
-    private static FlashCreature Vitals(SimCreatureState creature)
-        => new() { CurrentHp = creature.CurrentHp, MaxHp = creature.MaxHp, Block = creature.Block, Flags = FlashCreatureFlags.Present };
+    private static FlashCreature Vitals(SimCreatureState creature, bool lostHpThisTurn) => new()
+    {
+        CurrentHp = creature.CurrentHp,
+        MaxHp = creature.MaxHp,
+        Block = creature.Block,
+        Flags = FlashCreatureFlags.Present | (lostHpThisTurn ? FlashCreatureFlags.LostHpThisTurn : FlashCreatureFlags.None),
+    };
+
+    private static void ImportCounters(ref FlashBattle battle, SimulatedCombatState combat, Player player)
+    {
+        Creature owner = player.Creature;
+        battle.SetCounter(FlashCounter.CardsPlayedThisTurn, combat.GetCardsPlayedThisTurn(owner));
+        battle.SetCounter(FlashCounter.ManualCardsPlayedThisTurn, combat.GetManualCardsPlayedThisTurn(owner));
+        battle.SetCounter(FlashCounter.CardPlayStartsThisTurn, combat.GetCardPlayStartsThisTurn(owner));
+        battle.SetCounter(FlashCounter.AttackPlayStartsThisTurn, combat.GetAttackPlayStartsThisTurn(owner));
+        battle.SetCounter(FlashCounter.AttackSkillStartsThisTurn, combat.GetAttackSkillStartsThisTurn(owner));
+        battle.SetCounter(FlashCounter.ZeroCostAttackStartsThisTurn, combat.GetZeroCostAttackStartsThisTurn(owner));
+        battle.SetCounter(FlashCounter.CardPlaySeriesStartedThisTurn, combat.GetCardPlaySeriesStartedThisTurn(owner));
+        battle.SetCounter(FlashCounter.AttacksPlayedThisTurn, combat.GetAttacksPlayedThisTurn(owner));
+        battle.SetCounter(FlashCounter.ShivsPlayedThisTurn, combat.GetShivsPlayedThisTurn(owner));
+        battle.SetCounter(FlashCounter.SkillCardsPlayedThisTurn, combat.GetSkillCardsPlayedThisTurn(owner));
+        battle.SetCounter(FlashCounter.BlockCardsPlayedThisTurn, combat.GetBlockCardsPlayedThisTurn(owner));
+        battle.SetCounter(FlashCounter.CardsExhaustedThisTurn, combat.CardsExhaustedThisTurnForFlash(owner));
+        battle.SetCounter(FlashCounter.CardsDiscardedThisTurn, combat.GetCardsDiscardedThisTurn(owner));
+        battle.SetCounter(FlashCounter.PlayerAttacksThisTurn, combat.GetCreatureAttacksThisTurn(owner));
+        battle.SetCounter(FlashCounter.EnergySpentThisTurn, combat.GetEnergySpentThisTurn(player));
+        battle.SetCounter(FlashCounter.CumulativeHpLost, combat.GetCumulativeHpLost(owner));
+        battle.SetCounter(FlashCounter.RecoveredHp, combat.GetRecoveredHp(owner));
+    }
 
     private static void ImportRng(ref FlashBattle battle, CombatPredictionRngSet rng)
     {
@@ -131,7 +160,7 @@ internal static class FlashStateImporter
             FlashMonsterRules machine = rules.Monster(owner);
             BranchMonsterAiState ai = combat.GetMonsterAiStateForFlash(creature);
             ref FlashEnemy enemy = ref battle.Enemies[index];
-            enemy.Creature = Vitals(simulator.State.GetCreature(creature));
+            enemy.Creature = Vitals(simulator.State.GetCreature(creature), combat.HasLostHpThisTurn(creature));
             enemy.MonsterId = monsterId;
             enemy.Slot = (byte)index;
             enemy.DeathPhase = (FlashDeathPhase)(byte)combat.DeathPhaseForFlash(creature);
