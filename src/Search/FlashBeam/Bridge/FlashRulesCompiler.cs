@@ -39,18 +39,55 @@ internal static class FlashRulesCompiler
     public static FlashRules Compile(CombatPredictionSimulator simulator, Player player)
     {
         SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
+        ushort lampId = ushort.MaxValue;
+        foreach (RelicModel relic in combat.RelicsOf(player))
+        {
+            if (FlashRegistry.TryRelic(relic.Id.Entry, out ushort relicId)
+                && FlashRegistry.Relic(relicId).IsUnsettlingLamp)
+            {
+                lampId = relicId;
+                break;
+            }
+        }
         FlashRulesBuilder builder = new()
         {
             BaseMaxEnergy = combat.GetBaseMaxEnergy(player),
             BaseOrbSlotCount = player.Character.BaseOrbSlotCount,
+            // _rootPowerAmounts[(player.Creature, typeof(SwordSagePower))] in MaterializeRoot.
+            RootSwordSageAmount = combat.GetAmount<MegaCrit.Sts2.Core.Models.Powers.SwordSagePower>(
+                player.Creature),
+            UnsettlingLampRelicId = lampId,
         };
         SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(player);
+        bool hasIdentityContent = builder.RootSwordSageAmount != 0
+            || player.Character is MegaCrit.Sts2.Core.Models.Characters.Regent
+                or MegaCrit.Sts2.Core.Models.Characters.Necrobinder
+                or MegaCrit.Sts2.Core.Models.Characters.Silent;
         foreach (SimCardPile pile in new[] { playerState.Hand, playerState.DrawPile, playerState.DiscardPile,
                      playerState.ExhaustPile, playerState.PlayPile })
         {
             foreach (PredictedCard card in pile.Cards)
+            {
                 AddCard(builder, card.Preview, player);
+                FlashCardDef def = FlashRegistry.Card(CardId(card.Preview));
+                hasIdentityContent |= def.UsesIdentityLedger || def.TracksFetchPlay
+                    || def.MayGenerateIdentityContent || def.IsIdentityContent;
+            }
         }
+        foreach (PowerModel power in combat.EffectivePowers())
+        {
+            if (FlashRegistry.TryPower(power.Id.Entry, out ushort powerId))
+            {
+                hasIdentityContent |= FlashRegistry.Power(powerId).IsIdentityContent;
+            }
+        }
+        foreach (RelicModel relic in combat.RelicsOf(player))
+        {
+            if (FlashRegistry.TryRelic(relic.Id.Entry, out ushort relicId))
+                hasIdentityContent |= FlashRegistry.Relic(relicId).MayGenerateIdentityContent
+                    || FlashRegistry.Relic(relicId).IsIdentityContent;
+        }
+        builder.HasIdentityContent = hasIdentityContent;
         foreach (string nativeId in PowerIdsWithVars())
             AddPowerVars(builder, nativeId);
         for (ushort id = 0; id < FlashRegistry.PotionCount; id++)

@@ -302,6 +302,34 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             // canonical power Damage var, both already in the row.
             case RollingBoulderPower:
                 break;
+            // MonologuePower.Aux0 = the Strength copied from the card, .Aux1 = StrengthApplied. The
+            // per-card dictionary only holds cards between Before/AfterCardPlayed, so it must be empty.
+            case MonologuePower monologue:
+                if (combat.MonologuePendingCountForFlash(monologue) != 0)
+                    throw new FlashImportException(FlashRejection.UnrepresentableState, "Monologue 结算进行中");
+                target.Aux0 = monologue.DynamicVars.Strength.IntValue;
+                target.Aux1 = monologue.DynamicVars[MonologuePower.strengthAppliedKey].IntValue;
+                break;
+            // OrbitPower.Aux0 = energySpent % 4 (_orbitEnergyRemainders; the constructor's value is not
+            // a valid replacement because the existing engine throws when the entry is missing).
+            case OrbitPower orbit:
+                if (!combat.TryGetOrbitEnergyRemainder(orbit, out int remainder))
+                    throw new FlashImportException(FlashRejection.UnrepresentableState, "Orbit 剩余能量缺失");
+                if (remainder is < 0 or > 3)
+                    throw new FlashImportException(FlashRejection.UnrepresentableState, $"Orbit 剩余能量 {remainder}");
+                target.Aux0 = remainder;
+                break;
+            // PaleBlueDotPower.Aux0 = alreadyActivatedThisTurn (_paleBlueDotActivated; the constructor
+            // reads the live internal flag when the entry is absent).
+            case PaleBlueDotPower paleBlueDot:
+                target.Aux0 = combat.IsPaleBlueDotActivated(paleBlueDot) ? 1 : 0;
+                break;
+            // NightmarePower's selected card is allocated into FlashBattle.DetachedCards by the importer
+            // (it needs the battle, not just the power row). ProjectPower only verifies the entry.
+            case NightmarePower nightmare:
+                if (combat.NightmareSelectionForFlash(nightmare) == null)
+                    throw new FlashImportException(FlashRejection.UnrepresentableState, "Nightmare 选定卡缺失");
+                break;
             // RagePower has no private state; its stale PowerAmountPredictionState after the turn-end
             // removal is inert (amount equals the removed power's amount) and stays unclaimed.
             default:
@@ -325,6 +353,16 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             case RuinedHelmet:
                 if (ClaimStatefulRelic(relic).Current != 0)
                     target.Flags |= FlashRelicFlags.UsedThisCombat;
+                break;
+            // Vambrace.Counter = BlockGainedThisCombat (VambracePredictionState; the constructor reads
+            // the live relic fields when no entry exists). TriggeringCard is transient.
+            case Vambrace:
+                target.Counter = Claim<VambracePredictionState>(relic)?.BlockGainedThisCombat == true ? 1 : 0;
+                break;
+            // UnsettlingLamp.Counter = the finished latch (StatefulRelicState.Current =
+            // _isFinishedTriggering); the transient triggering card/type sets must be empty.
+            case UnsettlingLamp:
+                target.Counter = ClaimStatefulRelic(relic).Current != 0 ? 1 : 0;
                 break;
             // BurningSticks.Counter = was used this combat (BurningSticksPredictionState.WasUsedThisCombat).
             case BurningSticks sticks:
@@ -614,7 +652,8 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             // a play) can only leave an already-drained map behind: no EffectivePowers entry reaches
             // its Before/AfterCardPlayed readers again, and a re-acquired power is a fresh native
             // instance with its own state. A non-empty map at a stable boundary is rejected.
-            if (model is AfterimagePower or StranglePower or OblivionPower or SerpentFormPower { Amount: 0 }
+            if (model is AfterimagePower or StranglePower or OblivionPower or MonologuePower
+                or SerpentFormPower { Amount: 0 }
                 && state is CardPlayPairPredictionState retiredPair
                 && retiredPair.Amounts.Count == 0)
             {

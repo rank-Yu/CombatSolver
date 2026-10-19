@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Powers;
 
 namespace CombatSolver.FlashBeam;
 
@@ -84,7 +85,7 @@ internal static class FlashStateImporter
         ImportRng(ref battle, simulator.Rng);
         IReadOnlyList<Creature> known = combat.KnownEnemies;
         ImportEnemies(ref battle, simulator, combat, player, known, rules, processedDeaths, projections);
-        ImportPowers(ref battle, combat, player, known, osty, projections);
+        ImportPowers(ref battle, combat, player, known, osty, projections, rules);
         ImportCards(ref battle, combat, playerState, rules);
         RejectRunListenerDeckCards(player);
         ImportRelics(ref battle, combat, player, projections);
@@ -375,8 +376,8 @@ internal static class FlashStateImporter
         return checked((byte)FlashKernel.NoSlot);
     }
 
-    private static void ImportPowers(ref FlashBattle battle, SimulatedCombatState combat, Player player, IReadOnlyList<Creature> known,
-        Creature? osty, FlashStateProjections projections)
+    private static void ImportPowers(ref FlashBattle battle, SimulatedCombatState combat, Player player,
+        IReadOnlyList<Creature> known, Creature? osty, FlashStateProjections projections, FlashRules rules)
     {
         IReadOnlyList<PowerModel> powers = combat.EffectivePowers();
         // Group by owner index while keeping the existing listener order within each owner.
@@ -416,7 +417,32 @@ internal static class FlashStateImporter
                 AmountOnTurnStart = def.UsesAmountOnTurnStart ? power.AmountOnTurnStart : 0,
             };
             projections.ProjectPower(power, ref battle.Powers[index]);
+            if (power is NightmarePower nightmare)
+                ImportNightmareSelection(ref battle, combat, nightmare, rules, index);
         }
+    }
+
+    /// <summary>
+    /// NightmarePower's selected card is a detached clone (SetNightmareSelection uses
+    /// <c>PredictedCard.CreateClone</c> + ClearAffliction). Flash stores its full value in the battle's
+    /// detached-card table and references it from Aux0.
+    /// </summary>
+    private static void ImportNightmareSelection(ref FlashBattle battle, SimulatedCombatState combat,
+        NightmarePower power, FlashRules rules, int row)
+    {
+        PredictedCard? selected = combat.NightmareSelectionForFlash(power);
+        if (selected == null)
+            throw new FlashImportException(FlashRejection.UnrepresentableState, "Nightmare 选定卡缺失");
+        FlashCard value = Card(selected, rules, rootCard: false, dampenOriginalUpgrade: -1);
+        for (int slot = 0; slot < FlashLimits.DetachedCards; slot++)
+        {
+            if (battle.DetachedCards[slot].Id != 0)
+                continue;
+            battle.DetachedCards[slot] = value;
+            battle.Powers[row].Aux0 = slot + 1;
+            return;
+        }
+        throw new FlashImportException(FlashRejection.Capacity, $"Nightmare 选定卡 {FlashLimits.DetachedCards}");
     }
 
     /// <summary>
@@ -459,6 +485,18 @@ internal static class FlashStateImporter
                 imported.Add(card);
                 int originalUpgrade = dampen.TryGetValue(card, out int level) ? level : -1;
                 FlashCard value = Card(card, rules, combat.IsRootCardForFlash(card), originalUpgrade);
+                if (card.Preview is MegaCrit.Sts2.Core.Models.Cards.SovereignBlade)
+                {
+                    int? applied = combat.SwordSageAppliedForFlash(card);
+                    if (applied == null)
+                        throw new FlashImportException(FlashRejection.UnrepresentableState,
+                            $"SwordSage 账本缺少 {card.Preview.Id.Entry}");
+                    value.Private = checked((short)applied.Value);
+                }
+                else if (combat.FetchPlayedThisTurnForFlash(card))
+                {
+                    value.Private |= FlashKernel.FetchPlayedBit;
+                }
                 if (returning.Contains(card))
                     value.ReturnToHandNextTurn = true;
                 FlashPiles.Append(ref battle, target, value);
@@ -491,6 +529,8 @@ internal static class FlashStateImporter
             ReplayCount = checked((byte)card.BaseReplayCount),
             IsClone = card.IsClone,
         };
+        if (FlashRegistry.Card(id).UsesIdentityLedger)
+            result.Private = FlashLimits.UninitializedLedger;
         if (dampenOriginalUpgrade > 3)
             throw new FlashImportException(FlashRejection.UnrepresentableState,
                 $"{card.Id.Entry} 压制前升级等级 {dampenOriginalUpgrade}");

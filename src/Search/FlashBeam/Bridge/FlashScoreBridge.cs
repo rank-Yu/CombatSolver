@@ -378,6 +378,7 @@ internal static class FlashScoreBridge
         ThunderPower => FlashStrategicKind.Thunder,
         LightningRodPower => FlashStrategicKind.LightningRod,
         AutomationPower => FlashStrategicKind.RecurringEnergy,
+        OrbitPower => FlashStrategicKind.OrbitEnergy,
         _ => FlashStrategicKind.Scaling,
     };
 

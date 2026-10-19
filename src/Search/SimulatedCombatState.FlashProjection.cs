@@ -177,38 +177,23 @@ internal sealed partial class SimulatedCombatState
             return nameof(_pendingPowerAmountChanges);
         if (_powerCardSources is { Count: > 0 })
             return nameof(_powerCardSources);
-        if (_nightmareSelections is { Count: > 0 })
-            return nameof(_nightmareSelections);
-        if (_orbitEnergyRemainders is { Count: > 0 })
-            return nameof(_orbitEnergyRemainders);
-        if (_paleBlueDotActivated is { Count: > 0 })
-            return nameof(_paleBlueDotActivated);
-        if (_swordSageReplayBonuses is { Count: > 0 })
+        // Nightmare selections are projected into FlashBattle.DetachedCards. Entries whose power has
+        // been removed are inert (only positive EffectivePowers instances read their selection).
+        if (_nightmareSelections != null)
         {
-            // NormalizeSwordSageReplays records one entry per Sovereign Blade even when no Sword Sage
-            // Power exists (applied bonus 0). With no SwordSagePower anywhere the target bonus is
-            // always 0, so every entry is at its target and no reader can observe the table; the
-            // per-blade bonus is already part of the imported BaseReplayCount. A positive power (the
-            // card is not implemented) or a non-zero applied bonus is still rejected.
-            bool inert = true;
-            foreach (int applied in _swordSageReplayBonuses.Values)
+            foreach (NightmarePower power in _nightmareSelections.Keys)
             {
-                if (applied != 0)
-                {
-                    inert = false;
-                    break;
-                }
+                if (power.Amount > 0 && !EffectivePowers().Contains(power))
+                    return nameof(_nightmareSelections);
             }
-            foreach (Player player in Players)
-            {
-                if (GetAmount<SwordSagePower>(player.Creature) != 0)
-                {
-                    inert = false;
-                    break;
-                }
-            }
-            if (!inert)
-                return nameof(_swordSageReplayBonuses);
+        }
+        // _orbitEnergyRemainders/_paleBlueDotActivated are projected into the power rows; entries of a
+        // zero-amount power are inert for the same reason (readers visit positive EffectivePowers).
+        // Monologue's per-card dictionary must be empty at a stable boundary.
+        foreach (PowerModel power in EffectivePowers())
+        {
+            if (power is MonologuePower { Amount: > 0 } monologue && MonologuePendingCountForFlash(monologue) != 0)
+                return "monologue";
         }
         if (_unsettlingLampTriggeringCards is { Count: > 0 } || _unsettlingLampInternalPowerTypes is { Count: > 0 })
             return "unsettling lamp";
@@ -321,5 +306,43 @@ internal sealed partial class SimulatedCombatState
     /// <summary>Instanced power types Flash represents as one row per instance and projects.</summary>
     private static bool IsProjectedInstancedPower(PowerModel power)
         => power is AutomationPower or PanachePower or RollingBoulderPower or TheBombPower
-            or GigantificationPower or SandpitPower;
+            or GigantificationPower or SandpitPower or MonologuePower or OrbitPower or NightmarePower;
+
+    /// <summary>The applied SwordSage replay bonus of one blade, as the normalization table records it.</summary>
+    internal int? SwordSageAppliedForFlash(PredictedCard card)
+        => _swordSageReplayBonuses != null && _swordSageReplayBonuses.TryGetValue(card, out int applied)
+            ? applied
+            : null;
+
+    /// <summary>Membership in <c>_fetchCardsPlayedThisTurn</c> (root history + this turn's plays).</summary>
+    internal bool FetchPlayedThisTurnForFlash(PredictedCard card)
+        => GetFetchCardsPlayedThisTurn().Contains(card.Original);
+
+    /// <summary><c>_orbitEnergyRemainders[power]</c>; false when the instance has no entry.</summary>
+    internal bool TryGetOrbitEnergyRemainder(OrbitPower power, out int remainder)
+    {
+        remainder = 0;
+        return _orbitEnergyRemainders != null && _orbitEnergyRemainders.TryGetValue(power, out remainder);
+    }
+
+    /// <summary>The selected-card clone of an active NightmarePower (<c>_nightmareSelections</c>).</summary>
+    internal PredictedCard? NightmareSelectionForFlash(NightmarePower power)
+        => _nightmareSelections?.GetValueOrDefault(power);
+
+    /// <summary>
+    /// The number of cards recorded in a MonologuePower's internal per-card dictionary. A stable
+    /// boundary must have none (BeforeCardPlayed adds, AfterCardPlayed removes).
+    /// </summary>
+    internal int MonologuePendingCountForFlash(MonologuePower power)
+    {
+        object? data = PowerInternalDataField.GetValue(power);
+        if (data == null)
+            return 0;
+        System.Reflection.FieldInfo field = data.GetType().GetField(
+            "amountsForPlayedCards",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public
+            | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(data.GetType().FullName, "amountsForPlayedCards");
+        return ((System.Collections.ICollection)field.GetValue(data)!).Count;
+    }
 }
