@@ -154,7 +154,7 @@ internal static class FlashRouteMaterializer
                 flashPlanCommitment = ToFlashPlanCommitment(pendingPlan);
                 initialPlanPayoff = CountPlanPayoffs(prefix, pendingPlan);
             }
-            rules = FlashRulesCompiler.Compile(searchRootSnapshot.Simulator, player);
+            rules = FlashRulesCompiler.Compile(searchRootSnapshot.Simulator, player, rootSnapshot.Simulator);
             battle = FlashStateImporter.Import(searchRootSnapshot, player, rules,
                 potionUsage.PotionUseCount, requirePlayPhase: true);
             scorer = FlashScoreBridge.Create(root, policy, profile, rootSnapshot, searchRootSnapshot,

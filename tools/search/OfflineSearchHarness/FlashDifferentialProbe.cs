@@ -24,7 +24,8 @@ internal static class FlashDifferentialProbe
 {
     private const int OneStepChoiceCap = 64;
 
-    public static Dictionary<string, object?> Run(CombatState combat, HarnessOptions options, string outputDirectory)
+    public static Dictionary<string, object?> Run(CombatState combat, HarnessOptions options, string outputDirectory,
+        IReadOnlyList<string>? prefixActions = null)
     {
         int walks = ReadInt("OFFLINE_HARNESS_FLASH_DIFF_WALKS", 16);
         int steps = ReadInt("OFFLINE_HARNESS_FLASH_DIFF_STEPS", 60);
@@ -48,16 +49,40 @@ internal static class FlashDifferentialProbe
                 BeamWeightPerturbation = options.BeamWeightPerturbation,
             },
         };
-        CombatBeamSolver solver = new(root, names, damage, policy, searchProfile: policy.Profile);
+        List<PlanAction> prefixPlan = [];
+        if (prefixActions is { Count: > 0 })
+        {
+            foreach (string action in prefixActions)
+            {
+                if (action != "EndTurn")
+                    throw new InvalidOperationException($"FlashPrefixActions 只支持 EndTurn，收到 {action}。");
+                prefixPlan.Add(new PlanAction(PlanActionKind.EndTurn, Turn: 1));
+            }
+        }
+        CombatBeamSolver prefixSolver = new(root, names, damage, policy, searchProfile: policy.Profile,
+            fixedPrefixActions: prefixPlan);
+        CombatBeamSolver solver = prefixPlan.Count == 0
+            ? prefixSolver
+            : new CombatBeamSolver(root, names, damage, policy, searchProfile: policy.Profile);
         Player player = root.PlayerIdentity;
-        SimulationSnapshot rootSnapshot = solver.ReplayForFlash([], null);
+        // The request root stays the baseline for values the existing engine freezes on it
+        // (SimulatedCombatState._rootPowerAmounts), exactly as FlashRouteMaterializer compiles rules.
+        SimulationSnapshot baselineSnapshot = solver.ReplayForFlash([], null);
+        SimulationSnapshot rootSnapshot = baselineSnapshot;
+        if (prefixPlan.Count > 0)
+        {
+            SimulationSnapshot prefixRoot = prefixSolver.ReplayForFlash([], null);
+            rootSnapshot = prefixSolver.ReplayFixedPrefixForFlash(prefixRoot)
+                ?? throw new InvalidOperationException("FlashPrefixActions 无法在旧引擎回放。");
+            summary["prefixActions"] = prefixActions;
+        }
         solver.SetFlashRankBaseline(rootSnapshot);
 
         FlashRules rules;
         FlashBattle flashRoot;
         try
         {
-            rules = FlashRulesCompiler.Compile(rootSnapshot.Simulator, player);
+            rules = FlashRulesCompiler.Compile(rootSnapshot.Simulator, player, baselineSnapshot.Simulator);
             flashRoot = FlashStateImporter.Import(rootSnapshot, player, rules, rootSnapshot.PotionUseCount);
         }
         catch (FlashImportException ex)
@@ -76,7 +101,7 @@ internal static class FlashDifferentialProbe
         FlashScorer? scorer = null;
         try
         {
-            scorer = FlashScoreBridge.Create(root, policy, policy.Profile, rootSnapshot, rootSnapshot,
+            scorer = FlashScoreBridge.Create(root, policy, policy.Profile, baselineSnapshot, rootSnapshot,
                 player, rules, flashRoot);
         }
         catch (FlashImportException ex)
@@ -85,11 +110,11 @@ internal static class FlashDifferentialProbe
         }
         FlashBoundFeatures? bound = null;
         if (scorer != null)
-            bound = FlashBoundBridge.Create(root, policy, rootSnapshot, player, rules, flashRoot,
+            bound = FlashBoundBridge.Create(root, policy, baselineSnapshot, player, rules, flashRoot,
                 solver.CapturePruningRequestForFlash());
         bool checkRank = policy.Profile.ContinuousThreatRanking || policy.Profile.ContextualRanking != null;
         ScoreCheck scores = new(scorer, bound, solver, report, checkRank);
-        scores.Check(rootSnapshot, flashRoot, 0, "ROOT");
+        scores.Check(rootSnapshot, flashRoot, prefixPlan.Count, "ROOT");
 
         FlashAction[] actions = new FlashAction[FlashKernel.MaxLegalActions];
         int oneStepChecked = 0, oneStepFailed = 0, choiceActions = 0, choiceCapped = 0, choiceDeadEnds = 0, unsupported = 0;

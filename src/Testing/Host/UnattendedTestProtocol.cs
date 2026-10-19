@@ -83,6 +83,14 @@ internal sealed class UnattendedTestRequest
     public UnattendedMonsterMoveCheck[] MonsterMoveChecks { get; init; } = [];
     public string[] AdditionalMonsterIds { get; init; } = [];
     public string[] InitialEnemyMoveIds { get; init; } = [];
+
+    /// <summary>
+    /// Test-only fixed prefix for the offline Flash differential probe. Only "EndTurn" is accepted;
+    /// the probe replays it through both engines and diffs from the resulting search root, so a
+    /// value frozen on the request root (not the prefix end) is still exercised.
+    /// </summary>
+    public string[] FlashPrefixActions { get; init; } = [];
+
     public double TimeoutSeconds { get; init; } = 120;
     public int? ExpectedFinishedTurn { get; init; }
     public int? ExpectedFinishedTurnAtMost { get; init; }

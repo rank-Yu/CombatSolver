@@ -37,9 +37,16 @@ internal static class FlashRulesCompiler
         ModelDb.All.OfType<PowerModel>().GroupBy(power => power.Id.Entry, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal));
 
-    public static FlashRules Compile(CombatPredictionSimulator simulator, Player player)
+    public static FlashRules Compile(CombatPredictionSimulator simulator, Player player,
+        CombatPredictionSimulator? baselineSimulator = null)
     {
         SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
+        // _rootPowerAmounts is captured on the request root and copied into every fork, so a fixed
+        // prefix must not move the baseline used by AdjustMonsterMoveDamage. The caller passes the
+        // request-root simulator when the search starts after a prefix; null means "this is the root".
+        SimulatedCombatState? baselineCombat = baselineSimulator is null
+            ? null
+            : (SimulatedCombatState)baselineSimulator.State.CombatState;
         ushort lampId = ushort.MaxValue;
         foreach (RelicModel relic in combat.RelicsOf(player))
         {
@@ -130,7 +137,7 @@ internal static class FlashRulesCompiler
         CombatPredictionSimulator rootFork = simulator.Fork();
         SimulatedCombatState rootCombat = (SimulatedCombatState)rootFork.State.CombatState;
         for (int index = 0; index < known.Count; index++)
-            builder.SetMonster(index, CompileMonster(rootCombat, rootCombat.KnownEnemies[index]));
+            builder.SetMonster(index, CompileMonster(rootCombat, rootCombat.KnownEnemies[index], baselineCombat));
         foreach (ushort monsterId in spawnClosure)
             CompileSpawnedMonster(builder, simulator, monsterId);
         return builder.Build();
@@ -631,7 +638,8 @@ internal static class FlashRulesCompiler
         builder.SetPowerVars(id, vars);
     }
 
-    private static FlashMonsterRules CompileMonster(SimulatedCombatState combat, Creature creature)
+    private static FlashMonsterRules CompileMonster(SimulatedCombatState combat, Creature creature,
+        SimulatedCombatState? baselineCombat = null)
     {
         MonsterModel monster = creature.Monster
             ?? throw new FlashImportException(FlashRejection.UnsupportedMonster, "敌人没有怪物模型");
@@ -738,16 +746,26 @@ internal static class FlashRulesCompiler
                 : throw new FlashImportException(FlashRejection.UnsupportedMonster, $"{monster.Id.Entry} 没有静态值 {name}");
         }
         int[] rootPowerAmounts = new int[def.RootPowerAmountNames.Count];
-        for (int position = 0; position < rootPowerAmounts.Length; position++)
+        if (def.RootPowerAmountNames.Count > 0)
         {
-            string nativePower = def.RootPowerAmountNames[position];
-            rootPowerAmounts[position] = 0;
-            foreach (PowerModel power in combat.EffectivePowers())
+            // No baseline means this simulator is itself the request root (differential probe).
+            SimulatedCombatState baselineSource = baselineCombat ?? combat;
+            Creature? baselineCreature = baselineCombat is null
+                ? creature
+                : baselineCombat.GetCreature(creature.CombatId);
+            for (int position = 0; position < rootPowerAmounts.Length; position++)
             {
-                if (ReferenceEquals(power.Owner, creature) && power.Id.Entry == nativePower)
+                string nativePower = def.RootPowerAmountNames[position];
+                rootPowerAmounts[position] = 0;
+                if (baselineCreature == null)
+                    continue;
+                foreach (PowerModel power in baselineSource.EffectivePowers())
                 {
-                    rootPowerAmounts[position] = power.Amount;
-                    break;
+                    if (ReferenceEquals(power.Owner, baselineCreature) && power.Id.Entry == nativePower)
+                    {
+                        rootPowerAmounts[position] = power.Amount;
+                        break;
+                    }
                 }
             }
         }
