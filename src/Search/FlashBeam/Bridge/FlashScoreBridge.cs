@@ -68,7 +68,10 @@ internal static class FlashScoreBridge
             DoomPowerId = PowerId<DoomPower>(),
             SleightOfFleshPowerId = PowerId<SleightOfFleshPower>(),
             RetainHandPowerId = PowerId<RetainHandPower>(),
+            EnergyNextTurnPowerId = PowerId<EnergyNextTurnPower>(),
+            DrawCardsNextTurnPowerId = PowerId<DrawCardsNextTurnPower>(),
             FreeAttackPowerId = PowerId<FreeAttackPower>(),
+            FreeSkillPowerId = PowerId<FreeSkillPower>(),
             IllusionPowerId = PowerId<IllusionPower>(),
             ReattachPowerId = PowerId<ReattachPower>(),
             AdaptablePowerId = PowerId<AdaptablePower>(),
@@ -268,6 +271,9 @@ internal static class FlashScoreBridge
             MindBlast => FlashCalculatedKind.DrawPileCount,
             Rend => FlashCalculatedKind.TargetDebuffPowerCount,
             GoldAxe => FlashCalculatedKind.FinishedCardPlays,
+            MementoMori => FlashCalculatedKind.CardsDiscardedThisTurn,
+            PreciseCut => FlashCalculatedKind.NegativeHandCount,
+            Murder => FlashCalculatedKind.CardsDrawn,
             _ => FlashCalculatedKind.Unsupported,
         };
     }

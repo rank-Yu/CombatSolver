@@ -173,6 +173,10 @@ internal static class CalculatedVarSpecRegistry
         => ((SimulatedCombatState)simulator.State.CombatState).GetFinishedPlaysBeforePrediction()
            + simulator.History.OfType<CombatPredictionCardPlayFinishedEntry>().Count();
 
+    /// <summary>Read-only Flash import accessor for the Murder multiplier (prediction history included).</summary>
+    internal static int CountDrawnCardsForFlash(CombatPredictionSimulator simulator, Player player)
+        => CountDrawnCards(simulator, player);
+
     private static int CountDrawnCards(CombatPredictionSimulator simulator, Player player)
         => ((SimulatedCombatState)simulator.State.CombatState).GetCardsDrawnBeforePrediction(player)
            + simulator.History.OfType<CombatPredictionCardDrawnEntry>()

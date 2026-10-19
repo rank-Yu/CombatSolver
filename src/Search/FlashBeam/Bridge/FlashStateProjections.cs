@@ -181,6 +181,23 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
                 }
                 break;
             }
+            // AfterimagePower/StranglePower pair one play with the power amount at BeforeCardPlayed
+            // (the kernel's transient play stack; the existing engine keeps the same map in
+            // CardPlayPairPredictionState). The pair is removed by AfterCardPlayed, so a stable
+            // boundary has an empty map.
+            case AfterimagePower:
+            case StranglePower:
+            {
+                foreach ((AbstractModel model, object state) in store.EntriesForFlash())
+                {
+                    if (!ReferenceEquals(model, power) || state is not CardPlayPairPredictionState pair)
+                        continue;
+                    if (pair.Amounts.Count != 0)
+                        throw new FlashImportException(FlashRejection.UnrepresentableState, "能力结算进行中");
+                    _claimed.Add(state);
+                }
+                break;
+            }
             // SurroundedPower.Aux0 = Facing (BeforeCardPlayedMirrors/DeathPowerSupport update
             // SurroundedPredictionState; without an entry its constructor reads the live field).
             case SurroundedPower surrounded:
@@ -524,6 +541,17 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             {
                 continue;
             }
+            // AfterimagePower/StranglePower pairs are keyed by the in-flight CardPlay and removed by
+            // AfterCardPlayed. A retired power (amount 0, removed by its own side-turn-end effect or by
+            // a play) can only leave an already-drained map behind: no EffectivePowers entry reaches
+            // its Before/AfterCardPlayed readers again, and a re-acquired power is a fresh native
+            // instance with its own state. A non-empty map at a stable boundary is rejected.
+            if (model is AfterimagePower or StranglePower { Amount: 0 }
+                && state is CardPlayPairPredictionState retiredPair
+                && retiredPair.Amounts.Count == 0)
+            {
+                continue;
+            }
             // Retired power states left behind by HandlePlayerDeath -> RemovePowersAfterDeath: the
             // power amount reaches zero but the store entry keeps its accumulated value. Every
             // reader is a hook of that power and only visits positive EffectivePowers entries; the
@@ -538,7 +566,10 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             {
                 continue;
             }
-            throw new FlashImportException(FlashRejection.UnrepresentableState, $"StateStore: {state.GetType().Name}@{model.Id.Entry}");
+            string detail = state is CardPlayPairPredictionState pairState
+                ? $"StateStore: {state.GetType().Name}@{model.Id.Entry} amount={((PowerModel)model).Amount} pairs={pairState.Amounts.Count} cards={string.Join(',', pairState.Amounts.Keys.Select(key => key.Card.Id.Entry))}"
+                : $"StateStore: {state.GetType().Name}@{model.Id.Entry}";
+            throw new FlashImportException(FlashRejection.UnrepresentableState, detail);
         }
         foreach (RelicModel relic in combat.StatefulRelicKeysForFlash())
         {

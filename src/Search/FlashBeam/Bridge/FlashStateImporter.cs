@@ -187,6 +187,7 @@ internal static class FlashStateImporter
                 finishedPlays++;
         }
         battle.SetCounter(FlashCounter.FinishedCardPlays, finishedPlays);
+        battle.SetCounter(FlashCounter.CardsDrawn, CalculatedVarSpecRegistry.CountDrawnCardsForFlash(simulator, player));
     }
 
     private static void ImportRng(ref FlashBattle battle, CombatPredictionRngSet rng)
@@ -506,10 +507,26 @@ internal static class FlashStateImporter
         }
         result.EnergyModifierCount = modifiers.Count;
         var starCosts = card._temporaryStarCosts;
-        if (starCosts.Count > 1)
-            throw new FlashImportException(FlashRejection.Capacity, $"{card.Id.Entry} 临时星能费用 {starCosts.Count}");
-        if (starCosts.Count == 1)
-            result.SetTemporaryStarCost(starCosts[0].Cost, starCosts[0].ClearsWhenTurnEnds, starCosts[0].ClearsWhenCardIsPlayed);
+        if (starCosts.Count > 0)
+        {
+            // Flash keeps one temporary star cost. CurrentStarCost reads the last entry, and cleanup
+            // removes whole expiration classes, so several identical entries behave exactly like the
+            // last one (BulletTime can stack duplicates). Different costs or expirations are not
+            // representable: removing one would expose an older value.
+            TemporaryCardCost last = starCosts[^1];
+            for (int index = 0; index < starCosts.Count - 1; index++)
+            {
+                TemporaryCardCost entry = starCosts[index];
+                if (entry.Cost != last.Cost
+                    || entry.ClearsWhenTurnEnds != last.ClearsWhenTurnEnds
+                    || entry.ClearsWhenCardIsPlayed != last.ClearsWhenCardIsPlayed)
+                {
+                    throw new FlashImportException(FlashRejection.Capacity,
+                        $"{card.Id.Entry} 临时星能费用条目不一致（{starCosts.Count} 条）");
+                }
+            }
+            result.SetTemporaryStarCost(last.Cost, last.ClearsWhenTurnEnds, last.ClearsWhenCardIsPlayed);
+        }
 
         FlashCardDef def = FlashRegistry.Card(id);
         for (int index = 0; index < def.VarNames.Count; index++)
