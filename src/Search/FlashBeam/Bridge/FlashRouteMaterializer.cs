@@ -122,7 +122,7 @@ internal static class FlashRouteMaterializer
         try
         {
             rules = FlashRulesCompiler.Compile(searchRootSnapshot.Simulator, player);
-            battle = FlashStateImporter.Import(searchRootSnapshot, player, rules);
+            battle = FlashStateImporter.Import(searchRootSnapshot, player, rules, potionUsage.PotionUseCount);
             scorer = FlashScoreBridge.Create(root, policy, profile, rootSnapshot, searchRootSnapshot,
                 player, rules, battle);
             bound = FlashBoundBridge.Create(root, policy, rootSnapshot, player, rules, battle, pruning,
@@ -227,7 +227,7 @@ internal static class FlashRouteMaterializer
             FlashBattle projected;
             try
             {
-                projected = FlashStateImporter.Import(snapshot, player, rules);
+                projected = FlashStateImporter.Import(snapshot, player, rules, potionUsage.PotionUseCount);
             }
             catch (FlashImportException ex)
             {

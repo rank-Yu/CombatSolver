@@ -159,12 +159,14 @@ internal sealed partial class CombatBeamSolver
     }
 
     /// <summary>
-    /// Builds the <see cref="PlanAction.Choice"/> of a card-generation potion from a probe replay.
-    /// <c>PotionExecutionSupport.Prepare</c> records the generated options in
-    /// <c>History.CardGenerationOptions</c>; <see cref="PotionChoiceSupport.GetSpec"/> then builds the
-    /// same 0..1 GenerateToHand spec the existing search branches on, and
-    /// <see cref="PotionChoiceSupport.Apply"/> resolves it during the real replay. Returns false for
-    /// potions that do not generate a card choice, leaving <paramref name="action"/> untouched.
+    /// Builds the <see cref="PlanAction.Choice"/> of a potion whose existing-engine effect asks a card
+    /// selection (generation potions, DropletOfPrecognition, GamblersBrew, …) from a probe replay.
+    /// <c>PotionExecutionSupport.Prepare</c> records generation options in
+    /// <c>History.CardGenerationOptions</c> for the card-generation potions;
+    /// <see cref="PotionChoiceSupport.GetSpec"/> then builds the same spec the existing search branches
+    /// on (GenerateToHand for generation potions, MoveToHand/Draw for Droplet, …), and
+    /// <see cref="PotionChoiceSupport.Apply"/> resolves it during the real replay. Returns false only
+    /// when the potion does not ask for a choice, leaving <paramref name="action"/> untouched.
     /// </summary>
     private bool TryBuildPotionChoice(PlanAction action, SimulationSnapshot parent, ulong bits,
         out CardChoiceSpec spec, out PlanAction resolved)
@@ -176,14 +178,14 @@ internal sealed partial class CombatBeamSolver
             return false;
         SimulatedCombatState combat = (SimulatedCombatState)parent.Simulator.State.CombatState;
         MegaCrit.Sts2.Core.Models.PotionModel? potion = combat.GetPotionAtSlot(_player, slot);
-        if (potion == null || !PotionChoiceSupport.GeneratesCardChoice(potion))
+        if (potion == null || !PotionChoiceSupport.RequiresChoice(potion))
             return false;
         SimulationSnapshot probe = ReplayForFlash([action], parent);
         try
         {
             if (probe.BoundaryReason != SearchBoundaryReason.None)
                 throw new FlashChoiceMismatchException(
-                    $"药水 {action.PotionId} 的生成探测停在了 {probe.BoundaryReason}。");
+                    $"药水 {action.PotionId} 的选择探测停在了 {probe.BoundaryReason}。");
             spec = PotionChoiceSupport.GetSpec((CombatPredictionSimulator)probe.Simulator, potion);
         }
         finally

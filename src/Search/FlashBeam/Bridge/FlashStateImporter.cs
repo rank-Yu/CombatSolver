@@ -18,12 +18,13 @@ namespace CombatSolver.FlashBeam;
 /// </summary>
 internal static class FlashStateImporter
 {
-    public static FlashBattle Import(SimulationSnapshot snapshot, Player player, FlashRules rules)
+    public static FlashBattle Import(SimulationSnapshot snapshot, Player player, FlashRules rules,
+        int skippedPotionUses)
         => Import(snapshot.Simulator, player, rules, snapshot.ShufflesCrossed, snapshot.ProcessedEnemyDeaths,
-            snapshot.HasRisk);
+            snapshot.HasRisk, skippedPotionUses);
 
     public static FlashBattle Import(CombatPredictionSimulator simulator, Player player, FlashRules rules,
-        int shufflesCrossed, IReadOnlySet<uint> processedDeaths, bool hasRisk)
+        int shufflesCrossed, IReadOnlySet<uint> processedDeaths, bool hasRisk, int skippedPotionUses)
     {
         // The existing engine's per-turn counter getters fill their caches from root history on first
         // read. Reading a private fork keeps the caller's state, which other workers may fork, untouched.
@@ -89,7 +90,7 @@ internal static class FlashStateImporter
         ImportCards(ref battle, combat, playerState, rules);
         RejectRunListenerDeckCards(player);
         ImportRelics(ref battle, combat, player, projections);
-        ImportPotions(ref battle, combat, player, rules);
+        ImportPotions(ref battle, combat, player, rules, skippedPotionUses);
         ImportOrbs(ref battle, playerState);
         if (rules.HasDecimalCardVars && !FlashDecimalVars.TryCanonicalize(ref battle, out _))
             throw new FlashImportException(FlashRejection.Capacity, "卡牌小数变量表");
@@ -703,7 +704,7 @@ internal static class FlashStateImporter
     }
 
     private static void ImportPotions(ref FlashBattle battle, SimulatedCombatState combat, Player player,
-        FlashRules rules)
+        FlashRules rules, int skippedPotionUses)
     {
         int slots = combat.PotionSlotCountForFlash(player);
         if (slots > FlashLimits.PotionSlots)
@@ -722,11 +723,18 @@ internal static class FlashStateImporter
                 freeMask |= 1 << slot;
         }
         battle.SetCounter(FlashCounter.EntropicFreePotionMask, freeMask);
-        // PotionUses records every consumed potion. A use is generated when its slot does not hold the
-        // root potion (the same rule the kernel uses); freeFromEntropic uses already carry cost 0.
+        // PotionUses records every consumed potion. After skipping the uses a fixed prefix already
+        // spent, a use is generated when its slot does not hold the search root's potion (the same
+        // rule the kernel uses); freeFromEntropic uses already carry cost 0.
         int generatedUses = 0, generatedExplicitCost = 0, generatedAutomaticCost = 0;
+        int useIndex = 0;
         foreach (PredictedPotionUse use in combat.PotionUses)
         {
+            // A fixed prefix uses potions before the Flash search root. Those uses are already
+            // frozen in Initial*Potion* by the scorer; only uses after the root can be "generated"
+            // relative to the search root's slots.
+            if (useIndex++ < skippedPotionUses)
+                continue;
             if (!FlashRegistry.TryPotion(use.PotionId, out ushort usedId))
                 throw new FlashImportException(FlashRejection.UnsupportedPotion, use.PotionId);
             if (rules.RootPotion(use.Slot) == usedId + 1)

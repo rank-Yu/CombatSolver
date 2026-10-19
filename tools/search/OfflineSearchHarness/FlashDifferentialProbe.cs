@@ -46,7 +46,7 @@ internal static class FlashDifferentialProbe
         try
         {
             rules = FlashRulesCompiler.Compile(rootSnapshot.Simulator, player);
-            flashRoot = FlashStateImporter.Import(rootSnapshot, player, rules);
+            flashRoot = FlashStateImporter.Import(rootSnapshot, player, rules, rootSnapshot.PotionUseCount);
         }
         catch (FlashImportException ex)
         {
@@ -105,7 +105,7 @@ internal static class FlashDifferentialProbe
                 }
                 if (completion.Requests.Count > 0)
                     choiceActions++;
-                Outcome outcome = Compare(solver, player, rules, rootSnapshot, completion);
+                Outcome outcome = Compare(solver, player, rules, rootSnapshot, rootSnapshot.PotionUseCount, completion);
                 oneStepChecked++;
                 if (outcome.Diff.Count > 0)
                 {
@@ -158,7 +158,7 @@ internal static class FlashDifferentialProbe
                 }
                 if (completion.Requests.Count > 0)
                     choiceActions++;
-                Outcome outcome = Compare(solver, player, rules, snapshot, completion);
+                Outcome outcome = Compare(solver, player, rules, snapshot, rootSnapshot.PotionUseCount, completion);
                 walkTransitions++;
                 if (outcome.Diff.Count > 0)
                 {
@@ -412,7 +412,7 @@ internal static class FlashDifferentialProbe
     }
 
     private static Outcome Compare(CombatBeamSolver solver, Player player, FlashRules rules,
-        SimulationSnapshot parent, Completion completion)
+        SimulationSnapshot parent, int skippedPotionUses, Completion completion)
     {
         List<string> requestDiff = [];
         SimulationSnapshot oldChild;
@@ -441,7 +441,7 @@ internal static class FlashDifferentialProbe
         FlashBattle projected;
         try
         {
-            projected = FlashStateImporter.Import(oldChild, player, rules);
+            projected = FlashStateImporter.Import(oldChild, player, rules, skippedPotionUses);
         }
         catch (FlashImportException ex)
         {
