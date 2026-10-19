@@ -7,30 +7,62 @@ internal sealed partial class CombatBeamSolver
     // Component certification excludes new potion/relic acquisition and HP-growth
     // sources; branch-unknown sources retain the full counterfactual search.
     private readonly int? _smartPotionEligibilityHpCeiling =
-        (directSearchPurpose == DirectSearchPurpose.SmartPotionGradient
-            || CanUseComponentSmartPotionEligibility(root, policy)
-                && attributionPurpose == ContinuationPurpose.SmartOpeningPotionPosterior)
-        && policy.PotionPolicy == SolverPotionPolicy.Smart
-        && !policy.PotionStrategy.HasForcedDirectives
-        && policy.TheftPolicy != SolverTheftPolicy.PreserveResources
-        && root.SearchablePotions.Count > 0
-        && (CanUseComponentSmartPotionEligibility(root, policy)
+        ComputeSmartPotionEligibilityHpCeiling(
+            root,
+            policy,
+            directSearchPurpose,
+            attributionPurpose,
+            potionFreePolicyBaseline,
+            minimumPotionUses,
+            maximumPotionUses);
+
+    /// <summary>
+    /// The exact optional-potion layer's HP ceiling, shared by the existing solver and the Flash
+    /// bridge so both prune with the same rule. Returns null when the layer cannot affect the Smart
+    /// selection or when the root is outside the existing certification (no pruning).
+    /// </summary>
+    internal static int? ComputeSmartPotionEligibilityHpCeiling(
+        CombatRootSnapshot root,
+        SearchPolicySnapshot policy,
+        DirectSearchPurpose? directSearchPurpose,
+        ContinuationPurpose? attributionPurpose,
+        PotionFreePolicyBaseline? potionFreePolicyBaseline,
+        int? minimumPotionUses,
+        int? maximumPotionUses)
+    {
+        if (policy.PotionPolicy != SolverPotionPolicy.Smart
+            || policy.PotionStrategy.HasForcedDirectives
+            || policy.TheftPolicy == SolverTheftPolicy.PreserveResources
+            || root.SearchablePotions.Count == 0
+            || minimumPotionUses is not > 0
+            || maximumPotionUses != minimumPotionUses)
+        {
+            return null;
+        }
+        bool componentEligible = CanUseComponentSmartPotionEligibility(root, policy);
+        if (directSearchPurpose != DirectSearchPurpose.SmartPotionGradient
+            && !(componentEligible
+                && attributionPurpose == ContinuationPurpose.SmartOpeningPotionPosterior))
+        {
+            return null;
+        }
+        bool eligible = componentEligible
             || (root.PlayerIdentity.Character.GetType() == typeof(MegaCrit.Sts2.Core.Models.Characters.Defect)
                 && root.Enemies.Count > 0
                 && root.Enemies.All(enemy => enemy.Monster?.GetType() == typeof(MegaCrit.Sts2.Core.Models.Monsters.InfestedPrism))
                 && CanUseStrictHpRelicBound(root.CanCertifyRemainingHealing
                     && root.InitialRemainingHealingUpperBound == 0,
                     policy.EffectiveHasGrowthTargets, policy.RelicTargets)
-                && root.SearchablePotions.Count > 0
                 && root.SearchablePotions.All(potion => potion.PotionId
-                    == MegaCrit.Sts2.Core.Models.ModelDb.Potion<MegaCrit.Sts2.Core.Models.Potions.FoulPotion>().Id.Entry)))
-        && minimumPotionUses is > 0 && maximumPotionUses == minimumPotionUses
-            ? SmartPotionEligibilityHpCeiling(potionFreePolicyBaseline,
-                minimumPotionUses.Value, root.MinimumSearchablePotionStrategicCost!.Value,
-                root.PotionRewardOutlook.ReplacementHpCredit,
-                ActEndingBossPolicy.ResolveStrategicHpRelief(root.BossHpRelief,
-                    policy.ActTransitionBossHpStrategy, policy.FinalBossHpStrategy))
-            : null;
+                    == MegaCrit.Sts2.Core.Models.ModelDb.Potion<MegaCrit.Sts2.Core.Models.Potions.FoulPotion>().Id.Entry));
+        if (!eligible)
+            return null;
+        return SmartPotionEligibilityHpCeiling(potionFreePolicyBaseline,
+            minimumPotionUses.Value, root.MinimumSearchablePotionStrategicCost!.Value,
+            root.PotionRewardOutlook.ReplacementHpCredit,
+            ActEndingBossPolicy.ResolveStrategicHpRelief(root.BossHpRelief,
+                policy.ActTransitionBossHpStrategy, policy.FinalBossHpStrategy));
+    }
 
     internal static bool CanUseComponentSmartPotionEligibility(CombatRootSnapshot root, SearchPolicySnapshot policy)
         => root.UsesComponentHealingCertificate

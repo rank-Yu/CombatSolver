@@ -64,7 +64,8 @@ internal static class FlashDifferentialProbe
         FlashScorer? scorer = null;
         try
         {
-            scorer = FlashScoreBridge.Create(root, policy, policy.Profile, rootSnapshot, player, rules, flashRoot);
+            scorer = FlashScoreBridge.Create(root, policy, policy.Profile, rootSnapshot, rootSnapshot,
+                player, rules, flashRoot);
         }
         catch (FlashImportException ex)
         {
@@ -326,8 +327,11 @@ internal static class FlashDifferentialProbe
                 PlayerMaxHp: old.PlayerMaxHp,
                 DeathSaveHpRestored: old.DeathSaveHpRestored,
                 ExplicitPotionStrategicCost: old.ExplicitPotionStrategicCost,
-                StrategicHpLowerBound: solver.PrimaryIncumbentHpLowerBound(old));
-            FlashBoundValues flashValues = bound.Evaluate(flash, features.ExplicitPotionStrategicCost);
+                StrategicHpLowerBound: solver.PrimaryIncumbentHpLowerBound(old),
+                SmartPotionRemainingHealingPotential: solver.PrimarySmartPotionRemainingHealingPotential(old),
+                SmartPotionHpLowerBound: solver.PrimarySmartPotionHpLowerBound(old));
+            FlashBoundValues flashValues = bound.Evaluate(flash, features.ExplicitPotionStrategicCost,
+                includeSmartPotionLowerBound: true);
             List<string> diff = FlashBoundFeatures.Diff(oldValues, flashValues);
             if (diff.Count == 0)
                 return;

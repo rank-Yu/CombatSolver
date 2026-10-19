@@ -178,6 +178,27 @@ internal sealed partial class CombatBeamSolver
     }
 
     /// <summary>
+    /// The existing potion counters at a Flash search root. A fixed prefix may already have spent potions;
+    /// the Flash scorer and bound add these frozen totals so their per-state counters equal the existing
+    /// snapshot's cumulative values instead of restarting at the prefix end.
+    /// </summary>
+    internal static FlashPotionUsageForBridge CapturePotionUsageForFlash(SimulationSnapshot snapshot)
+    {
+        SimulatedCombatState combat = (SimulatedCombatState)snapshot.Simulator.State.CombatState;
+        int automatic = 0;
+        foreach (PredictedPotionUse use in combat.PotionUses)
+        {
+            if (use.Automatic)
+                automatic = checked(automatic + 1);
+        }
+        return new FlashPotionUsageForBridge(
+            snapshot.PotionUseCount,
+            checked(snapshot.PotionUseCount - automatic),
+            snapshot.PotionStrategicCost,
+            snapshot.ExplicitPotionStrategicCost);
+    }
+
+    /// <summary>
     /// The existing primary member's incumbent settings, frozen for the Flash bound. The Flash bridge uses the
     /// same values so its lower bound and potion-cost gate are evaluated with the existing search's semantics.
     /// </summary>
@@ -206,7 +227,26 @@ internal sealed partial class CombatBeamSolver
     internal int PrimaryIncumbentHpLowerBound(SimulationSnapshot snapshot)
         => StrategicHpLowerBound(snapshot, _strategicBossHpRelief,
             PrimaryIncumbentFutureHealPotential(snapshot));
+
+    /// <summary>
+    /// The healing input <c>ApplySmartPotionEligibilityBound</c> reads. It differs from the incumbent
+    /// bound when relic targets disable <c>PruneEqualHp</c>: the ceiling always uses
+    /// <c>RemainingHealingPotential</c>, not its minimum with <c>FutureHealPotential</c>.
+    /// </summary>
+    internal int PrimarySmartPotionRemainingHealingPotential(SimulationSnapshot snapshot)
+        => RemainingHealingPotential(snapshot);
+
+    internal int PrimarySmartPotionHpLowerBound(SimulationSnapshot snapshot)
+        => StrategicHpLowerBound(snapshot, _strategicBossHpRelief,
+            RemainingHealingPotential(snapshot));
 }
+
+/// <summary>The cumulative potion counters of an existing-engine snapshot, frozen for a Flash search root.</summary>
+internal readonly record struct FlashPotionUsageForBridge(
+    int PotionUseCount,
+    int ExplicitPotionUseCount,
+    int PotionStrategicCost,
+    int ExplicitPotionStrategicCost);
 
 /// <summary>The existing primary member's incumbent policy, frozen for the Flash bound.</summary>
 internal readonly record struct FlashPruningRequest(

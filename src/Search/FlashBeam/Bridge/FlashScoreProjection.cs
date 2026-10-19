@@ -55,5 +55,6 @@ internal static class FlashScoreProjection
         PotionStrategicCost = snapshot.PotionStrategicCost,
         AutomaticPotionUseCount = snapshot.AutomaticPotionUseCount,
         ExplicitPotionStrategicCost = snapshot.ExplicitPotionStrategicCost,
+        ExplicitPotionUseCount = snapshot.PotionUseCount - snapshot.AutomaticPotionUseCount,
     };
 }

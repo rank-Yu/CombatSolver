@@ -26,7 +26,9 @@ internal static class FlashBoundBridge
         Player player,
         FlashRules rules,
         in FlashBattle flashRoot,
-        FlashPruningRequest pruning)
+        FlashPruningRequest pruning,
+        int initialExplicitPotionUses = 0,
+        int initialAutomaticPotionUses = 0)
     {
         string? disabled = DisabledReason(root, policy, rootSnapshot, flashRoot);
         if (disabled != null)
@@ -197,6 +199,8 @@ internal static class FlashBoundBridge
             PruneEqualHp = policy.RelicTargets.Count == 0,
             ForceAllPotionsDisabled = pruning.ForceAllPotionsDisabled,
             MaximumPotionUses = pruning.MaximumPotionUses,
+            InitialExplicitPotionUses = initialExplicitPotionUses,
+            InitialAutomaticPotionUses = initialAutomaticPotionUses,
             ComponentUnsafeCard = componentUnsafeCard,
             ComponentUnsafePower = componentUnsafePower,
             ComponentUnsafeRelic = componentUnsafeRelic,
@@ -288,6 +292,8 @@ internal static class FlashBoundBridge
         PruneEqualHp = false,
         ForceAllPotionsDisabled = false,
         MaximumPotionUses = null,
+        InitialExplicitPotionUses = 0,
+        InitialAutomaticPotionUses = 0,
         ComponentUnsafeCard = [],
         ComponentUnsafePower = [],
         ComponentUnsafeRelic = [],

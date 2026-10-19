@@ -1073,7 +1073,7 @@ internal static partial class CombatSearchCoordinator
             SolverResult candidate;
             try
             {
-                candidate = new CombatBeamSolver(
+                candidate = BeamSolveDispatch.Solve(new BeamSolveRequest(
                     root,
                     displayNames,
                     battleDamage,
@@ -1082,11 +1082,13 @@ internal static partial class CombatSearchCoordinator
                     progressCallback,
                     profile,
                     SolverPotionPolicy.RequireAtLeastOne,
-                    baseline,
-                    maximumPotionUses: potionCount,
-                    minimumPotionUses: potionCount,
-                    primaryIncumbent: primaryIncumbent,
-                    directSearchPurpose: DirectSearchPurpose.SmartPotionGradient).Solve();
+                    primaryIncumbent,
+                    DirectSearchPurpose.SmartPotionGradient)
+                {
+                    PotionFreePolicyBaseline = baseline,
+                    MaximumPotionUses = potionCount,
+                    MinimumPotionUses = potionCount,
+                });
                 observedLayerResult = candidate;
             }
             catch (PotionPolicyUnsatisfiedException)

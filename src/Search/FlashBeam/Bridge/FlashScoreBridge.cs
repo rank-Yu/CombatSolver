@@ -25,6 +25,7 @@ internal static class FlashScoreBridge
         SearchPolicySnapshot policy,
         SolverSearchProfile profile,
         SimulationSnapshot rootSnapshot,
+        SimulationSnapshot searchRootSnapshot,
         Player player,
         FlashRules rules,
         in FlashBattle flashRoot)
@@ -40,6 +41,8 @@ internal static class FlashScoreBridge
         ushort[] rootPotions = new ushort[FlashLimits.PotionSlots];
         for (int slot = 0; slot < FlashLimits.PotionSlots && slot < flashRoot.PotionSlotCount; slot++)
             rootPotions[slot] = flashRoot.Potions[slot];
+        FlashPotionUsageForBridge potionUsage =
+            CombatBeamSolver.CapturePotionUsageForFlash(searchRootSnapshot);
 
         FlashScoreRules score = new()
         {
@@ -60,6 +63,9 @@ internal static class FlashScoreBridge
             InitialRetainedAttackValue = rootSnapshot.RetainedAttackValue,
             RootPotions = rootPotions,
             RootPotionSlotCount = flashRoot.PotionSlotCount,
+            InitialPotionUseCount = potionUsage.PotionUseCount,
+            InitialPotionStrategicCost = potionUsage.PotionStrategicCost,
+            InitialExplicitPotionStrategicCost = potionUsage.ExplicitPotionStrategicCost,
             StrengthPowerId = PowerId<StrengthPower>(),
             WeakPowerId = PowerId<WeakPower>(),
             VulnerablePowerId = PowerId<VulnerablePower>(),
@@ -80,6 +86,7 @@ internal static class FlashScoreBridge
             NoDrawPowerId = PowerId<NoDrawPower>(),
             TheGambitPowerId = PowerId<TheGambitPower>(),
             FairyInABottlePotionId = PotionId<FairyInABottle>(),
+            AmbergrisPotionId = PotionId<Ambergris>(),
             LizardTailRelicId = RelicId<LizardTail>(),
         };
         return new FlashScorer(score);
@@ -406,7 +413,7 @@ internal static class FlashScoreBridge
     private static ushort CardId<TCard>() where TCard : CardModel
         => FlashRegistry.TryCard(ModelDb.Card<TCard>().Id.Entry, out ushort id) ? id : ushort.MaxValue;
 
-    private static ushort PotionId<TPotion>() where TPotion : PotionModel
+    internal static ushort PotionId<TPotion>() where TPotion : PotionModel
         => FlashRegistry.TryPotion(ModelDb.Potion<TPotion>().Id.Entry, out ushort id) ? id : ushort.MaxValue;
 
     private static ushort RelicId<TRelic>() where TRelic : RelicModel

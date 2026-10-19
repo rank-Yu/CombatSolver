@@ -20,7 +20,15 @@ internal sealed record FlashSolveOutcome(
     IReadOnlyList<PlanAction> Plan,
     TimeSpan AdmissionTime,
     TimeSpan VerificationTime,
-    TimeSpan MaterializationTime);
+    TimeSpan MaterializationTime)
+{
+    /// <summary>
+    /// Set when the audited Flash search found no route satisfying the request's potion policy, or the
+    /// materialized route failed the post-materialization potion checks. The caller falls back to the
+    /// existing solver without treating this as the existing search's potion-policy verdict.
+    /// </summary>
+    public string? ConstraintFailure { get; init; }
+}
 
 /// <summary>
 /// Runs one Flash solve for a <see cref="CombatBeamSolver"/> request: admission and root import,
@@ -54,7 +62,9 @@ internal static class FlashRouteMaterializer
         int? maximumPotionUses = null,
         int? minimumPotionUses = null,
         int? earliestPotionTurn = null,
-        ContinuationPurpose? continuationPurpose = null)
+        ContinuationPurpose? continuationPurpose = null,
+        PotionFreePolicyBaseline? potionFreePolicyBaseline = null,
+        bool? resetFixedPrefixSchedulingBaseline = null)
     {
         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
         Player player = root.PlayerIdentity;
@@ -93,6 +103,11 @@ internal static class FlashRouteMaterializer
             }
             searchRootSnapshot = prefixEnd;
         }
+        bool auditPotionPolicy = purpose == DirectSearchPurpose.SmartPotionGradient
+            || continuationPurpose == ContinuationPurpose.SmartOpeningPotionPosterior;
+        FlashPotionUsageForBridge potionUsage =
+            CombatBeamSolver.CapturePotionUsageForFlash(searchRootSnapshot);
+        int initialAutomaticPotionUses = potionUsage.PotionUseCount - potionUsage.ExplicitPotionUseCount;
         FlashRules rules;
         FlashBattle battle;
         FlashScorer scorer;
@@ -101,14 +116,30 @@ internal static class FlashRouteMaterializer
         {
             rules = FlashRulesCompiler.Compile(searchRootSnapshot.Simulator, player);
             battle = FlashStateImporter.Import(searchRootSnapshot, player, rules);
-            scorer = FlashScoreBridge.Create(root, policy, profile, rootSnapshot, player, rules, battle);
-            bound = FlashBoundBridge.Create(root, policy, rootSnapshot, player, rules, battle, pruning);
+            scorer = FlashScoreBridge.Create(root, policy, profile, rootSnapshot, searchRootSnapshot,
+                player, rules, battle);
+            bound = FlashBoundBridge.Create(root, policy, rootSnapshot, player, rules, battle, pruning,
+                potionUsage.ExplicitPotionUseCount, initialAutomaticPotionUses);
         }
         catch (FlashImportException ex)
         {
             return new FlashSolveOutcome(null, ex.Reason, ex.Detail, null, [], watch.Elapsed, TimeSpan.Zero, TimeSpan.Zero);
         }
         TimeSpan admission = watch.Elapsed;
+        int? smartCeiling = auditPotionPolicy
+            ? CombatBeamSolver.ComputeSmartPotionEligibilityHpCeiling(
+                root, policy, purpose, continuationPurpose, potionFreePolicyBaseline,
+                minimumPotionUses, maximumPotionUses)
+            : null;
+        if (smartCeiling != null && !bound.Enabled)
+        {
+            return new FlashSolveOutcome(null, FlashRejection.None,
+                $"smart-potion-bound unavailable ({bound.DisabledReason})", null, [],
+                admission, TimeSpan.Zero, TimeSpan.Zero)
+            {
+                ConstraintFailure = $"smart-potion-bound unavailable ({bound.DisabledReason})",
+            };
+        }
 
         // Incumbent and potion turns stay in request-root units: the fixed prefix is already part of
         // the existing solver's request, so it must not shift the comparison base.
@@ -133,8 +164,25 @@ internal static class FlashRouteMaterializer
             EffectivePotionPolicy = pruning.EffectivePotionPolicy,
             MinimumPotionUses = pruning.MinimumPotionUses,
             InitialActionCount = prefixLength,
+            InitialExplicitPotionUses = potionUsage.ExplicitPotionUseCount,
+            InitialAutomaticPotionUses = initialAutomaticPotionUses,
+            InitialExplicitPotionStrategicCost = potionUsage.ExplicitPotionStrategicCost,
+            PotionFreeBaseline = potionFreePolicyBaseline,
+            PotionReplacementHpCredit = root.PotionRewardOutlook.ReplacementHpCredit,
+            SmartPotionEligibilityHpCeiling = smartCeiling,
+            AmbergrisPotionId = FlashPotionBridge.AmbergrisPotionId(),
+            InitialAmbergrisUses = CountAmbergrisUses(prefix),
+            AuditPotionPolicy = auditPotionPolicy,
         };
         FlashBeamResult search = new FlashBeamSolver(rules, options).Solve(battle, cancellationToken);
+        if (!search.PotionPolicySatisfied)
+        {
+            return new FlashSolveOutcome(null, FlashRejection.None,
+                "flash-potion-policy-no-route", search, [], admission, TimeSpan.Zero, TimeSpan.Zero)
+            {
+                ConstraintFailure = "flash-potion-policy-no-route",
+            };
+        }
 
         watch.Restart();
         // The verified route is the fixed prefix plus the Flash route; the existing solver replays the
@@ -181,17 +229,58 @@ internal static class FlashRouteMaterializer
             MaxExpandedNodes = 1,
             SoftTimeBudgetMilliseconds = Math.Max(1, Math.Min(profile.SoftTimeBudgetMilliseconds, 2_000)),
         };
-        SolverResult result = new CombatBeamSolver(root, displayNames, battleDamage, policy, cancellationToken,
-            progressCallback, materializeProfile, potionPolicyOverride: potionPolicyOverride,
-            maximumPotionUses: maximumPotionUses,
-            fixedPrefixActions: plan,
-            minimumPotionUses: minimumPotionUses,
-            // The primary-member materializer did not seed the incumbent; keep that path unchanged.
-            primaryIncumbent: continuationPurpose == null ? null : primaryIncumbent,
-            earliestPotionTurn: earliestPotionTurn,
-            attributionPurpose: continuationPurpose,
-            directSearchPurpose: purpose).Solve();
+        SolverResult result;
+        try
+        {
+            result = new CombatBeamSolver(root, displayNames, battleDamage, policy, cancellationToken,
+                progressCallback, materializeProfile, potionPolicyOverride: potionPolicyOverride,
+                potionFreePolicyBaseline: potionFreePolicyBaseline,
+                maximumPotionUses: maximumPotionUses,
+                fixedPrefixActions: plan,
+                resetFixedPrefixSchedulingBaseline: resetFixedPrefixSchedulingBaseline ?? false,
+                minimumPotionUses: minimumPotionUses,
+                // The primary-member materializer did not seed the incumbent; keep that path unchanged.
+                primaryIncumbent: continuationPurpose == null ? null : primaryIncumbent,
+                earliestPotionTurn: earliestPotionTurn,
+                attributionPurpose: continuationPurpose,
+                directSearchPurpose: purpose).Solve();
+        }
+        catch (PotionPolicyUnsatisfiedException ex)
+        {
+            // The existing final ordering rejected the materialized route under the request's own
+            // potion policy. That is a fallback reason, not a Flash verification failure.
+            return new FlashSolveOutcome(null, FlashRejection.None, ex.Message, search, plan,
+                admission, verification, watch.Elapsed)
+            {
+                ConstraintFailure = $"materialize-potion-policy {ex.Message}",
+            };
+        }
+        if (auditPotionPolicy
+            && FlashPotionBridge.VerifyRoute(result, minimumPotionUses, maximumPotionUses,
+                potionPolicyOverride) is { } failure)
+        {
+            return new FlashSolveOutcome(null, FlashRejection.None, failure, search, plan,
+                admission, verification, watch.Elapsed)
+            {
+                ConstraintFailure = failure,
+            };
+        }
         return new FlashSolveOutcome(result, FlashRejection.None, "", search, plan, admission, verification, watch.Elapsed);
+    }
+
+    private static int CountAmbergrisUses(IReadOnlyList<PlanAction> prefix)
+    {
+        int uses = 0;
+        foreach (PlanAction action in prefix)
+        {
+            if (action.Kind == PlanActionKind.UsePotion
+                && string.Equals(action.PotionId, FlashPotionBridge.AmbergrisPotionNativeId(),
+                    StringComparison.Ordinal))
+            {
+                uses++;
+            }
+        }
+        return uses;
     }
 
     /// <summary>The existing search's potion constraints at the root, in Flash player-turn units.</summary>
