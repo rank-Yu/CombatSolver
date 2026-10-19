@@ -43,3 +43,9 @@ DX3 批次用 `ACT_OVERRIDE=2 deck-survey.sh act3-<角色> <角色> 30` 为五�
 - `SILENT-23`（首领）：Envenom/不宁提灯/蛇骷髅的施加来源（`cardSource: null` 不翻倍）；`SILENT-29`（首领）：Vambrace 在 Sly 嵌套自动打出后的锁存。
 
 这些牌组与既有语料使用同一 `request.json` 格式；`regress.sh` 对每个请求跑 K1/K2/K4/K5 差分。
+
+## 评估杂质与 HexPower（K4C 批次）
+
+K4C 批次修正了 `FlashScorer` 的牌库杂质判定：现有引擎用 `card.HasKeyword(State, Ethereal)` 读取回合末离手例外，而 `HexPower` 会通过 `TryModifyKeywordsInCombat` 让所有 `Hexed` 牌获得 `Ethereal`；Flash 此前只读卡上的本地关键字，把 SpectralKnight 施加 `Hex` 后手牌里的 `DEBRIS` 误计为长期杂质（K1/K2 状态逐字节一致，只有 K4 的 `LiveDeckClutter` 与 `Score` 偏差）。修正为同一 battle-aware `FlashKernel.HasKeyword` 后，第三幕 REGENT-04 的 33 个 K4 差异清零；Pagestorm 的 `EtherealDrawTriggers` 投影也改用同一读取口径。
+
+- `REGENT-04`（精英，KNIGHTS_ELITE）：`CRASH_LANDING` 补满手牌生成的 `DEBRIS` 被 SpectralKnight 的 `HEX` 变成 `Hexed`，48 条游走 K1/K2/K4/K5 零差异、`unsupported=0`，`scoreFailed=0`、`boundFailed=0`。根上另有 `ANCHOR`、`MUMMIFIED_HAND` 与 `GAMBLERS_BREW`，`EndTurn(choices=1)` 的回合开始选择照常覆盖。
