@@ -181,12 +181,20 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
                 }
                 break;
             }
-            // AfterimagePower/StranglePower pair one play with the power amount at BeforeCardPlayed
-            // (the kernel's transient play stack; the existing engine keeps the same map in
-            // CardPlayPairPredictionState). The pair is removed by AfterCardPlayed, so a stable
-            // boundary has an empty map.
+            // FeralPower.Aux0 = zero-cost attacks played this turn (FeralPredictionState; without an
+            // entry the constructor reads the power's internal data).
+            case FeralPower feral:
+                target.Aux0 = Claim<FeralPredictionState>(power)?.ZeroCostAttacksPlayed
+                    ?? feral.GetInternalData<FeralPower.Data>().zeroCostAttacksPlayed;
+                break;
+            // AfterimagePower/StranglePower/StormPower/SubroutinePower pair one play with the power
+            // amount at BeforeCardPlayed (the kernel's transient play stack; the existing engine keeps
+            // the same map in CardPlayPairPredictionState). The pair is removed by AfterCardPlayed, so
+            // a stable boundary has an empty map.
             case AfterimagePower:
             case StranglePower:
+            case StormPower:
+            case SubroutinePower:
             {
                 foreach ((AbstractModel model, object state) in store.EntriesForFlash())
                 {
@@ -562,7 +570,7 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
                 && combatState.GetCreature(retired.Owner).IsDead
                 && state is DarkEmbracePredictionState or JugglingPredictionState
                     or HellraiserPredictionState or RupturePredictionState or CardPlayPairPredictionState
-                    or ChainsOfBindingPredictionState)
+                    or ChainsOfBindingPredictionState or FeralPredictionState)
             {
                 continue;
             }

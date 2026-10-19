@@ -159,6 +159,10 @@ internal static class CalculatedVarSpecRegistry
            + simulator.History.OfType<CombatPredictionOrbChanneledEntry>()
                .Count(entry => entry.Orb is LightningOrb && entry.Orb.Owner == player);
 
+    /// <summary>Read-only Flash import accessor for Voltaic's lightning-channel counter.</summary>
+    internal static int CountLightningChannelsForFlash(CombatPredictionSimulator simulator, Player player)
+        => CountLightningChannels(simulator, player);
+
     private static int CountUnblockedDamageEvents(CombatPredictionSimulator simulator, Creature owner)
         => ((SimulatedCombatState)simulator.State.CombatState).GetUnblockedHitsBeforePrediction(owner)
            + simulator.History.OfType<CombatPredictionDamageReceivedEntry>()

@@ -79,6 +79,19 @@ internal static class OrbMirrors
             _ => orb.PassiveVal,
         };
 
+    /// <summary>
+    /// Read-only accessor for the one private decimal a vanilla orb carries between prediction
+    /// steps (Dark's <c>_evokeVal</c>, Glass's <c>_passiveVal</c>). The bridge imports it into
+    /// <c>FlashOrb.Aux</c>; other orb types have no such state.
+    /// </summary>
+    public static decimal GetStoredValueForFlash(OrbModel orb)
+        => orb switch
+        {
+            DarkOrb dark => dark._evokeVal,
+            GlassOrb glass => glass._passiveVal,
+            _ => 0m,
+        };
+
     public static decimal GetEvokeValue(CombatPredictionSimulator simulator, OrbModel orb)
         => orb switch
         {

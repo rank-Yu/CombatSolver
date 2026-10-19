@@ -78,6 +78,7 @@ internal static class FlashScoreBridge
             DrawCardsNextTurnPowerId = PowerId<DrawCardsNextTurnPower>(),
             FreeAttackPowerId = PowerId<FreeAttackPower>(),
             FreeSkillPowerId = PowerId<FreeSkillPower>(),
+            FreePowerPowerId = PowerId<FreePowerPower>(),
             IllusionPowerId = PowerId<IllusionPower>(),
             ReattachPowerId = PowerId<ReattachPower>(),
             AdaptablePowerId = PowerId<AdaptablePower>(),

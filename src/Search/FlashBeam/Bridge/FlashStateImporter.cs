@@ -1,5 +1,6 @@
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Flash;
+using CombatSolver.Engine.InCombat.Mirrors.Orbs;
 using CombatSolver.Engine.InCombat.Simulation;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
@@ -188,6 +189,15 @@ internal static class FlashStateImporter
         }
         battle.SetCounter(FlashCounter.FinishedCardPlays, finishedPlays);
         battle.SetCounter(FlashCounter.CardsDrawn, CalculatedVarSpecRegistry.CountDrawnCardsForFlash(simulator, player));
+        battle.SetCounter(FlashCounter.LightningChannels,
+            CalculatedVarSpecRegistry.CountLightningChannelsForFlash(simulator, player));
+        int orbChannels = 0;
+        foreach (CombatPredictionHistoryEntry entry in simulator.History)
+        {
+            if (entry is CombatPredictionOrbChanneledEntry)
+                orbChannels = checked(orbChannels + 1);
+        }
+        battle.SetCounter(FlashCounter.OrbChannels, orbChannels);
     }
 
     private static void ImportRng(ref FlashBattle battle, CombatPredictionRngSet rng)
@@ -540,6 +550,7 @@ internal static class FlashStateImporter
             if (index == 0) result.Var0 = (short)delta;
             else result.Var1 = (short)delta;
         }
+        def.ProjectPrivate(ref result);
         return result;
     }
 
@@ -584,9 +595,30 @@ internal static class FlashStateImporter
     private static void ImportOrbs(ref FlashBattle battle, SimPlayerCombatState playerState)
     {
         SimOrbQueue orbs = playerState.OrbQueue;
-        if (orbs.Orbs.Count > 0)
-            throw new FlashImportException(FlashRejection.UnsupportedOrb, orbs.Orbs[0].Id.Entry);
+        if (orbs.Capacity < 0 || orbs.Capacity > FlashLimits.Orbs)
+            throw new FlashImportException(FlashRejection.Capacity, $"球槽 {orbs.Capacity}");
+        if (orbs.Orbs.Count > orbs.Capacity)
+            throw new FlashImportException(FlashRejection.UnrepresentableState,
+                $"球数 {orbs.Orbs.Count} 超过容量 {orbs.Capacity}");
+        if (orbs.Orbs.Count > FlashLimits.Orbs)
+            throw new FlashImportException(FlashRejection.Capacity, $"球数 {orbs.Orbs.Count}");
         battle.OrbCapacity = checked((byte)orbs.Capacity);
+        battle.OrbCount = checked((byte)orbs.Orbs.Count);
+        for (int index = 0; index < orbs.Orbs.Count; index++)
+        {
+            OrbModel orb = orbs.Orbs[index];
+            if (!FlashRegistry.TryOrb(orb.Id.Entry, out ushort id))
+                throw new FlashImportException(FlashRejection.UnsupportedOrb, orb.Id.Entry);
+            // DarkOrb._evokeVal / GlassOrb._passiveVal are the only private orb decimals. The
+            // simulator clones the orb model and mutates the clone, so the projection reads the model
+            // field through OrbMirrors (no PredictionStateStore entry exists for them). Flash stores
+            // integers; a fractional value cannot be represented and rejects instead of rounding.
+            decimal stored = OrbMirrors.GetStoredValueForFlash(orb);
+            if (stored != decimal.Truncate(stored) || stored < int.MinValue || stored > int.MaxValue)
+                throw new FlashImportException(FlashRejection.UnrepresentableState,
+                    $"{orb.Id.Entry} 私有值 {stored}");
+            battle.Orbs[index] = new FlashOrb { Id = checked((byte)id), Aux = (int)stored };
+        }
     }
 
     private static byte Owner(Creature creature, Player player, IReadOnlyList<Creature> known)

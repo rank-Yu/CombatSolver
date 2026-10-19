@@ -26,6 +26,8 @@ internal static class FlashBattleDump
             FlashRngState rng = battle.Rng[stream];
             lines.Add($"Rng[{(FlashRngStream)stream}]={rng.Counter}:{rng.S0:X}:{rng.S1:X}:{rng.S2:X}:{rng.S3:X}");
         }
+        for (int index = 0; index < battle.OrbCount; index++)
+            lines.Add($"Orb[{index}]={FlashRegistry.Orb(battle.Orbs[index].Id).NativeId} aux={battle.Orbs[index].Aux}");
         List<byte> roster = [];
         for (int position = 0; position < battle.RosterCount; position++)
             roster.Add(battle.Roster[position]);

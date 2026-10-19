@@ -41,6 +41,7 @@ internal static class FlashRulesCompiler
         FlashRulesBuilder builder = new()
         {
             BaseMaxEnergy = combat.GetBaseMaxEnergy(player),
+            BaseOrbSlotCount = player.Character.BaseOrbSlotCount,
         };
         SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(player);
         foreach (SimCardPile pile in new[] { playerState.Hand, playerState.DrawPile, playerState.DiscardPile,
@@ -357,6 +358,8 @@ internal static class FlashRulesCompiler
             FlashCardPools.ColorlessExceptJackOfAllTrades => player.GetUnlockedColorlessCards(constraint)
                 .Where(static card => card is not JackOfAllTrades),
             FlashCardPools.OtherCharacterAttacks => OtherCharacterAttacks(player, constraint),
+            FlashCardPools.CharacterPowers => player.GetUnlockedCharacterCards(constraint)
+                .Where(static card => card.Type == CardType.Power),
             _ => throw new FlashImportException(FlashRejection.UnsupportedClosure, $"未知卡池 {poolKey}"),
         };
         List<CardModel> candidates = cards.FilterForCombatAndPlayerCount(constraint).ToList();
