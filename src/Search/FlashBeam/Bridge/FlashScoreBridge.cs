@@ -71,6 +71,7 @@ internal static class FlashScoreBridge
             FreeAttackPowerId = PowerId<FreeAttackPower>(),
             IllusionPowerId = PowerId<IllusionPower>(),
             ReattachPowerId = PowerId<ReattachPower>(),
+            AdaptablePowerId = PowerId<AdaptablePower>(),
             BodySlamCardId = CardId<BodySlam>(),
             BufferPowerId = PowerId<MegaCrit.Sts2.Core.Models.Powers.BufferPower>(),
             NoDrawPowerId = PowerId<NoDrawPower>(),
@@ -123,7 +124,7 @@ internal static class FlashScoreBridge
         for (int index = 0; index < root.Enemies.Count; index++)
         {
             MonsterModel? monster = root.Enemies[index].Monster;
-            if (monster is WaterfallGiant or TheForgotten)
+            if (monster is WaterfallGiant)
                 throw new FlashImportException(FlashRejection.UnsupportedMonster,
                     $"{monster.Id.Entry} 的 AdjustMonsterMoveDamage 特例未移植");
         }
@@ -266,6 +267,7 @@ internal static class FlashScoreBridge
             Bully => FlashCalculatedKind.TargetVulnerable,
             MindBlast => FlashCalculatedKind.DrawPileCount,
             Rend => FlashCalculatedKind.TargetDebuffPowerCount,
+            GoldAxe => FlashCalculatedKind.FinishedCardPlays,
             _ => FlashCalculatedKind.Unsupported,
         };
     }
@@ -342,6 +344,7 @@ internal static class FlashScoreBridge
         FurnacePower => FlashStrategicKind.Furnace,
         ThunderPower => FlashStrategicKind.Thunder,
         LightningRodPower => FlashStrategicKind.LightningRod,
+        AutomationPower => FlashStrategicKind.RecurringEnergy,
         _ => FlashStrategicKind.Scaling,
     };
 

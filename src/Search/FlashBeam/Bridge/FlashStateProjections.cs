@@ -101,6 +101,21 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
                 target.Aux0 = (int)(Claim<HardenedShellPredictionState>(power)?.DamageReceivedThisTurn
                     ?? hardened.GetInternalData<HardenedShellPower.Data>().damageReceivedThisTurn);
                 break;
+            // GigantificationPower keeps the armed AttackCommand in its private State. At a stable
+            // boundary no attack is in flight, so the entry is idle (Aux0 zero); a live capture is not
+            // an action boundary. The armed flag itself is transient and not projected.
+            case GigantificationPower gigantification:
+                foreach ((AbstractModel model, object state) in store.EntriesForFlash())
+                {
+                    if (!ReferenceEquals(model, gigantification)
+                        || !GigantificationPowerMirrors.OwnsStateForFlash(state))
+                        continue;
+                    if (!GigantificationPowerMirrors.IsIdleStateForFlash(state))
+                        throw new FlashImportException(FlashRejection.UnrepresentableState,
+                            "巨大化攻击结算进行中");
+                    _claimed.Add(state);
+                }
+                break;
             // VigorPower.Aux0 is the amount captured by the Flash definition for the current attack and is
             // zero at every action boundary. The existing engine keeps the same pair (AttackCommand,
             // amountWhenAttackStarted) in VigorPowerMirrors' private State; an idle state has no
@@ -181,10 +196,70 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
                 target.Aux1 = curl?.PlayedCard != null ? 1 : 0;
                 break;
             }
+            // ChainsOfBindingPower.Aux0 = boundCardPlayed, .Aux1 = Bound cards afflicted this turn
+            // (ChainsOfBindingPredictionState; the projection reads the entry, and a missing entry
+            // would be the constructor's zero state).
+            case ChainsOfBindingPower:
+            {
+                ChainsOfBindingPredictionState? chains = Claim<ChainsOfBindingPredictionState>(power);
+                target.Aux0 = chains?.BoundCardPlayed == true ? 1 : 0;
+                target.Aux1 = chains?.GetBoundCardsAfflictedThisTurn(
+                    combat.GetPlayerTurnNumber(power.Owner.Player!)) ?? 0;
+                break;
+            }
+            // WitheringPresencePower.Aux0 = CardsLeft (CounterPredictionState when present, otherwise
+            // the native dynamic variable its constructor would read).
+            case WitheringPresencePower withering:
+            {
+                WitheringPresencePower powerModel = withering;
+                target.Aux0 = Claim<CounterPredictionState>(power)?.Value
+                    ?? powerModel.DynamicVars["CardsLeft"].IntValue;
+                break;
+            }
+            // PossessStrengthPower/PossessSpeedPower.Aux0 = the stat amount this possessor stole from
+            // the player (SimulatedCombatState._stolenStrength/_stolenDexterity; a missing entry is
+            // the constructor's zero).
+            case PossessStrengthPower possessStrength:
+                target.Aux0 = combat.PossessedAmountForFlash(possessStrength.Owner, strength: true);
+                break;
+            case PossessSpeedPower possessSpeed:
+                target.Aux0 = combat.PossessedAmountForFlash(possessSpeed.Owner, strength: false);
+                break;
+            // NemesisPower.Aux0 = _shouldApplyIntangible
+            // (EndTurnPowerSupport.TriggerNemesis; SimulatedCombatState._nemesisShouldApplyIntangible
+            // when present, otherwise the model's private flag).
+            case NemesisPower nemesis:
+                target.Aux0 = combat.GetNemesisShouldApplyIntangible(nemesis.Owner) ? 1 : 0;
+                break;
             // TenderPower.Aux0 = cards played this turn. The existing engine reads it through
             // GetTenderCardsPlayed (_tenderCardsPlayed when captured, otherwise the native model field).
             case TenderPower tender:
                 target.Aux0 = combat.TenderCardsPlayedForFlash(tender.Owner);
+                break;
+            // Instanced powers keep their per-instance private state in the model or its prediction
+            // state. Each row of the Flash power table is one native instance (AddPowerInstance), so
+            // the projection reads that instance directly.
+            // AutomationPower.Aux0 = cards drawn since the last 10-card energy grant.
+            case AutomationPower automation:
+                target.Aux0 = Claim<AutomationPredictionState>(automation)?.CardsLeft
+                    ?? new AutomationPredictionState(automation).CardsLeft;
+                break;
+            // PanachePower.Aux0 = cards left in the current 5-card cycle, .Aux1 = alreadyApplied.
+            case PanachePower panache:
+            {
+                PanachePredictionState state = Claim<PanachePredictionState>(panache)
+                    ?? new PanachePredictionState(panache);
+                target.Aux0 = state.CardsLeft;
+                target.Aux1 = state.AlreadyApplied ? 1 : 0;
+                break;
+            }
+            // TheBombPower.Aux0 = the per-instance bomb damage (DynamicVars.Damage); Amount is turns.
+            case TheBombPower bomb:
+                target.Aux0 = bomb.DynamicVars.Damage.IntValue;
+                break;
+            // RollingBoulderPower has no private state: Amount is the damage and the increment is the
+            // canonical power Damage var, both already in the row.
+            case RollingBoulderPower:
                 break;
             // RagePower has no private state; its stale PowerAmountPredictionState after the turn-end
             // removal is inert (amount equals the removed power's amount) and stays unclaimed.
@@ -422,6 +497,14 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             // inert; a live Vigor is claimed by the ProjectPower case above.
             if (model is VigorPower { Amount: 0 } && VigorPowerMirrors.IsIdleStateForFlash(state))
                 continue;
+            // GigantificationPower consumes a stack after the armed attack; when the last stack is
+            // spent the model is retired while its private State (idle: no CommandToModify) remains.
+            // Only the power's own hooks read it, and they visit positive EffectivePowers entries; a
+            // re-acquired power is a fresh native instance.
+            if (model is GigantificationPower { Amount: 0 }
+                && GigantificationPowerMirrors.OwnsStateForFlash(state)
+                && GigantificationPowerMirrors.IsIdleStateForFlash(state))
+                continue;
             if (model is PowerModel { Owner: { Side: CombatSide.Enemy } owner } && !combat.ContainsCreature(owner))
                 continue;
             // Retired power prediction states whose only readers are the power's own hooks. The power
@@ -450,7 +533,8 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
                 && retired.Owner.Player is not null
                 && combatState.GetCreature(retired.Owner).IsDead
                 && state is DarkEmbracePredictionState or JugglingPredictionState
-                    or HellraiserPredictionState or RupturePredictionState or CardPlayPairPredictionState)
+                    or HellraiserPredictionState or RupturePredictionState or CardPlayPairPredictionState
+                    or ChainsOfBindingPredictionState)
             {
                 continue;
             }

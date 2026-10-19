@@ -143,6 +143,8 @@ internal static class FlashRulesCompiler
         MonsterModel mutable = canonical.ToMutable();
         if (def.SpawnedStunned && mutable is Wriggler wriggler)
             wriggler.StartStunned = true;
+        if (def.SpawnStockAmount >= 0 && mutable is Axebot axebot)
+            axebot.StockAmount = def.SpawnStockAmount;
         Creature created = combat.CreatePredictedMonster(fork, mutable, CombatSide.Enemy, slot);
         combat.AddPredictedMonster(created);
         combat.PreparePredictedMonster(fork, created);
@@ -582,6 +584,20 @@ internal static class FlashRulesCompiler
                 ? value
                 : throw new FlashImportException(FlashRejection.UnsupportedMonster, $"{monster.Id.Entry} 没有静态值 {name}");
         }
+        int[] rootPowerAmounts = new int[def.RootPowerAmountNames.Count];
+        for (int position = 0; position < rootPowerAmounts.Length; position++)
+        {
+            string nativePower = def.RootPowerAmountNames[position];
+            rootPowerAmounts[position] = 0;
+            foreach (PowerModel power in combat.EffectivePowers())
+            {
+                if (ReferenceEquals(power.Owner, creature) && power.Id.Entry == nativePower)
+                {
+                    rootPowerAmounts[position] = power.Amount;
+                    break;
+                }
+            }
+        }
         int[] initialAiRegisters = new int[def.AiRegisterNames.Count];
         for (int position = 0; position < initialAiRegisters.Length; position++)
             initialAiRegisters[position] = combat.GetMonsterIntForFlash(creature, def.AiRegisterNames[position]);
@@ -596,6 +612,7 @@ internal static class FlashRulesCompiler
             InitialHpMin = monster.MinInitialHp,
             InitialHpMax = monster.MaxInitialHp,
             StaticInts = staticInts,
+            RootPowerAmounts = rootPowerAmounts,
             InitialAiRegisters = initialAiRegisters,
         };
     }

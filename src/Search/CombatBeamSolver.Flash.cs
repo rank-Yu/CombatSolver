@@ -71,6 +71,22 @@ internal sealed partial class CombatBeamSolver
         int taken = 0;
         while (true)
         {
+            // Potion card-generation choices are not pending turn-start choices: the existing engine
+            // stores the generated options in History during Prepare and resolves the action's
+            // PlanAction.Choice in PotionExecutionSupport.Complete (PotionChoiceSupport.GetSpec/Apply).
+            // Probe once to read the same options, then attach the selection as the action's choice.
+            if (action.Kind == PlanActionKind.UsePotion && action.Choice == null && taken < selections.Count
+                && TryBuildPotionChoice(action, parent, selections[taken], out CardChoiceSpec potionSpec,
+                    out PlanAction potionAction))
+            {
+                inspect?.Invoke(taken, new TurnStartChoiceRequest(action.PotionId ?? potionSpec.Effect.ToString(),
+                        potionSpec.Effect, potionSpec.SourcePile,
+                        Math.Min(potionSpec.MaxCount, potionSpec.Options.Count), potionSpec,
+                        Timing: PlanChoiceTiming.Action), potionSpec);
+                action = potionAction;
+                taken++;
+                continue;
+            }
             SimulationSnapshot child = ReplayForFlash([action], parent);
             if (child.BoundaryReason != SearchBoundaryReason.PendingChoice)
             {
@@ -112,6 +128,53 @@ internal sealed partial class CombatBeamSolver
             action = AppendPendingChoice(action, request, branch, turnResolution, primary);
             child.ReleaseSimulator();
         }
+    }
+
+    /// <summary>
+    /// Builds the <see cref="PlanAction.Choice"/> of a card-generation potion from a probe replay.
+    /// <c>PotionExecutionSupport.Prepare</c> records the generated options in
+    /// <c>History.CardGenerationOptions</c>; <see cref="PotionChoiceSupport.GetSpec"/> then builds the
+    /// same 0..1 GenerateToHand spec the existing search branches on, and
+    /// <see cref="PotionChoiceSupport.Apply"/> resolves it during the real replay. Returns false for
+    /// potions that do not generate a card choice, leaving <paramref name="action"/> untouched.
+    /// </summary>
+    private bool TryBuildPotionChoice(PlanAction action, SimulationSnapshot parent, ulong bits,
+        out CardChoiceSpec spec, out PlanAction resolved)
+    {
+        spec = null!;
+        resolved = action;
+        int slot = action.PotionSlot;
+        if (slot < 0)
+            return false;
+        SimulatedCombatState combat = (SimulatedCombatState)parent.Simulator.State.CombatState;
+        MegaCrit.Sts2.Core.Models.PotionModel? potion = combat.GetPotionAtSlot(_player, slot);
+        if (potion == null || !PotionChoiceSupport.GeneratesCardChoice(potion))
+            return false;
+        SimulationSnapshot probe = ReplayForFlash([action], parent);
+        try
+        {
+            if (probe.BoundaryReason != SearchBoundaryReason.None)
+                throw new FlashChoiceMismatchException(
+                    $"药水 {action.PotionId} 的生成探测停在了 {probe.BoundaryReason}。");
+            spec = PotionChoiceSupport.GetSpec((CombatPredictionSimulator)probe.Simulator, potion);
+        }
+        finally
+        {
+            probe.ReleaseSimulator();
+        }
+        if (spec.Options.Count < 64 && bits >> spec.Options.Count != 0)
+            throw new FlashChoiceMismatchException($"选择 {bits:X} 超出旧引擎的 {spec.Options.Count} 个选项。");
+        List<int> indexes = [];
+        for (int index = 0; index < spec.Options.Count; index++)
+        {
+            if ((bits & (1UL << index)) != 0)
+                indexes.Add(index);
+        }
+        resolved = action with
+        {
+            Choice = CardChoiceSupport.BuildSelectedChoiceForFlash(spec, indexes, displayNames),
+        };
+        return true;
     }
 
     /// <summary>

@@ -56,6 +56,13 @@ internal static class GigantificationPowerMirrors
         return context.StateStore.Get<State>(power);
     }
 
+    /// <summary>Read-only projection helpers for the Flash bridge (state entries of this power).</summary>
+    internal static bool OwnsStateForFlash(object state) => state is State;
+
+    /// <summary>True when no attack is in flight; only stable boundaries are admitted.</summary>
+    internal static bool IsIdleStateForFlash(object state)
+        => state is State gigantification && gigantification.CommandToModify is null;
+
     private static bool ShouldTrigger(GigantificationPower power, AttackCommand command)
     {
         return command.ModelSource is CardModel card &&

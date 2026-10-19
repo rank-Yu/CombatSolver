@@ -69,7 +69,7 @@ internal static class FlashStateImporter
         if (simulator.State.GetOsty(player) != null)
             throw new FlashImportException(FlashRejection.UnrepresentableState, "Osty");
 
-        ImportCounters(ref battle, simulator, combat, player);
+        ImportCounters(ref battle, simulator, combat, player, combat.KnownEnemies);
 
         ImportRng(ref battle, simulator.Rng);
         IReadOnlyList<Creature> known = combat.KnownEnemies;
@@ -114,8 +114,21 @@ internal static class FlashStateImporter
     };
 
     private static void ImportCounters(ref FlashBattle battle, CombatPredictionSimulator simulator,
-        SimulatedCombatState combat, Player player)
+        SimulatedCombatState combat, Player player, IReadOnlyList<Creature> known)
     {
+        // MagiKnight's DampenPower keeps its caster set in SimulatedCombatState._dampenCasters; the
+        // kernel stores the same set as a bitmask of enemy-owner indices.
+        int dampenMask = 0;
+        foreach ((Creature target, Creature caster) in combat.DampenCastersForFlash())
+        {
+            if (!ReferenceEquals(target, player.Creature))
+                throw new FlashImportException(FlashRejection.UnrepresentableState, "Dampen 目标不是玩家");
+            int casterIndex = IndexOf(known, caster);
+            if (casterIndex < 0 || casterIndex >= 32)
+                throw new FlashImportException(FlashRejection.UnrepresentableState, "Dampen 施法者不在敌人名单");
+            dampenMask |= 1 << casterIndex;
+        }
+        battle.SetCounter(FlashCounter.DampenCasterMask, dampenMask);
         Creature owner = player.Creature;
         battle.SetCounter(FlashCounter.CardsPlayedThisTurn, combat.GetCardsPlayedThisTurn(owner));
         battle.SetCounter(FlashCounter.ManualCardsPlayedThisTurn, combat.GetManualCardsPlayedThisTurn(owner));
@@ -165,6 +178,15 @@ internal static class FlashStateImporter
             combat.LastNormalizedVitalSparkAmountForFlash);
         battle.SetCounter(FlashCounter.SkillPlayedThisSideTurn,
             combat.HasPlayedSkillThisTurn(owner) ? 1 : 0);
+        // CalculatedVarSpecRegistry.CountFinishedCardPlays: the root history plus the predicted
+        // CardPlayFinished entries (the latter are counted by the search's counter during play).
+        int finishedPlays = combat.GetFinishedPlaysBeforePrediction();
+        foreach (CombatPredictionHistoryEntry entry in simulator.History)
+        {
+            if (entry is CombatPredictionCardPlayFinishedEntry)
+                finishedPlays++;
+        }
+        battle.SetCounter(FlashCounter.FinishedCardPlays, finishedPlays);
     }
 
     private static void ImportRng(ref FlashBattle battle, CombatPredictionRngSet rng)
@@ -364,6 +386,10 @@ internal static class FlashStateImporter
     private static void ImportCards(ref FlashBattle battle, SimulatedCombatState combat,
         SimPlayerCombatState playerState, FlashRules rules)
     {
+        Dictionary<PredictedCard, int> dampen = new(ReferenceEqualityComparer.Instance);
+        foreach ((PredictedCard card, int level) in combat.DampenOriginalUpgradesForFlash())
+            dampen[card] = level;
+        HashSet<PredictedCard> imported = new(ReferenceEqualityComparer.Instance);
         (SimCardPile Pile, FlashPile Flash)[] piles =
         [
             (playerState.Hand, FlashPile.Hand),
@@ -372,14 +398,31 @@ internal static class FlashStateImporter
             (playerState.ExhaustPile, FlashPile.Exhaust),
             (playerState.PlayPile, FlashPile.Play),
         ];
+        // SimulatedCombatState._returnToHandNextTurn: the exact card objects that return at this
+        // turn's BeforeHandDraw (Bolas/ThrummingHatchet, including a Start root captured before the
+        // return). Flash carries the membership on the card value.
+        HashSet<PredictedCard> returning = new(combat.PendingReturningCards, ReferenceEqualityComparer.Instance);
         foreach ((SimCardPile pile, FlashPile target) in piles)
         {
             foreach (PredictedCard card in pile.Cards)
-                FlashPiles.Append(ref battle, target, Card(card, rules, combat.IsRootCardForFlash(card)));
+            {
+                imported.Add(card);
+                int originalUpgrade = dampen.TryGetValue(card, out int level) ? level : -1;
+                FlashCard value = Card(card, rules, combat.IsRootCardForFlash(card), originalUpgrade);
+                if (returning.Contains(card))
+                    value.ReturnToHandNextTurn = true;
+                FlashPiles.Append(ref battle, target, value);
+            }
+        }
+        foreach (PredictedCard card in dampen.Keys)
+        {
+            if (!imported.Contains(card))
+                throw new FlashImportException(FlashRejection.UnrepresentableState,
+                    $"Dampen 记录不在牌堆中：{card.Preview.Id.Entry}");
         }
     }
 
-    private static FlashCard Card(PredictedCard predicted, FlashRules rules, bool rootCard)
+    private static FlashCard Card(PredictedCard predicted, FlashRules rules, bool rootCard, int dampenOriginalUpgrade)
     {
         CardModel card = predicted.Preview;
         ushort id = FlashRulesCompiler.CardId(card);
@@ -398,6 +441,11 @@ internal static class FlashStateImporter
             ReplayCount = checked((byte)card.BaseReplayCount),
             IsClone = card.IsClone,
         };
+        if (dampenOriginalUpgrade > 3)
+            throw new FlashImportException(FlashRejection.UnrepresentableState,
+                $"{card.Id.Entry} 压制前升级等级 {dampenOriginalUpgrade}");
+        if (dampenOriginalUpgrade >= 0)
+            result.DampenOriginalUpgrade = checked((byte)(dampenOriginalUpgrade + 1));
         // Root cards were present at _liveCardsAtSnapshot, so the one-time check can never apply to
         // them; marking them checked is equivalent to the existing engine's first normalization and
         // keeps their bytes stable while an auto-play queue holds them. Generated cards copy the

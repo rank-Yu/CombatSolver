@@ -88,7 +88,7 @@ internal static class FlashDifferentialProbe
                 if (Complete(rules, flashRoot, actions[index], [], completions))
                     choiceCapped++;
             }
-            catch (FlashUnsupportedException ex)
+            catch (Exception ex) when (ex is FlashUnsupportedException or FlashCapacityException)
             {
                 // A Flash boundary, not a divergence: production falls back to the existing solver.
                 if (unsupported++ == 0)
@@ -143,7 +143,7 @@ internal static class FlashDifferentialProbe
                 {
                     completion = CompleteRandomly(rules, battle, action, random);
                 }
-                catch (FlashUnsupportedException ex)
+                catch (Exception ex) when (ex is FlashUnsupportedException or FlashCapacityException)
                 {
                     if (unsupported++ == 0)
                         report.Add($"UNSUPPORTED K2 seed={seed} step={step}: {ex.Message}");

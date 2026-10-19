@@ -46,7 +46,8 @@ internal static class FlashBattleDump
         {
             FlashPower power = battle.Powers[index];
             lines.Add($"Power[{index}]={FlashRegistry.Power(power.Id).NativeId} owner={power.Owner} applier={power.Applier} "
-                + $"amount={power.Amount} onTurnStart={power.AmountOnTurnStart} flags={power.Flags} aux={power.Aux0}/{power.Aux1}/{power.Aux2}");
+                + $"target={power.Target} amount={power.Amount} onTurnStart={power.AmountOnTurnStart} flags={power.Flags} "
+                + $"aux={power.Aux0}/{power.Aux1}/{power.Aux2}");
         }
         foreach (FlashPile pile in Enum.GetValues<FlashPile>())
         {
@@ -82,5 +83,5 @@ internal static class FlashBattleDump
     private static string Card(in FlashCard card)
         => $"{FlashRegistry.Card(card.Id).NativeId}+{card.Upgrade} flags={card.Flags} kw={card.Keywords} cost={card.BaseCost} "
             + $"star={card.BaseStarCost} replay={card.ReplayCount} mods={card.EnergyModifierCount} state={card.CostState} "
-            + $"vars={card.Var0}/{card.Var1} private={card.Private}";
+            + $"vars={card.Var0}/{card.Var1} private={card.Private} dampen={card.DampenOriginalUpgrade}";
 }
