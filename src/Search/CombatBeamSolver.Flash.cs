@@ -269,6 +269,42 @@ internal sealed partial class CombatBeamSolver
     internal int PrimarySmartPotionHpLowerBound(SimulationSnapshot snapshot)
         => StrategicHpLowerBound(snapshot, _strategicBossHpRelief,
             RemainingHealingPotential(snapshot));
+
+    /// <summary>
+    /// The intermediate Beam rank of one detached snapshot for the Flash differential probe. Read-only:
+    /// the node only carries values the solver already has, and no runtime state moves.
+    /// </summary>
+    internal double BeamRankForFlash(SimulationSnapshot snapshot, int actionCount, int potionCount,
+        bool terminal, bool isEndTurn)
+    {
+        PlanAction action = new(
+            isEndTurn ? PlanActionKind.EndTurn : PlanActionKind.PlayCard,
+            snapshot.Turn,
+            EndsPlayerTurn: isEndTurn);
+        SearchNode node = new(action, actionCount, potionCount, 0, snapshot.Turn, default, 0,
+            snapshot.Score, default, false, SearchBoundaryReason.None, terminal, null, snapshot, default!);
+        return Retention.BeamRankScore(node);
+    }
+
+    /// <summary>
+    /// Sets the four root-relative Beam rank baselines the solver's Solve phase normally freezes.
+    /// The differential probe compares ranks before running a solve; this only copies root values.
+    /// </summary>
+    internal void SetFlashRankBaseline(SimulationSnapshot rootSnapshot)
+    {
+        _run.InitialPersistentBuffValue = rootSnapshot.PersistentBuffValue;
+        _run.InitialEnemyStrengthSuppression = rootSnapshot.EnemyStrengthSuppression;
+        _run.InitialEnemyWeakTurns = rootSnapshot.EnemyWeakTurns;
+        _run.InitialRetainedAttackValue = rootSnapshot.RetainedAttackValue;
+    }
+
+    internal double ContextualAdjustmentForFlash(SimulationSnapshot snapshot, bool terminal)
+    {
+        PlanAction action = new(PlanActionKind.EndTurn, snapshot.Turn, EndsPlayerTurn: true);
+        SearchNode node = new(action, 0, 0, 0, snapshot.Turn, default, 0,
+            snapshot.Score, default, false, SearchBoundaryReason.None, terminal, null, snapshot, default!);
+        return _profile.ContextualRanking?.Adjustment(node) ?? 0;
+    }
 }
 
 /// <summary>The cumulative potion counters of an existing-engine snapshot, frozen for a Flash search root.</summary>

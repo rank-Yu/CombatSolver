@@ -24,7 +24,7 @@ internal static class FlashDifferentialProbe
 {
     private const int OneStepChoiceCap = 64;
 
-    public static Dictionary<string, object?> Run(CombatState combat, string outputDirectory)
+    public static Dictionary<string, object?> Run(CombatState combat, HarnessOptions options, string outputDirectory)
     {
         int walks = ReadInt("OFFLINE_HARNESS_FLASH_DIFF_WALKS", 16);
         int steps = ReadInt("OFFLINE_HARNESS_FLASH_DIFF_STEPS", 60);
@@ -37,9 +37,21 @@ internal static class FlashDifferentialProbe
         SolverSettingsSnapshot settings = SolverSettings.Capture();
         SearchPolicySnapshot policy = SolverController.CaptureSearchPolicy(
             settings, combat, includeTurnSetup: false, theftPolicy: SolverController.ResolveTheftPolicy(combat));
+        policy = policy with
+        {
+            Profile = policy.Profile with
+            {
+                BaseScoreOnly = options.Ordering == "base",
+                ContextualRanking = options.RankingModelPath == null ? null
+                    : ContextualRankingModel.Parse(File.ReadAllText(options.RankingModelPath)),
+                ContinuousThreatRanking = options.ContinuousThreatRanking,
+                BeamWeightPerturbation = options.BeamWeightPerturbation,
+            },
+        };
         CombatBeamSolver solver = new(root, names, damage, policy, searchProfile: policy.Profile);
         Player player = root.PlayerIdentity;
         SimulationSnapshot rootSnapshot = solver.ReplayForFlash([], null);
+        solver.SetFlashRankBaseline(rootSnapshot);
 
         FlashRules rules;
         FlashBattle flashRoot;
@@ -75,7 +87,8 @@ internal static class FlashDifferentialProbe
         if (scorer != null)
             bound = FlashBoundBridge.Create(root, policy, rootSnapshot, player, rules, flashRoot,
                 solver.CapturePruningRequestForFlash());
-        ScoreCheck scores = new(scorer, bound, solver, report);
+        bool checkRank = policy.Profile.ContinuousThreatRanking || policy.Profile.ContextualRanking != null;
+        ScoreCheck scores = new(scorer, bound, solver, report, checkRank);
         scores.Check(rootSnapshot, flashRoot, 0, "ROOT");
 
         FlashAction[] actions = new FlashAction[FlashKernel.MaxLegalActions];
@@ -196,6 +209,8 @@ internal static class FlashDifferentialProbe
         summary["boundFailed"] = scores.BoundFailed;
         summary["unsupported"] = unsupported;
         summary["boundFailedFields"] = scores.BoundFailedFields;
+        summary["rankChecked"] = scores.RankChecked;
+        summary["rankFailed"] = scores.RankFailed;
         report.Insert(0, $"SUMMARY oneStep={oneStepChecked} failed={oneStepFailed} walkTransitions={walkTransitions} "
             + $"walkFailed={walkFailed} terminals={terminals} choiceActions={choiceActions} choiceCapped={choiceCapped} "
             + $"choiceDeadEnds={choiceDeadEnds} endings={string.Join(",", endings.Select(item => $"{item.Key}:{item.Value}"))} "
@@ -203,7 +218,9 @@ internal static class FlashDifferentialProbe
             + $"scoreSkippedBoundary={scores.SkippedBoundary} "
             + (scores.BoundStatus == "checked"
                 ? $"bound=checked boundChecked={scores.BoundChecked} boundFailed={scores.BoundFailed}"
-                : $"bound=disabled({scores.BoundStatus})") + $" unsupported={unsupported}");
+                : $"bound=disabled({scores.BoundStatus})")
+            + (scores.RankChecked == 0 ? "" : $" rankChecked={scores.RankChecked} rankFailed={scores.RankFailed}")
+            + $" unsupported={unsupported}");
         if (scores.FailedFields.Count > 0)
             report.Insert(1, "K4 FIELDS " + string.Join(",", scores.FailedFields
                 .OrderByDescending(item => item.Value).Select(item => $"{item.Key}:{item.Value}")));
@@ -258,7 +275,8 @@ internal static class FlashDifferentialProbe
     }
 
     private sealed class ScoreCheck(
-        FlashScorer? scorer, FlashBoundFeatures? bound, CombatBeamSolver solver, List<string> report)
+        FlashScorer? scorer, FlashBoundFeatures? bound, CombatBeamSolver solver, List<string> report,
+        bool checkRank)
     {
         private const int ReportedMismatches = 20;
 
@@ -277,6 +295,11 @@ internal static class FlashDifferentialProbe
 
         public Dictionary<string, int> BoundFailedFields { get; } = new(StringComparer.Ordinal);
 
+        /// <summary>Intermediate Beam rank comparisons (only when the profile carries a rank modifier).</summary>
+        public int RankChecked { get; private set; }
+
+        public int RankFailed { get; private set; }
+
         public string BoundStatus => bound == null ? "score_rejected" : bound.Enabled ? "checked" : bound.DisabledReason;
 
         public void Check(SimulationSnapshot old, in FlashBattle flash, int actionCount, string label)
@@ -289,6 +312,37 @@ internal static class FlashDifferentialProbe
             FlashScoreFeatures? flashFeatures = scorer?.Features(flash, actionCount);
             CheckScore(old, flash, flashFeatures, label);
             CheckBound(old, flash, flashFeatures, label);
+            if (checkRank && flashFeatures is { } features)
+                CheckRank(old, flash, features, actionCount, label);
+        }
+
+        private void CheckRank(SimulationSnapshot old, in FlashBattle flash,
+            in FlashScoreFeatures features, int actionCount, string label)
+        {
+            RankChecked++;
+            bool terminal = !FlashKernel.IsInProgress(flash);
+            for (int actionKind = 0; actionKind < 2; actionKind++)
+            {
+                bool isEndTurn = actionKind == 0;
+                double flashRank = scorer!.BeamRankScore(flash, features, terminal, isEndTurn);
+                double oldRank = solver.BeamRankForFlash(
+                    old, actionCount, old.PotionUseCount, terminal, isEndTurn);
+                if (BitConverter.DoubleToInt64Bits(flashRank)
+                    == BitConverter.DoubleToInt64Bits(oldRank))
+                {
+                    continue;
+                }
+                RankFailed++;
+                if (RankFailed <= ReportedMismatches)
+                {
+                    report.Add($"K4 RANK MISMATCH {label} endTurn={isEndTurn}");
+                    report.Add($"  rank old={oldRank:R} flash={flashRank:R} "
+                        + $"delta={flashRank - oldRank:R} "
+                        + $"adj old={solver.ContextualAdjustmentForFlash(old, terminal):R} "
+                        + $"flash={scorer.ContextualAdjustmentForTesting(flash, features, terminal):R}");
+                }
+                return;
+            }
         }
 
         private void CheckScore(SimulationSnapshot old, in FlashBattle flash,

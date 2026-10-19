@@ -30,11 +30,12 @@ internal static class FlashScoreBridge
         FlashRules rules,
         in FlashBattle flashRoot)
     {
-        RejectUnsupportedSettings(root, policy, profile);
+        RejectUnsupportedSettings(policy);
 
         FlashCardScore?[][] cards = CompileCards(player);
         FlashPowerScore[] powers = CompilePowers(policy.Act3BossStrategy);
         int[] potionCosts = CompilePotionCosts(player, rootSnapshot);
+        FlashRelicCounterRule[] relicRules = CompileRelicCounterRules(policy);
         ValidateAdmittedCards(flashRoot, cards);
 
         ushort[] rootPotions = new ushort[FlashLimits.PotionSlots];
@@ -49,6 +50,16 @@ internal static class FlashScoreBridge
             Cards = cards,
             Powers = powers,
             PotionStrategicCost = potionCosts,
+            GrowthBudgets = policy.EffectiveGrowthBudgets,
+            RequiredGrowthRewards = policy.EffectiveHasGrowthTargets
+                ? policy.GrowthOpportunityTargets.RequiredRewards
+                : default,
+            RelicCounterRules = relicRules,
+            PostCombatRelicHeal = root.PostCombatRelicHeal,
+            BossHpRelief = ActEndingBossPolicy.ResolveStrategicHpRelief(
+                root.BossHpRelief, policy.ActTransitionBossHpStrategy, policy.FinalBossHpStrategy),
+            ContinuousThreatRanking = profile.ContinuousThreatRanking,
+            ContextualRanking = profile.ContextualRanking,
             InitialPlayerMaxHp = root.InitialPlayerMaxHp,
             IsActEndingBoss = root.IsActEndingBoss,
             Act3BossStrategy = policy.Act3BossStrategy,
@@ -103,26 +114,50 @@ internal static class FlashScoreBridge
         return new FlashScorer(score);
     }
 
-    private static void RejectUnsupportedSettings(
-        CombatRootSnapshot root, SearchPolicySnapshot policy, SolverSearchProfile profile)
+    private static void RejectUnsupportedSettings(SearchPolicySnapshot policy)
     {
-        // A growth card in the deck alone does not move the snapshot: GrowthHpCredit is the configured
-        // budget multiplied by the realized rewards, so it stays zero while every budget is zero. Only
-        // non-zero (effective) budgets need the unported credit path.
-        if (policy.EffectiveGrowthBudgets != default)
-            throw Reject("GrowthBudgets", "成长额度（GrowthHpCredit）未移植");
-        if (policy.RelicTargets.Count != 0)
-            throw Reject("RelicTargets", $"遗物计数目标 {policy.RelicTargets.Count} 项未移植");
+        // Third-party growth sources are a public mod registration surface and stay outside this
+        // port. Built-in growth budgets are compiled into the score table below.
+        if (!policy.EffectiveGrowthBudgets.Extras.IsEmpty)
+            throw Reject("GrowthSourceMirrors", "第三方成长来源的额度未移植");
+        if (policy.EffectiveHasGrowthTargets
+            && !policy.GrowthOpportunityTargets.RequiredRewards.Extras.IsEmpty)
+        {
+            throw Reject("GrowthSourceMirrors", "第三方成长来源的目标未移植");
+        }
         if (policy.DevelopmentStrategy != null)
-            throw Reject("DevelopmentStrategy", "开发策略的排序调整未移植");
+            throw Reject("DevelopmentStrategy", "Prioritize/Retain 依赖 ActionCandidate 与 RankBest 必保通道，Flash 没有等价结构");
         if (!StrategicEffectMirrors.IsEmpty)
             throw Reject("StrategicEffectMirrors", "第三方战略效果登记表非空");
         if (!CardRemovalValueMirrors.IsEmpty)
             throw Reject("CardRemovalValueMirrors", "卡牌移除估值登记表非空，牌库杂质判定未移植");
-        if (profile.ContinuousThreatRanking)
-            throw Reject("Profile.ContinuousThreatRanking", "连续致命意图定价未移植");
-        if (profile.ContextualRanking != null)
-            throw Reject("Profile.ContextualRanking", "上下文排序模型未移植");
+    }
+
+    /// <summary>
+    /// Freezes the configured relic counter goals. Every goal's relic already has a Flash definition
+    /// (unregistered relics reject the root earlier); the rule carries the id whose
+    /// <c>FlashRelic.Counter</c> is the same counter the existing engine reads.
+    /// </summary>
+    private static FlashRelicCounterRule[] CompileRelicCounterRules(SearchPolicySnapshot policy)
+    {
+        if (policy.RelicTargets.Count == 0)
+            return [];
+
+        FlashRelicCounterRule[] result = new FlashRelicCounterRule[policy.RelicTargets.Count];
+        for (int index = 0; index < policy.RelicTargets.Count; index++)
+        {
+            RelicCounterTarget target = policy.RelicTargets[index];
+            RelicCounterCatalog.Entry entry = RelicCounterCatalog.All.Single(candidate => candidate.Id == target.Id);
+            string nativeId = entry.Canonical().Id.Entry;
+            if (!FlashRegistry.TryRelic(nativeId, out ushort relicId))
+                throw Reject("RelicTargets", $"遗物 {nativeId} 没有 Flash 定义");
+            int meatThreshold = target.Id == RelicCounterId.MeatOnTheBone
+                ? ModelDb.Relic<MeatOnTheBone>()
+                    .DynamicVars[MeatOnTheBone._hpThresholdKey].IntValue
+                : 0;
+            result[index] = new FlashRelicCounterRule(target, relicId, meatThreshold);
+        }
+        return result;
     }
 
     private static void ValidateAdmittedCards(in FlashBattle flashRoot, FlashCardScore?[][] cards)

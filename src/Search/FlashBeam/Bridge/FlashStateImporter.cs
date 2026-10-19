@@ -178,6 +178,7 @@ internal static class FlashStateImporter
         }
         battle.SetCounter(FlashCounter.PlayerUnblockedDamageEvents, unblockedEvents);
         battle.SetCounter(FlashCounter.LongTermResourceValue, combat.LongTermResourceValue);
+        ImportGrowthRewards(ref battle, combat.GrowthRewards);
         battle.SetCounter(FlashCounter.AngerCopiesGenerated, combat.AngerCopiesGenerated);
         battle.SetCounter(FlashCounter.DeathSaveRelicHpRestored, combat.DeathSaveRelicHpRestored);
         battle.SetCounter(FlashCounter.DeathSavePotionHpRestored, combat.DeathSavePotionHpRestored);
@@ -238,6 +239,36 @@ internal static class FlashStateImporter
         (int stolenGold, int stolenCards) = combat.UnrecoveredLootForFlash(simulator);
         battle.SetCounter(FlashCounter.OutstandingStolenGold, stolenGold);
         battle.SetCounter(FlashCounter.OutstandingStolenCards, stolenCards);
+    }
+
+    /// <summary>
+    /// Projects <c>SimulatedCombatState._growthRewards</c> into the packed growth counters. Every
+    /// built-in source fits two 16-bit slots; a larger root count or a third-party source cannot be
+    /// represented and rejects the state instead of truncating.
+    /// </summary>
+    private static void ImportGrowthRewards(ref FlashBattle battle, GrowthValues rewards)
+    {
+        if (!rewards.Extras.IsEmpty)
+            throw new FlashImportException(FlashRejection.UnrepresentableState,
+                "第三方成长来源的累计收益");
+        Set(ref battle, FlashGrowthSource.HandOfGreed, rewards.HandOfGreed);
+        Set(ref battle, FlashGrowthSource.TheHunt, rewards.TheHunt);
+        Set(ref battle, FlashGrowthSource.Feed, rewards.Feed);
+        Set(ref battle, FlashGrowthSource.Royalties, rewards.Royalties);
+        Set(ref battle, FlashGrowthSource.Alchemize, rewards.Alchemize);
+        Set(ref battle, FlashGrowthSource.GeneticAlgorithm, rewards.GeneticAlgorithm);
+        Set(ref battle, FlashGrowthSource.TheScythe, rewards.TheScythe);
+        Set(ref battle, FlashGrowthSource.Goopy, rewards.Goopy);
+        Set(ref battle, FlashGrowthSource.ForbiddenGrimoire, rewards.ForbiddenGrimoire);
+        Set(ref battle, FlashGrowthSource.MadScience, rewards.MadScience);
+
+        static void Set(ref FlashBattle target, FlashGrowthSource source, int value)
+        {
+            if ((uint)value > ushort.MaxValue)
+                throw new FlashImportException(FlashRejection.UnrepresentableState,
+                    $"成长来源 {source} 的累计收益 {value}");
+            FlashGrowthRewards.Set(ref target, source, value);
+        }
     }
 
     private static void ImportRng(ref FlashBattle battle, CombatPredictionRngSet rng)
