@@ -11,6 +11,8 @@ internal static class FlashScoreProjection
         PlayerHp = snapshot.PlayerHp,
         PlayerMaxHp = snapshot.PlayerMaxHp,
         PlayerBlock = snapshot.PlayerBlock,
+        OstyHp = snapshot.OstyHp,
+        OstyMaxHp = snapshot.OstyMaxHp,
         CumulativePlayerHpLost = snapshot.CumulativePlayerHpLost,
         RecoveredPlayerHp = snapshot.RecoveredPlayerHp,
         DeathSaveHpRestored = snapshot.DeathSaveHpRestored,

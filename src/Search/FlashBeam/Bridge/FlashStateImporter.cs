@@ -67,15 +67,24 @@ internal static class FlashStateImporter
         battle.MaxHandSize = checked((byte)combat.GetMaxHandSize(player));
 
         battle.Player = Vitals(simulator.State.GetCreature(player.Creature), combat.HasLostHpThisTurn(player.Creature));
-        if (simulator.State.GetOsty(player) != null)
-            throw new FlashImportException(FlashRejection.UnrepresentableState, "Osty");
+        Creature? osty = simulator.State.GetOsty(player);
+        if (osty != null)
+        {
+            // The pet is one of the player-side creatures. Player.Osty is the native pet field: it is
+            // non-null only for a pet that already existed when the root was captured, and the existing
+            // engine reads it directly for per-turn resets (BeginSideTurn).
+            battle.Osty = Vitals(simulator.State.GetCreature(osty), combat.HasLostHpThisTurn(osty));
+            battle.Flags |= FlashBattleFlags.OstyPresent;
+            if (player.Osty != null)
+                battle.Flags |= FlashBattleFlags.OstyWasRootPet;
+        }
 
-        ImportCounters(ref battle, simulator, combat, player, combat.KnownEnemies);
+        ImportCounters(ref battle, simulator, combat, player, combat.KnownEnemies, osty);
 
         ImportRng(ref battle, simulator.Rng);
         IReadOnlyList<Creature> known = combat.KnownEnemies;
         ImportEnemies(ref battle, simulator, combat, known, rules, processedDeaths, projections);
-        ImportPowers(ref battle, combat, player, known, projections);
+        ImportPowers(ref battle, combat, player, known, osty, projections);
         ImportCards(ref battle, combat, playerState, rules);
         RejectRunListenerDeckCards(player);
         ImportRelics(ref battle, combat, player, projections);
@@ -115,7 +124,7 @@ internal static class FlashStateImporter
     };
 
     private static void ImportCounters(ref FlashBattle battle, CombatPredictionSimulator simulator,
-        SimulatedCombatState combat, Player player, IReadOnlyList<Creature> known)
+        SimulatedCombatState combat, Player player, IReadOnlyList<Creature> known, Creature? osty)
     {
         // MagiKnight's DampenPower keeps its caster set in SimulatedCombatState._dampenCasters; the
         // kernel stores the same set as a bitmask of enemy-owner indices.
@@ -192,6 +201,25 @@ internal static class FlashStateImporter
         battle.SetCounter(FlashCounter.CardsDrawn, CalculatedVarSpecRegistry.CountDrawnCardsForFlash(simulator, player));
         battle.SetCounter(FlashCounter.LightningChannels,
             CalculatedVarSpecRegistry.CountLightningChannelsForFlash(simulator, player));
+        // SimulatedCombatState.GetCreatureAttacksThisTurn(osty): the Rattle calculated-hit multiplier.
+        // The per-turn maps are filled from root history on first read.
+        battle.SetCounter(FlashCounter.OstyAttacksThisTurn,
+            osty != null ? combat.GetCreatureAttacksThisTurn(osty) : 0);
+        battle.SetCounter(FlashCounter.DoomAppliedThisTurn,
+            combat.WasDoomAppliedThisTurn(player.Creature) ? 1 : 0);
+        // CalculatedVarSpecRegistry.CountEtherealPlays: the root history plus predicted finished plays
+        // whose card was Ethereal when played (CardPlayFinishedEntry.WasEthereal).
+        int etherealPlays = combat.GetEtherealPlaysBeforePrediction(player);
+        foreach (CombatPredictionHistoryEntry entry in simulator.History)
+        {
+            if (entry is CombatPredictionCardPlayFinishedEntry finished
+                && finished.WasEthereal
+                && ReferenceEquals(finished.CardPlay.Player, player))
+            {
+                etherealPlays++;
+            }
+        }
+        battle.SetCounter(FlashCounter.EtherealPlays, etherealPlays);
         int orbChannels = 0;
         foreach (CombatPredictionHistoryEntry entry in simulator.History)
         {
@@ -338,7 +366,7 @@ internal static class FlashStateImporter
     }
 
     private static void ImportPowers(ref FlashBattle battle, SimulatedCombatState combat, Player player, IReadOnlyList<Creature> known,
-        FlashStateProjections projections)
+        Creature? osty, FlashStateProjections projections)
     {
         IReadOnlyList<PowerModel> powers = combat.EffectivePowers();
         // Group by owner index while keeping the existing listener order within each owner.
@@ -348,7 +376,7 @@ internal static class FlashStateImporter
             PowerModel power = powers[order];
             if (power.Amount == 0)
                 continue;
-            ordered.Add((Owner(power.Owner, player, known), order, power));
+            ordered.Add((Owner(power.Owner, player, known, osty), order, power));
         }
         ordered.Sort((left, right) => left.Owner != right.Owner ? left.Owner.CompareTo(right.Owner) : left.Order.CompareTo(right.Order));
         if (ordered.Count > FlashLimits.Powers)
@@ -371,8 +399,8 @@ internal static class FlashStateImporter
             {
                 Id = id,
                 Owner = owner,
-                Applier = power.Applier == null ? FlashLimits.NoOwner : Owner(power.Applier, player, known),
-                Target = power._target == null ? FlashLimits.NoOwner : Owner(power._target, player, known),
+                Applier = power.Applier == null ? FlashLimits.NoOwner : Owner(power.Applier, player, known, osty),
+                Target = power._target == null ? FlashLimits.NoOwner : Owner(power._target, player, known, osty),
                 Flags = flags,
                 Amount = power.Amount,
                 AmountOnTurnStart = power.AmountOnTurnStart,
@@ -622,10 +650,12 @@ internal static class FlashStateImporter
         }
     }
 
-    private static byte Owner(Creature creature, Player player, IReadOnlyList<Creature> known)
+    private static byte Owner(Creature creature, Player player, IReadOnlyList<Creature> known, Creature? osty)
     {
         if (ReferenceEquals(creature, player.Creature))
             return FlashLimits.PlayerOwner;
+        if (osty != null && ReferenceEquals(creature, osty))
+            return FlashLimits.OstyOwner;
         int index = IndexOf(known, creature);
         return index >= 0
             ? FlashKernel.EnemyOwner(index)

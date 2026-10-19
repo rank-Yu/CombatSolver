@@ -195,6 +195,7 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             case StranglePower:
             case StormPower:
             case SubroutinePower:
+            case OblivionPower:
             {
                 foreach ((AbstractModel model, object state) in store.EntriesForFlash())
                 {
@@ -574,7 +575,7 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             // a play) can only leave an already-drained map behind: no EffectivePowers entry reaches
             // its Before/AfterCardPlayed readers again, and a re-acquired power is a fresh native
             // instance with its own state. A non-empty map at a stable boundary is rejected.
-            if (model is AfterimagePower or StranglePower { Amount: 0 }
+            if (model is AfterimagePower or StranglePower or OblivionPower { Amount: 0 }
                 && state is CardPlayPairPredictionState retiredPair
                 && retiredPair.Amounts.Count == 0)
             {

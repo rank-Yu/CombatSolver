@@ -72,6 +72,8 @@ internal static class FlashScoreBridge
             PoisonPowerId = PowerId<PoisonPower>(),
             DemisePowerId = PowerId<DemisePower>(),
             DoomPowerId = PowerId<DoomPower>(),
+            SummonNextTurnPowerId = PowerId<SummonNextTurnPower>(),
+            DieForYouPowerId = PowerId<DieForYouPower>(),
             SleightOfFleshPowerId = PowerId<SleightOfFleshPower>(),
             RetainHandPowerId = PowerId<RetainHandPower>(),
             EnergyNextTurnPowerId = PowerId<EnergyNextTurnPower>(),
@@ -213,6 +215,7 @@ internal static class FlashScoreBridge
             CalculationExtraVar = names.Contains("CalculationExtra")
                 ? VarIndex(names, "CalculationExtra")
                 : VarIndex(names, "ExtraDamage"),
+            DoomThresholdVar = VarIndex(names, "DoomThreshold"),
             AttackHits = card switch
             {
                 TwinStrike or RipAndTear => FlashAttackHitKind.Two,
@@ -284,6 +287,15 @@ internal static class FlashScoreBridge
             PreciseCut => FlashCalculatedKind.NegativeHandCount,
             Murder => FlashCalculatedKind.CardsDrawn,
             CrescentSpear => FlashCalculatedKind.StarCardCount,
+            Unleash => FlashCalculatedKind.OstyCurrentHp,
+            Rattle => FlashCalculatedKind.OstyAttacksPlusOne,
+            Squeeze => FlashCalculatedKind.OstyAttackCardsMinusSelf,
+            Protector => FlashCalculatedKind.OstyMaxHp,
+            SoulStorm => FlashCalculatedKind.ExhaustSoulCount,
+            PullFromBelow => FlashCalculatedKind.EtherealPlays,
+            NoEscape => FlashCalculatedKind.DoomOverThreshold,
+            TimesUp => FlashCalculatedKind.TargetDoom,
+            DeathMarch => FlashCalculatedKind.NonHandDraws,
             _ => FlashCalculatedKind.Unsupported,
         };
     }

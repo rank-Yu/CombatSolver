@@ -222,12 +222,29 @@ internal sealed partial class SimulatedCombatState
             if (creature.Monster?.GetType().Name != "Aeonglass" || !KnownEnemies.Contains(creature))
                 return "aeonglass";
         }
+        // The simulated pet ledger is projected as the Osty creature. A key that is not a combat player,
+        // or an entry that no longer matches GetOsty (stale after a fork), cannot be projected.
+        if (_simulatedOsties != null)
+        {
+            foreach ((Player key, Creature value) in _simulatedOsties)
+            {
+                if (!Players.Contains(key) || !ReferenceEquals(GetOsty(key), value))
+                    return nameof(_simulatedOsties);
+            }
+        }
+        if (_simulatedOstyMaxHp != null)
+        {
+            foreach ((Creature osty, int value) in _simulatedOstyMaxHp)
+            {
+                if (Players.Count == 0 || !ReferenceEquals(GetOsty(Players[0]), osty)
+                    || _predictionState == null || value != _predictionState.GetCreature(osty).MaxHp)
+                    return nameof(_simulatedOstyMaxHp);
+            }
+        }
         if (_knowledgeDemonCurseCounters is { Count: > 0 })
             return nameof(_knowledgeDemonCurseCounters);
         if (_pressureGunBonus is { Count: > 0 })
             return nameof(_pressureGunBonus);
-        if (_simulatedOsties is { Count: > 0 } || _simulatedOstyMaxHp is { Count: > 0 })
-            return "osty";
         if (_steamEruptionDamage is { Count: > 0 } || _steamEruptionPhases is { Count: > 0 })
             return "steam eruption";
         // Possession ledgers are projected into the matching power's Aux0 (one player target).

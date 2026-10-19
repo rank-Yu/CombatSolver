@@ -207,6 +207,7 @@ internal static class FlashRulesCompiler
             Keywords = FlashStateImporter.MapKeywords(copy.Keywords),
             MaxUpgradeLevel = copy.MaxUpgradeLevel,
             Tags = MapTags(copy.Tags),
+            IsSoul = copy.Id.Entry == "SOUL",
             Vars = vars,
         };
     }
