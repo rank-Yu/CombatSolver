@@ -301,6 +301,13 @@ internal sealed class HellraiserPredictionState(HellraiserPower power) : IPredic
         power.GetInternalData<HellraiserPower.Data>().infiniteAutoPlaysThisTurn;
 
     public object Fork(PredictionForkContext context) => MemberwiseClone();
+
+    /// <summary>
+    /// The model's own counter for the Flash bridge's projection: when no store entry exists, the
+    /// entry constructor would have read this field, so the value is the same.
+    /// </summary>
+    internal static int ModelInfiniteAutoPlays(HellraiserPower power)
+        => power.GetInternalData<HellraiserPower.Data>().infiniteAutoPlaysThisTurn;
 }
 
 internal sealed class CacophonyPredictionState(CacophonyPower power) : IPredictionStateForkable

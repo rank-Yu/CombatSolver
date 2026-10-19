@@ -171,23 +171,13 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
                 }
                 break;
             }
-            // HellraiserPower keeps infiniteAutoPlaysThisTurn in HellraiserPredictionState. Every
-            // admitted root has finite-HP enemies (WaterfallGiant's infinite display HP is not
-            // admitted), so the native finite branch resets the counter on every draw and the only
-            // representable stable value is zero.
-            case HellraiserPower:
-            {
-                foreach ((AbstractModel model, object state) in store.EntriesForFlash())
-                {
-                    if (!ReferenceEquals(model, power) || state is not HellraiserPredictionState hellraiser)
-                        continue;
-                    if (hellraiser.InfiniteAutoPlaysThisTurn != 0)
-                        throw new FlashImportException(FlashRejection.UnrepresentableState,
-                            "Hellraiser 无限生命自动打出计数非零");
-                    _claimed.Add(state);
-                }
+            // HellraiserPower keeps infiniteAutoPlaysThisTurn in HellraiserPredictionState; Aux0
+            // carries it for the Waterfall Giant's infinite-HP branch. Without a store entry the
+            // entry constructor would read the model's internal data, so that field is the fallback.
+            case HellraiserPower hellraiser:
+                target.Aux0 = Claim<HellraiserPredictionState>(power)?.InfiniteAutoPlaysThisTurn
+                    ?? HellraiserPredictionState.ModelInfiniteAutoPlays(hellraiser);
                 break;
-            }
             // CalamityPower pairs an Attack play with the power amount in CardPlayPairPredictionState.
             // The pair is removed by AfterCardPlayed, so a stable boundary has an empty map.
             case CalamityPower:

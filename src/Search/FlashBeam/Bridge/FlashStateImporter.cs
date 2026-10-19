@@ -539,9 +539,17 @@ internal static class FlashStateImporter
         }
         foreach (PredictedCard card in dampen.Keys)
         {
-            if (!imported.Contains(card))
-                throw new FlashImportException(FlashRejection.UnrepresentableState,
-                    $"Dampen 记录不在牌堆中：{card.Preview.Id.Entry}");
+            if (imported.Contains(card))
+                continue;
+            // A transformed/removed card leaves the combat piles but its downgraded model stays in
+            // SimulatedCombatState._dampenOriginalUpgrades. RestoreDampenedCards later upgrades that
+            // object and drops the record; HasBeenRemovedFromState makes CardPileCmd.Add refuse to put
+            // it back in a pile, so the model value has no further settlement effect. Anything else
+            // outside the piles could re-enter combat with a downgraded level and is rejected.
+            if (card.Preview.HasBeenRemovedFromState)
+                continue;
+            throw new FlashImportException(FlashRejection.UnrepresentableState,
+                $"Dampen 记录不在牌堆中：{card.Preview.Id.Entry}");
         }
     }
 

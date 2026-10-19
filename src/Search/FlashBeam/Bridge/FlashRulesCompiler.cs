@@ -112,6 +112,7 @@ internal static class FlashRulesCompiler
         if (known.Count > FlashLimits.Enemies)
             throw new FlashImportException(FlashRejection.Capacity, $"敌人数 {known.Count}");
         List<ushort> spawnClosure = SpawnClosure(known);
+        builder.HasInfiniteHpDisplayMonster = HasInfiniteHpDisplayMonster(known, spawnClosure);
         AddGeneratedCardClosure(builder, simulator, combat, player, spawnClosure);
         builder.RootEnemyCount = known.Count;
         builder.HasEncounter = combat.Encounter != null;
@@ -133,6 +134,29 @@ internal static class FlashRulesCompiler
         foreach (ushort monsterId in spawnClosure)
             CompileSpawnedMonster(builder, simulator, monsterId);
         return builder.Build();
+    }
+
+    /// <summary>
+    /// Native <c>HpDisplay.InfiniteWithoutNumbers</c> is set only by the Waterfall Giant's steam
+    /// eruption rewrite; a root with no such monster (known or spawnable) skips Hellraiser's scan.
+    /// </summary>
+    private static bool HasInfiniteHpDisplayMonster(IReadOnlyList<Creature> known, IReadOnlyList<ushort> spawnClosure)
+    {
+        foreach (Creature creature in known)
+        {
+            if (creature.Monster is { } monster
+                && FlashRegistry.TryMonster(monster.Id.Entry, out ushort id)
+                && FlashRegistry.Monster(id).HasInfiniteHpDisplay)
+            {
+                return true;
+            }
+        }
+        foreach (ushort monsterId in spawnClosure)
+        {
+            if (FlashRegistry.Monster(monsterId).HasInfiniteHpDisplay)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -236,11 +260,16 @@ internal static class FlashRulesCompiler
 
     /// <summary>
     /// Adds the stats of <paramref name="upgrade"/> and, for an upgradable card, of the next level, so
-    /// in-combat upgrades (<c>FlashKernel.UpgradeCard</c>) find their target level.
+    /// in-combat upgrades (<c>FlashKernel.UpgradeCard</c>) find their target level. An upgraded card's
+    /// base level is added too: MagiKnight's Dampen resets every upgraded card to level 0
+    /// (<c>SimulatedCombatState.ApplyDampen</c> / <c>FlashKernel.DowngradeCard</c>) and the downgraded
+    /// card can be read and played before the last caster dies and restores it.
     /// </summary>
     private static void AddStatsWithUpgrade(FlashRulesBuilder builder, ushort id, int upgrade, CardModel canonical, Player player)
     {
         builder.HasDecimalCardVars |= FlashRegistry.Card(id).UsesDecimalDamageVar;
+        if (upgrade > 0 && !builder.HasCard(id, 0))
+            builder.SetCard(id, 0, CanonicalStats(canonical, 0, player));
         if (!builder.HasCard(id, upgrade))
             builder.SetCard(id, upgrade, CanonicalStats(canonical, upgrade, player));
         if (upgrade < canonical.MaxUpgradeLevel && !builder.HasCard(id, upgrade + 1))
@@ -731,6 +760,7 @@ internal static class FlashRulesCompiler
             Nodes = nodes,
             InitialNode = initial,
             PendingInitialMoveNode = pendingInitial,
+            InitialMoveLogged = ai.Machine._initialState is MoveState,
             StunnedNode = stunned,
             ReviveNode = revive,
             InitialHpMin = monster.MinInitialHp,
