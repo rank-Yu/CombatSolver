@@ -88,6 +88,8 @@ internal static class FlashScoreBridge
             ReattachPowerId = PowerId<ReattachPower>(),
             AdaptablePowerId = PowerId<AdaptablePower>(),
             BodySlamCardId = CardId<BodySlam>(),
+            TheHuntCardId = CardId<TheHunt>(),
+            TheHuntPowerId = PowerId<TheHuntPower>(),
             BufferPowerId = PowerId<MegaCrit.Sts2.Core.Models.Powers.BufferPower>(),
             NoDrawPowerId = PowerId<NoDrawPower>(),
             TheGambitPowerId = PowerId<TheGambitPower>(),

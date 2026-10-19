@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Factories;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.CardPools;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Monsters;
 using MegaCrit.Sts2.Core.Models.Modifiers;
@@ -200,6 +201,13 @@ internal static class FlashRulesCompiler
             Type = (FlashCardType)(byte)copy.Type,
             Target = (FlashTargetType)(byte)copy.TargetType,
             Rarity = (FlashCardRarity)(byte)copy.Rarity,
+            Pool = copy.Pool switch
+            {
+                ColorlessCardPool => FlashTransformPool.Colorless,
+                StatusCardPool => FlashTransformPool.Status,
+                CurseCardPool => FlashTransformPool.Curse,
+                _ => FlashTransformPool.Character,
+            },
             EnergyCost = copy.EnergyCost._base,
             CostsX = copy.EnergyCost.CostsX,
             StarCost = copy.BaseStarCost,
@@ -398,6 +406,12 @@ internal static class FlashRulesCompiler
             FlashCardPools.OtherCharacterAttacks => OtherCharacterAttacks(player, constraint),
             FlashCardPools.CharacterPowers => player.GetUnlockedCharacterCards(constraint)
                 .Where(static card => card.Type == CardType.Power),
+            FlashCardPools.CharacterEthereal => player.GetUnlockedCharacterCards(constraint)
+                .Where(static card => card.Keywords.Contains(CardKeyword.Ethereal)),
+            FlashCardPools.StatusAll => ModelDb.CardPool<StatusCardPool>()
+                .GetUnlockedCards(player.UnlockState, constraint),
+            FlashCardPools.CurseAll => ModelDb.CardPool<CurseCardPool>()
+                .GetUnlockedCards(player.UnlockState, constraint),
             _ => throw new FlashImportException(FlashRejection.UnsupportedClosure, $"未知卡池 {poolKey}"),
         };
         List<CardModel> candidates = cards.FilterForCombatAndPlayerCount(constraint).ToList();

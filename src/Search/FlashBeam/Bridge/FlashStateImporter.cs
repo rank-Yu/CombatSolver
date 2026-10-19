@@ -413,7 +413,7 @@ internal static class FlashStateImporter
                 Target = power._target == null ? FlashLimits.NoOwner : Owner(power._target, player, known, osty),
                 Flags = flags,
                 Amount = power.Amount,
-                AmountOnTurnStart = power.AmountOnTurnStart,
+                AmountOnTurnStart = def.UsesAmountOnTurnStart ? power.AmountOnTurnStart : 0,
             };
             projections.ProjectPower(power, ref battle.Powers[index]);
         }

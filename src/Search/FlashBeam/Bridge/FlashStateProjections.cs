@@ -210,6 +210,7 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             case StormPower:
             case SubroutinePower:
             case OblivionPower:
+            case SerpentFormPower:
             {
                 foreach ((AbstractModel model, object state) in store.EntriesForFlash())
                 {
@@ -339,6 +340,11 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             case DemonTongue tongue:
                 target.Counter = (Claim<DemonTonguePredictionState>(relic)?.TriggeredThisTurn
                     ?? tongue._triggeredThisTurn) ? 1 : 0;
+                break;
+            // BeltBuckle.Counter = dexterity applied (StatefulRelicState.Current; the root snapshot
+            // already includes the pre-combat application, and AfterPotionUsed reapplies it once).
+            case BeltBuckle:
+                target.Counter = ClaimStatefulRelic(relic).Current;
                 break;
             // HappyFlower.Counter = turns seen in the cycle (StatefulRelicState Current = TurnsSeen).
             case HappyFlower:
@@ -608,9 +614,17 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             // a play) can only leave an already-drained map behind: no EffectivePowers entry reaches
             // its Before/AfterCardPlayed readers again, and a re-acquired power is a fresh native
             // instance with its own state. A non-empty map at a stable boundary is rejected.
-            if (model is AfterimagePower or StranglePower or OblivionPower { Amount: 0 }
+            if (model is AfterimagePower or StranglePower or OblivionPower or SerpentFormPower { Amount: 0 }
                 && state is CardPlayPairPredictionState retiredPair
                 && retiredPair.Amounts.Count == 0)
+            {
+                continue;
+            }
+            // PanachePower is instanced and removes itself after its 5-card cycle. The retired
+            // instance's CardsLeft/AlreadyApplied are only read by that instance's Before/After
+            // CardPlayed and SynchronizePanacheState over positive EffectivePowers; a re-acquired
+            // Panache is a new instance with a fresh state.
+            if (model is PanachePower { Amount: 0 } && state is PanachePredictionState)
             {
                 continue;
             }
