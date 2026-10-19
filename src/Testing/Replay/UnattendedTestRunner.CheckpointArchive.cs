@@ -121,7 +121,7 @@ internal sealed partial class UnattendedTestRunner
             ?? JsonSerializer.SerializeToNode(false, UnattendedTestFiles.JsonOptions);
         // Preserve explicitly recorded false values as well as true. Archives that
         // predate these fields keep the existing legacy settings fallback.
-        foreach (string name in new[] { "useNoveltyPortfolio", "useBeamWidthPortfolio", "useEarlyTurnExploration", "predictPotionReward" })
+        foreach (string name in new[] { "useNoveltyPortfolio", "useBeamWidthPortfolio", "useEarlyTurnExploration", "predictPotionReward", "flashSearchMode" })
             if (recorded[name] != null)
                 settings[name] = recorded[name]!.DeepClone();
         foreach (string name in new[] { "potionDirectives", "actTransitionBossHpStrategy", "finalBossHpStrategy", "acceptableBattleHpLoss", "stopAtAcceptableBattleHpLoss", "searchMaxDegreeOfParallelism" })
@@ -188,7 +188,7 @@ internal sealed partial class UnattendedTestRunner
         JsonObject policy = recorded == null ? new JsonObject() : (JsonObject)recorded.DeepClone();
         if (recorded == null && _checkpointImport["legacySettings"] is JsonObject legacy)
         {
-            foreach (string key in new[] { "potionPolicy", "potionDirectives", "growthBudgets", "relicStrategyEnabled", "relicCounterRules", "brightestFlameMaxHpLossLimit", "actTransitionBossHpStrategy", "finalBossHpStrategy", "acceptableBattleHpLoss", "stopAtAcceptableBattleHpLoss", "searchMaxDegreeOfParallelism", "useNoveltyPortfolio", "useBeamWidthPortfolio", "useEarlyTurnExploration", "predictPotionReward" })
+            foreach (string key in new[] { "potionPolicy", "potionDirectives", "growthBudgets", "relicStrategyEnabled", "relicCounterRules", "brightestFlameMaxHpLossLimit", "actTransitionBossHpStrategy", "finalBossHpStrategy", "acceptableBattleHpLoss", "stopAtAcceptableBattleHpLoss", "searchMaxDegreeOfParallelism", "useNoveltyPortfolio", "useBeamWidthPortfolio", "useEarlyTurnExploration", "predictPotionReward", "flashSearchMode" })
                 if (legacy[key] != null)
                     policy[key] = legacy[key]!.DeepClone();
             if (_checkpointImport["legacySearchProfiles"] is JsonObject profiles)
@@ -203,7 +203,7 @@ internal sealed partial class UnattendedTestRunner
             {
                 "potionPolicy", "potionDirectives", "growthBudgets", "relicStrategyEnabled", "relicCounterRules", "brightestFlameMaxHpLossLimit", "actTransitionBossHpStrategy", "finalBossHpStrategy",
                 "acceptableBattleHpLoss", "stopAtAcceptableBattleHpLoss", "searchMaxDegreeOfParallelism", "profile", "fixedBudget", "act3BossStrategy",
-                "useNoveltyPortfolio", "useBeamWidthPortfolio", "useEarlyTurnExploration", "predictPotionReward",
+                "useNoveltyPortfolio", "useBeamWidthPortfolio", "useEarlyTurnExploration", "predictPotionReward", "flashSearchMode",
             };
             foreach ((string key, JsonNode? value) in overrides)
             {

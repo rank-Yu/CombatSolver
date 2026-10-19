@@ -1984,6 +1984,7 @@ internal sealed partial class UnattendedTestRunner
             UnattendedTestRequest request = runner._request;
             if (runner._checkpointImport == null
                 && !request.PerformancePresetForTest.HasValue
+                && !request.FlashSearchModeForTest.HasValue
                 && !request.SearchBeamWidthForTest.HasValue
                 && !request.SearchMaxExpandedNodesForTest.HasValue
                 && !request.ShortMaxCardBranchesPerNodeForTest.HasValue
@@ -2056,6 +2057,8 @@ internal sealed partial class UnattendedTestRunner
                     ?? _settingsBeforeTest.EnableDetailedDiagnosticLogs,
                 PotionPolicy = request.PotionPolicyForTest
                     ?? testSettings.PotionPolicy,
+                FlashSearchMode = request.FlashSearchModeForTest
+                    ?? testSettings.FlashSearchMode,
             });
             FastModeType fastModeBeforeDeployment = SaveManager.Instance.PrefsSave.FastMode;
             if (request.PerformancePresetForTest is { } expectedPreset)
@@ -2066,6 +2069,9 @@ internal sealed partial class UnattendedTestRunner
                         : expectedPreset);
             }
             SolverSettingsSnapshot snapshot = SolverSettings.Capture();
+            if (request.FlashSearchModeForTest is { } expectedFlash
+                && snapshot.FlashSearchMode != expectedFlash)
+                throw new InvalidOperationException($"测试 Flash 模式为 {snapshot.FlashSearchMode}，预期 {expectedFlash}。");
             if (request.SearchBeamWidthForTest is { } expectedBeam
                 && snapshot.Profile.BeamWidth != expectedBeam)
                 throw new InvalidOperationException($"测试 Beam 为 {snapshot.Profile.BeamWidth}，预期 {expectedBeam}。");

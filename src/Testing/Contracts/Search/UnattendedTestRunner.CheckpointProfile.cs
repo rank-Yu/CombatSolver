@@ -58,8 +58,8 @@ internal sealed partial class UnattendedTestRunner
         {
             foreach (var flags in new[]
             {
-                (Novelty: true, Beam: false, Early: false, Reward: false),
-                (Novelty: false, Beam: true, Early: true, Reward: true),
+                (Novelty: true, Beam: false, Early: false, Reward: false, Flash: FlashSearchMode.On),
+                (Novelty: false, Beam: true, Early: true, Reward: true, Flash: FlashSearchMode.Off),
             })
             {
                 SolverSettingsData current = original with
@@ -68,6 +68,7 @@ internal sealed partial class UnattendedTestRunner
                     UseBeamWidthPortfolio = !flags.Beam,
                     UseEarlyTurnExploration = !flags.Early,
                     PredictPotionReward = !flags.Reward,
+                    FlashSearchMode = flags.Flash == FlashSearchMode.On ? FlashSearchMode.Off : FlashSearchMode.On,
                 };
                 JsonObject recorded = JsonSerializer.SerializeToNode(current, UnattendedTestFiles.JsonOptions)!.AsObject();
                 recorded["potionPolicy"] = JsonSerializer.SerializeToNode(current.PotionPolicy, UnattendedTestFiles.JsonOptions);
@@ -77,27 +78,31 @@ internal sealed partial class UnattendedTestRunner
                 recorded["useBeamWidthPortfolio"] = flags.Beam;
                 recorded["useEarlyTurnExploration"] = flags.Early;
                 recorded["predictPotionReward"] = flags.Reward;
+                recorded["flashSearchMode"] = JsonSerializer.SerializeToNode(flags.Flash, UnattendedTestFiles.JsonOptions);
                 _checkpointImport = new JsonObject { ["resolvedPolicy"] = recorded };
                 SolverSettingsData restored = ApplyRecordedCheckpointPolicy(current);
                 if (restored.UseNoveltyPortfolio != flags.Novelty
                     || restored.UseBeamWidthPortfolio != flags.Beam
                     || restored.UseEarlyTurnExploration != flags.Early
-                    || restored.PredictPotionReward != flags.Reward)
+                    || restored.PredictPotionReward != flags.Reward
+                    || restored.FlashSearchMode != flags.Flash)
                     throw new InvalidOperationException("Recorded portfolio/reward switches were replaced by current settings.");
                 SolverSettings.ApplyForTesting(restored);
                 SearchPolicySnapshot frozen = SolverController.CaptureSearchPolicy(SolverSettings.Capture(), combat, false, null);
                 if (frozen.UseNoveltyPortfolio != flags.Novelty
                     || frozen.UseBeamWidthPortfolio != flags.Beam
                     || frozen.EarlyTurnExplorationDepth != (flags.Early ? 2 : 0)
-                    || frozen.PredictPotionReward != flags.Reward)
+                    || frozen.PredictPotionReward != flags.Reward
+                    || frozen.FlashMode != flags.Flash)
                     throw new InvalidOperationException("Recorded portfolio/reward switches changed during policy capture.");
-                foreach (string key in new[] { "useNoveltyPortfolio", "useBeamWidthPortfolio", "useEarlyTurnExploration", "predictPotionReward" })
+                foreach (string key in new[] { "useNoveltyPortfolio", "useBeamWidthPortfolio", "useEarlyTurnExploration", "predictPotionReward", "flashSearchMode" })
                     recorded.Remove(key);
                 SolverSettingsData legacy = ApplyRecordedCheckpointPolicy(current);
                 if (legacy.UseNoveltyPortfolio != current.UseNoveltyPortfolio
                     || legacy.UseBeamWidthPortfolio != current.UseBeamWidthPortfolio
                     || legacy.UseEarlyTurnExploration != current.UseEarlyTurnExploration
-                    || legacy.PredictPotionReward != current.PredictPotionReward)
+                    || legacy.PredictPotionReward != current.PredictPotionReward
+                    || legacy.FlashSearchMode != current.FlashSearchMode)
                     throw new InvalidOperationException("Unrecorded legacy switches changed their existing fallback.");
             }
             _completedChecks.Add("CheckpointPolicy:RecordedTrueAndFalseSwitches:FrozenPolicy:LegacyFallback");

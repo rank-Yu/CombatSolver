@@ -1276,6 +1276,7 @@ internal static class CombatBugReportExporter
         captured["earlyTurnExplorationBudgetMilliseconds"] =
             policy.EarlyTurnExplorationBudgetMilliseconds;
         captured["predictPotionReward"] = policy.PredictPotionReward;
+        captured["flashSearchMode"] = JsonSerializer.SerializeToNode(policy.FlashMode, JsonOptions);
         captured["noveltyBudget"] = JsonSerializer.SerializeToNode(policy.NoveltyBudget, JsonOptions);
         captured["beamWidthPortfolioWidths"] = JsonSerializer.SerializeToNode(
             policy.BeamWidthPortfolioWidths,
@@ -1336,7 +1337,7 @@ internal static class CombatBugReportExporter
             "noGcRegionBudgetGigabytes", "shortBeamWidth", "deepBeamWidth", "shortMaxExpandedNodes", "deepMaxExpandedNodes",
             "shortMaxCardBranchesPerNode", "deepMaxCardBranchesPerNode", "shortMaxPileChoiceBranchesPerAction",
             "deepMaxPileChoiceBranchesPerAction", "shortMaxHandChoiceBranchesPerAction", "deepMaxHandChoiceBranchesPerAction",
-            "deploymentFastMode", "deploymentInterActionDelaySeconds",
+            "deploymentFastMode", "deploymentInterActionDelaySeconds", "flashSearchMode",
         };
         foreach (string key in settings.Select(item => item.Key).Where(key => !fields.Contains(key)).ToArray())
             settings.Remove(key);
