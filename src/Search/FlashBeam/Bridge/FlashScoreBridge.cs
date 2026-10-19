@@ -76,6 +76,7 @@ internal static class FlashScoreBridge
             RetainHandPowerId = PowerId<RetainHandPower>(),
             EnergyNextTurnPowerId = PowerId<EnergyNextTurnPower>(),
             DrawCardsNextTurnPowerId = PowerId<DrawCardsNextTurnPower>(),
+            StarNextTurnPowerId = PowerId<StarNextTurnPower>(),
             FreeAttackPowerId = PowerId<FreeAttackPower>(),
             FreeSkillPowerId = PowerId<FreeSkillPower>(),
             FreePowerPowerId = PowerId<FreePowerPower>(),
@@ -282,6 +283,7 @@ internal static class FlashScoreBridge
             MementoMori => FlashCalculatedKind.CardsDiscardedThisTurn,
             PreciseCut => FlashCalculatedKind.NegativeHandCount,
             Murder => FlashCalculatedKind.CardsDrawn,
+            CrescentSpear => FlashCalculatedKind.StarCardCount,
             _ => FlashCalculatedKind.Unsupported,
         };
     }

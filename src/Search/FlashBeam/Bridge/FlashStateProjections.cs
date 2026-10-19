@@ -469,6 +469,26 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             case PumpkinCandle candle:
                 target.Counter = candle.KindleCount;
                 break;
+            // GalacticDust.Counter = stars spent toward the next block (StatefulRelicState Current;
+            // TriggerRelicsAfterStarsSpent accumulates and reduces it modulo the Stars variable).
+            case GalacticDust:
+                target.Counter = ClaimStatefulRelic(relic).Current;
+                break;
+            // MiniRegent.Counter = used this turn (StatefulRelicState Current = _usedThisTurn).
+            case MiniRegent:
+                target.Counter = ClaimStatefulRelic(relic).Current;
+                break;
+            // BrilliantScarf.Counter = non-auto cards played this turn (CounterPredictionState; the
+            // constructor reads the live _cardsPlayedThisTurn field when no entry exists).
+            case BrilliantScarf scarf:
+                target.Counter = Claim<CounterPredictionState>(relic)?.Value ?? scarf._cardsPlayedThisTurn;
+                break;
+            // Regalite.Counter = used this turn (RegalitePredictionState.UsedThisTurn; the constructor
+            // reads the live _usedThisTurn field when no entry exists).
+            case Regalite regalite:
+                target.Counter = (Claim<RegalitePredictionState>(relic)?.UsedThisTurn
+                    ?? regalite._usedThisTurn) ? 1 : 0;
+                break;
             default:
                 break;
         }

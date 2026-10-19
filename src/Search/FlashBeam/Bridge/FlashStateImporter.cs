@@ -148,6 +148,7 @@ internal static class FlashStateImporter
         battle.SetCounter(FlashCounter.NonHandDrawsThisTurn, combat.GetNonHandDrawsThisTurn(player));
         battle.SetCounter(FlashCounter.StatusCardsDrawnThisTurn, combat.GetStatusCardsDrawnThisTurn(player));
         battle.SetCounter(FlashCounter.EnergySpentThisTurn, combat.GetEnergySpentThisTurn(player));
+        battle.SetCounter(FlashCounter.StarsGainedThisTurn, combat.GetStarsGainedThisTurn(player));
         battle.SetCounter(FlashCounter.CumulativeHpLost, combat.GetCumulativeHpLost(owner));
         battle.SetCounter(FlashCounter.RecoveredHp, combat.GetRecoveredHp(owner));
         // CalculatedVarSpecRegistry.CountUnblockedDamageEvents: root history plus the predicted

@@ -173,7 +173,32 @@ internal sealed partial class SimulatedCombatState
         if (_paleBlueDotActivated is { Count: > 0 })
             return nameof(_paleBlueDotActivated);
         if (_swordSageReplayBonuses is { Count: > 0 })
-            return nameof(_swordSageReplayBonuses);
+        {
+            // NormalizeSwordSageReplays records one entry per Sovereign Blade even when no Sword Sage
+            // Power exists (applied bonus 0). With no SwordSagePower anywhere the target bonus is
+            // always 0, so every entry is at its target and no reader can observe the table; the
+            // per-blade bonus is already part of the imported BaseReplayCount. A positive power (the
+            // card is not implemented) or a non-zero applied bonus is still rejected.
+            bool inert = true;
+            foreach (int applied in _swordSageReplayBonuses.Values)
+            {
+                if (applied != 0)
+                {
+                    inert = false;
+                    break;
+                }
+            }
+            foreach (Player player in Players)
+            {
+                if (GetAmount<SwordSagePower>(player.Creature) != 0)
+                {
+                    inert = false;
+                    break;
+                }
+            }
+            if (!inert)
+                return nameof(_swordSageReplayBonuses);
+        }
         if (_unsettlingLampTriggeringCards is { Count: > 0 } || _unsettlingLampInternalPowerTypes is { Count: > 0 })
             return "unsettling lamp";
         // Nemesis toggles are projected into the power's Aux0; every entry must belong to a known
