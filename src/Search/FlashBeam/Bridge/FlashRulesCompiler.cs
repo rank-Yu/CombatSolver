@@ -63,6 +63,9 @@ internal static class FlashRulesCompiler
             || player.Character is MegaCrit.Sts2.Core.Models.Characters.Regent
                 or MegaCrit.Sts2.Core.Models.Characters.Necrobinder
                 or MegaCrit.Sts2.Core.Models.Characters.Silent;
+        // Enchantments only enter combat from the out-of-combat deck; the root piles are the complete
+        // source of the two turn-phase enchantment hooks, so a root without them skips the dispatch.
+        bool hasShuffleOrderEnchantment = false, hasBeforeFlushEnchantment = false;
         foreach (SimCardPile pile in new[] { playerState.Hand, playerState.DrawPile, playerState.DiscardPile,
                      playerState.ExhaustPile, playerState.PlayPile })
         {
@@ -72,8 +75,17 @@ internal static class FlashRulesCompiler
                 FlashCardDef def = FlashRegistry.Card(CardId(card.Preview));
                 hasIdentityContent |= def.UsesIdentityLedger || def.TracksFetchPlay
                     || def.MayGenerateIdentityContent || def.IsIdentityContent;
+                if (card.Preview.Enchantment is { } enchantment
+                    && FlashRegistry.TryEnchantment(enchantment.Id.Entry, out ushort enchantmentId))
+                {
+                    FlashHookMaskExt hooks = FlashRegistry.Enchantment(enchantmentId).HooksExt;
+                    hasShuffleOrderEnchantment |= (hooks & FlashHookMaskExt.ModifyShuffleOrder) != 0;
+                    hasBeforeFlushEnchantment |= (hooks & FlashHookMaskExt.BeforeFlush) != 0;
+                }
             }
         }
+        builder.HasShuffleOrderEnchantment = hasShuffleOrderEnchantment;
+        builder.HasBeforeFlushEnchantment = hasBeforeFlushEnchantment;
         foreach (PowerModel power in combat.EffectivePowers())
         {
             if (FlashRegistry.TryPower(power.Id.Entry, out ushort powerId))

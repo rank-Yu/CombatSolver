@@ -448,13 +448,17 @@ internal static class FlashStateImporter
     /// <summary>
     /// The existing engine dispatches some hooks over the run listeners, which include the deck versions of cards;
     /// Flash dispatches over the combat listeners only, so a deck card implementing one of those hooks rejects the root.
+    /// A definition may declare its out-of-combat deck copy inert when the existing handler provably does nothing
+    /// for a card that is not in a combat pile (Melancholy's <c>AfterDeath</c>).
     /// </summary>
     private static void RejectRunListenerDeckCards(Player player)
     {
         foreach (CardModel card in player.Deck.Cards)
         {
-            if (FlashRegistry.TryCard(card.Id.Entry, out ushort id)
-                && (FlashRegistry.Card(id).Hooks & FlashHookMask.RunListenerHooks) != 0)
+            if (!FlashRegistry.TryCard(card.Id.Entry, out ushort id))
+                continue;
+            FlashCardDef def = FlashRegistry.Card(id);
+            if ((def.Hooks & FlashHookMask.RunListenerHooks) != 0 && !def.DeckCopyOutsideCombatIsInert)
                 throw new FlashImportException(FlashRejection.UnsupportedCard, $"牌组卡 {card.Id.Entry} 带有局外监听 Hook");
         }
     }
