@@ -154,6 +154,10 @@ internal static class CalculatedVarSpecRegistry
         => ((SimulatedCombatState)simulator.State.CombatState).GetCardsGeneratedBeforePrediction(player)
            + simulator.History.OfType<CombatPredictionCardGeneratedEntry>().Count(entry => entry.Creator == player);
 
+    /// <summary>Read-only Flash import accessor for Supermassive's generated-card multiplier.</summary>
+    internal static int CountGeneratedCardsForFlash(CombatPredictionSimulator simulator, Player player)
+        => CountGeneratedCards(simulator, player);
+
     internal static int CountLightningChannels(CombatPredictionSimulator simulator, Player player)
         => ((SimulatedCombatState)simulator.State.CombatState).GetLightningChannelsBeforePrediction(player)
            + simulator.History.OfType<CombatPredictionOrbChanneledEntry>()

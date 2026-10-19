@@ -93,6 +93,13 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
                 target.Aux0 = (Claim<SkittishPredictionState>(power)?.HasGainedBlockThisTurn
                     ?? skittish.HasGainedBlockThisTurn) ? 1 : 0;
                 break;
+            // VoidFormPower.Aux0 = cardsPlayedThisTurn (AfterCardPlayedMirrors.HandleVoidFormPower
+            // stores it in VoidFormPredictionState; without an entry the constructor reads the model's
+            // internal data). The native hooks only visit positive EffectivePowers entries.
+            case VoidFormPower voidForm:
+                target.Aux0 = Claim<VoidFormPredictionState>(power)?.CardsPlayedThisTurn
+                    ?? voidForm.GetInternalData<VoidFormPower.Data>().cardsPlayedThisTurn;
+                break;
             // HardenedShellPower.Aux0 = damageReceivedThisTurn
             // (AfterDamageReceivedMirrors.HandleHardenedShellPower and
             // ModifyHpLostMirrors.HandleHardenedShellPower use HardenedShellPredictionState; without
@@ -567,6 +574,14 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             // CurlUpPower consumes itself in AfterCardPlayed; the store entry keeps Consumed and the
             // cleared card. AfterDamageReceived/AfterCardPlayed only visit a positive effective power.
             if (model is CurlUpPower { Amount: 0 } && state is CurlUpPredictionState)
+            {
+                continue;
+            }
+            // VoidFormPower's CardsPlayedThisTurn is read only by its two cost hooks, its
+            // AfterCardPlayed, the evaluation's GetPower lookup and the hidden-state fingerprint, all of
+            // which visit positive EffectivePowers entries; a removed power can never reach them again
+            // and re-acquiring it creates a fresh native instance.
+            if (model is VoidFormPower { Amount: 0 } && state is VoidFormPredictionState)
             {
                 continue;
             }

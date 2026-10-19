@@ -80,6 +80,7 @@ internal static class FlashScoreBridge
             DrawCardsNextTurnPowerId = PowerId<DrawCardsNextTurnPower>(),
             StarNextTurnPowerId = PowerId<StarNextTurnPower>(),
             FreeAttackPowerId = PowerId<FreeAttackPower>(),
+            VoidFormPowerId = PowerId<VoidFormPower>(),
             FreeSkillPowerId = PowerId<FreeSkillPower>(),
             FreePowerPowerId = PowerId<FreePowerPower>(),
             IllusionPowerId = PowerId<IllusionPower>(),
@@ -296,6 +297,7 @@ internal static class FlashScoreBridge
             NoEscape => FlashCalculatedKind.DoomOverThreshold,
             TimesUp => FlashCalculatedKind.TargetDoom,
             DeathMarch => FlashCalculatedKind.NonHandDraws,
+            Supermassive => FlashCalculatedKind.GeneratedCardCount,
             _ => FlashCalculatedKind.Unsupported,
         };
     }

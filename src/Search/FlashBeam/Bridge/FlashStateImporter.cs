@@ -83,7 +83,7 @@ internal static class FlashStateImporter
 
         ImportRng(ref battle, simulator.Rng);
         IReadOnlyList<Creature> known = combat.KnownEnemies;
-        ImportEnemies(ref battle, simulator, combat, known, rules, processedDeaths, projections);
+        ImportEnemies(ref battle, simulator, combat, player, known, rules, processedDeaths, projections);
         ImportPowers(ref battle, combat, player, known, osty, projections);
         ImportCards(ref battle, combat, playerState, rules);
         RejectRunListenerDeckCards(player);
@@ -220,6 +220,8 @@ internal static class FlashStateImporter
             }
         }
         battle.SetCounter(FlashCounter.EtherealPlays, etherealPlays);
+        battle.SetCounter(FlashCounter.CardsGeneratedThisCombat,
+            CalculatedVarSpecRegistry.CountGeneratedCardsForFlash(simulator, player));
         int orbChannels = 0;
         foreach (CombatPredictionHistoryEntry entry in simulator.History)
         {
@@ -246,8 +248,8 @@ internal static class FlashStateImporter
     }
 
     private static void ImportEnemies(ref FlashBattle battle, CombatPredictionSimulator simulator,
-        SimulatedCombatState combat, IReadOnlyList<Creature> known, FlashRules rules, IReadOnlySet<uint> processedDeaths,
-        FlashStateProjections projections)
+        SimulatedCombatState combat, Player player, IReadOnlyList<Creature> known, FlashRules rules,
+        IReadOnlySet<uint> processedDeaths, FlashStateProjections projections)
     {
         if (known.Count > FlashLimits.Enemies)
             throw new FlashImportException(FlashRejection.Capacity, $"敌人数 {known.Count}");
@@ -325,6 +327,14 @@ internal static class FlashStateImporter
                 enemy.Flags |= FlashEnemyFlags.DeathProcessed;
             foreach (string logged in ai.StateLog)
                 FlashKernel.LogMonsterMove(ref enemy, machine.NodeIndex(logged));
+            // SimulatedCombatState.GetPoweredAttackHitsThisTurn(player, enemy): BeatIntoShape's
+            // calculated-forge multiplier. The per-turn map is filled from root history on first read
+            // on the importer's private fork, so the caller's simulator is not mutated.
+            int poweredHits = combat.GetPoweredAttackHitsThisTurn(player.Creature, creature);
+            if (poweredHits > byte.MaxValue)
+                throw new FlashImportException(FlashRejection.UnrepresentableState,
+                    $"{monster.Id.Entry} 的本回合强化攻击命中数 {poweredHits} 超过 255");
+            enemy.PoweredAttackHitsThisTurn = checked((byte)poweredHits);
             projections.ProjectMonster(creature, FlashRegistry.Monster(monsterId), ref enemy);
         }
         IReadOnlyList<Creature> roster = combat.Enemies;

@@ -208,6 +208,7 @@ internal static class FlashRulesCompiler
             MaxUpgradeLevel = copy.MaxUpgradeLevel,
             Tags = MapTags(copy.Tags),
             IsSoul = copy.Id.Entry == "SOUL",
+            IsColorless = copy.VisualCardPool.IsColorless,
             Vars = vars,
         };
     }
