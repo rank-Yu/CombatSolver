@@ -72,7 +72,10 @@ internal static class FlashRouteMaterializer
         ContinuationPurpose? continuationPurpose = null,
         PotionFreePolicyBaseline? potionFreePolicyBaseline = null,
         bool? resetFixedPrefixSchedulingBaseline = null,
-        int profileScale = ProfileWidthScale)
+        int profileScale = ProfileWidthScale,
+        PlanCommitment? planCommitment = null,
+        int earlyTurnScoutDepth = 0,
+        Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null)
     {
         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
         Player player = root.PlayerIdentity;
@@ -138,12 +141,19 @@ internal static class FlashRouteMaterializer
         FlashPotionUsageForBridge potionUsage =
             CombatBeamSolver.CapturePotionUsageForFlash(searchRootSnapshot);
         int initialAutomaticPotionUses = potionUsage.PotionUseCount - potionUsage.ExplicitPotionUseCount;
+        FlashPlanCommitment? flashPlanCommitment = null;
+        int initialPlanPayoff = 0;
         FlashRules rules;
         FlashBattle battle;
         FlashScorer scorer;
         FlashBoundFeatures bound;
         try
         {
+            if (planCommitment is { } pendingPlan)
+            {
+                flashPlanCommitment = ToFlashPlanCommitment(pendingPlan);
+                initialPlanPayoff = CountPlanPayoffs(prefix, pendingPlan);
+            }
             rules = FlashRulesCompiler.Compile(searchRootSnapshot.Simulator, player);
             battle = FlashStateImporter.Import(searchRootSnapshot, player, rules,
                 potionUsage.PotionUseCount, requirePlayPhase: true);
@@ -209,6 +219,10 @@ internal static class FlashRouteMaterializer
             InitialAmbergrisUses = CountAmbergrisUses(prefix),
             AuditPotionPolicy = auditPotionPolicy,
             Act3BossStrategy = policy.Act3BossStrategy,
+            PlanCommitment = flashPlanCommitment,
+            InitialPlanPayoffCount = initialPlanPayoff,
+            EarlyTurnScoutDepth = earlyTurnScoutDepth,
+            InitialPlayerTurn = rootSnapshot.Turn,
         };
         // The offensive-reserved lane is a Flash-specific diversity seat (the existing RankBest has
         // no such lane). Short searches rely on it to keep aggressive lines; the production Medium
@@ -301,6 +315,15 @@ internal static class FlashRouteMaterializer
                 ConstraintFailure = $"materialize-potion-policy {ex.Message}",
             };
         }
+        if (planCommitment is { } commitment)
+        {
+            int realized = CountPlanPayoffs(plan, commitment);
+            if (realized != search.BestPayoffCount)
+            {
+                throw new FlashVerificationException(plan.Count,
+                    [$"plan payoff old={realized} flash={search.BestPayoffCount}"]);
+            }
+        }
         bool verifyPotion = auditPotionPolicy
             || minimumPotionUses != null
             || maximumPotionUses != null
@@ -318,7 +341,113 @@ internal static class FlashRouteMaterializer
                 ConstraintFailure = failure,
             };
         }
+        // Publish the scout frontier only after the whole Flash attempt, including materialization,
+        // succeeded. A later failure falls back to the existing solver, whose observer must be the only
+        // one that reports to the coordinator.
+        if (earlyTurnScoutObserver != null && search.ScoutLayers.Count > 0)
+        {
+            List<(int Turns, IReadOnlyList<EarlyTurnFrontierCandidate> Candidates)> layers = new(
+                search.ScoutLayers.Count);
+            foreach (FlashScoutLayer layer in search.ScoutLayers)
+            {
+                List<EarlyTurnFrontierCandidate> candidates = new(layer.Candidates.Count);
+                foreach (FlashScoutCandidate candidate in layer.Candidates)
+                {
+                    PlanAction[] actions = TranslateScoutRoute(
+                        replay, player, prefix, candidate.Actions, out StateFingerprint stateKey);
+                    candidates.Add(new EarlyTurnFrontierCandidate(
+                        layer.Turns, actions, stateKey, candidate.Score));
+                }
+                layers.Add((layer.Turns, candidates));
+            }
+            // Translate every layer before invoking the observer, so a mismatch cannot leave the
+            // coordinator with a partially published frontier.
+            foreach ((int turns, IReadOnlyList<EarlyTurnFrontierCandidate> candidates) in layers)
+                earlyTurnScoutObserver(turns, candidates);
+        }
         return new FlashSolveOutcome(result, FlashRejection.None, "", search, plan, admission, verification, watch.Elapsed);
+    }
+
+    /// <summary>
+    /// The Flash form of a <see cref="PlanCommitment"/>. <c>RegisteredPowerBenefit</c> reads the
+    /// existing <c>PowerCommitment.RealizedEvidence</c>, which FlashBeam does not model; the request is
+    /// rejected with the normal unsupported-request result instead of searching with a partial policy.
+    /// </summary>
+    private static FlashPlanCommitment ToFlashPlanCommitment(PlanCommitment plan)
+    {
+        if (plan.Payoff.Kind != PlanPayoffEvidenceKind.CardPlayed)
+        {
+            throw new FlashImportException(FlashRejection.UnsupportedRequest,
+                $"计划收益证据 {plan.Payoff.Kind} 未移植");
+        }
+        if (!FlashRegistry.TryCard(plan.Payoff.SourceId, out ushort cardId))
+        {
+            throw new FlashImportException(FlashRejection.UnsupportedRequest,
+                $"计划收益卡 {plan.Payoff.SourceId} 没有 Flash 定义");
+        }
+        return new FlashPlanCommitment(
+            plan.Kind == PlanCommitmentKind.CopyPower,
+            plan.OpenedTurn,
+            plan.Payoff.EarliestTurn,
+            FlashPlanPayoffKind.CardPlayed,
+            cardId);
+    }
+
+    /// <summary>The existing <c>PlanCommitment.CountRealizedPayoffs</c> over materialized actions.</summary>
+    private static int CountPlanPayoffs(IReadOnlyList<PlanAction> actions, PlanCommitment plan)
+    {
+        if (plan.Payoff.Kind != PlanPayoffEvidenceKind.CardPlayed)
+            throw new ArgumentOutOfRangeException(nameof(plan), "只有 CardPlayed 收益证据可计数。");
+        int count = 0;
+        foreach (PlanAction action in actions)
+        {
+            if (action.Kind == PlanActionKind.PlayCard
+                && action.Turn >= plan.Payoff.EarliestTurn
+                && string.Equals(action.CardId, plan.Payoff.SourceId, StringComparison.Ordinal))
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Replays a Flash scout route through the existing engine from the request root and returns the
+    /// translator's <see cref="PlanAction"/>s plus the end state's fingerprint. The scout is admitted
+    /// only for an empty fixed prefix, so the route starts at the request root.
+    /// </summary>
+    private static PlanAction[] TranslateScoutRoute(CombatBeamSolver replay, Player player,
+        IReadOnlyList<PlanAction> prefix, FlashAction[] route, out StateFingerprint stateKey)
+    {
+        SimulationSnapshot snapshot = replay.ReplayForFlash(prefix, null);
+        List<PlanAction> actions = new(prefix.Count + route.Length);
+        actions.AddRange(prefix);
+        try
+        {
+            for (int step = 0; step < route.Length; step++)
+            {
+                PlanAction planned;
+                SimulationSnapshot next;
+                try
+                {
+                    next = FlashChoiceTranslator.Replay(replay, snapshot, player, route[step],
+                        out planned);
+                }
+                catch (FlashChoiceMismatchException ex)
+                {
+                    throw new FlashVerificationException(step, [ex.Message]);
+                }
+                snapshot.ReleaseSimulator();
+                snapshot = next;
+                actions.Add(planned);
+            }
+            stateKey = snapshot.StateKey;
+            return [.. actions];
+        }
+        finally
+        {
+            snapshot.ReleaseSimulator();
+        }
     }
 
     private static int CountAmbergrisUses(IReadOnlyList<PlanAction> prefix)

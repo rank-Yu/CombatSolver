@@ -128,8 +128,9 @@ internal static class BeamSolveDispatch
     }
 
     /// <summary>
-    /// A fixed-prefix continuation solve. Requests with a potion policy or fixed-prefix state Flash
-    /// does not model are still refused with a stable reason and go straight to the existing solver.
+    /// A fixed-prefix continuation solve. The gate (<see cref="TakeOverBoundary"/>) offers plan members,
+    /// the plan pass's depth-one scout and the potion-constrained requests to Flash; requests with a
+    /// feature Flash does not model are refused with a stable reason and go straight to the existing solver.
     /// </summary>
     public static SolverResult SolveContinuation(ContinuationSearchRequest request)
     {
@@ -250,16 +251,17 @@ internal static class BeamSolveDispatch
     }
 
     /// <summary>
-    /// The continuation features Flash does not model in this batch. Commitment (plan vision and
-    /// representative seats) and early-turn scouts are separate structures; invalid potion bounds keep
-    /// the existing solver's own argument validation.
+    /// The continuation gate. Plan members and the plan pass's own depth-one scout are admitted by the
+    /// two plan helpers below; other early-turn scouts and invalid potion bounds keep the existing
+    /// solver (the latter for its own argument validation); potion-constrained requests must not
+    /// silently drop a retention switch Flash does not model.
     /// </summary>
     private static string? TakeOverBoundary(ContinuationSearchRequest request)
     {
         if (request.Commitment != null)
-            return "commitment";
+            return CanTakeOverPlanMember(request) ? null : "commitment";
         if (request.EarlyTurnScoutDepth != 0 || request.EarlyTurnScoutObserver != null)
-            return "early-turn-scout";
+            return CanTakeOverPlanScout(request) ? null : "early-turn-scout";
         if (request.MinimumPotionUses is < 0 || request.MaximumPotionUses is < 0)
             return "potion-bounds";
         if (request.MinimumPotionUses is { } minimum
@@ -277,6 +279,79 @@ internal static class BeamSolveDispatch
                 return "aggressive-power-commitment";
         }
         return null;
+    }
+
+    /// <summary>
+    /// A <c>ContinuationPurpose.PlanCommitment</c> member. The plan prefix is replayed by the existing
+    /// engine before the Flash root; the commitment adds route payoff counting and the CopyPower
+    /// representative seats (<c>CombatBeamSolver.Expansion</c> / <c>BeamRetentionPolicy</c>). Potion
+    /// bounds on a plan are not offered yet: only the potion-free form and the deferred plan's
+    /// no-override Smart form (the primary member's existing Flash potion path) are admitted.
+    /// </summary>
+    private static bool CanTakeOverPlanMember(ContinuationSearchRequest request)
+    {
+        if (request.Purpose != ContinuationPurpose.PlanCommitment
+            || request.Commitment is not { } plan
+            || request.EarlyTurnScoutDepth != 0
+            || request.EarlyTurnScoutObserver != null
+            || request.PotionFreePolicyBaseline != null
+            || request.EarliestPotionTurn != null
+            || request.MinimumPotionUses is not (null or 0)
+            || request.MaximumPotionUses is not (null or 0)
+            || plan.Payoff.Kind != PlanPayoffEvidenceKind.CardPlayed)
+        {
+            return false;
+        }
+        SearchPolicySnapshot policy = EffectivePolicy(request);
+        if (policy.PotionStrategy.HasForcedDirectives)
+            return false;
+        if (PlanPotionFree(request))
+            return true;
+        return request.PotionPolicyOverride == null
+            && request.MaximumPotionUses == null
+            && request.MinimumPotionUses == null
+            && policy.PotionPolicy == SolverPotionPolicy.Smart;
+    }
+
+    /// <summary>
+    /// The deferred-power plan's depth-one scout. Only the plan pass's own scout
+    /// (<c>RunDeferredPowerPlanSearchPass</c>, empty prefix, depth one) is offered to Flash; the other
+    /// early-turn exploration requests stay with the existing solver. The bridge translates the reported
+    /// Flash routes back to <see cref="EarlyTurnFrontierCandidate"/>s.
+    /// </summary>
+    private static bool CanTakeOverPlanScout(ContinuationSearchRequest request)
+    {
+        if (request.Purpose != ContinuationPurpose.PlanCommitment
+            || request.Commitment != null
+            || request.EarlyTurnScoutDepth != 1
+            || request.EarlyTurnScoutObserver == null
+            || request.Prefix.Length != 0
+            || request.PotionFreePolicyBaseline != null
+            || request.EarliestPotionTurn != null
+            || request.MaximumPotionUses is not (null or 0)
+            || request.MinimumPotionUses is not (null or 0))
+        {
+            return false;
+        }
+        return PlanPotionFree(request);
+    }
+
+    /// <summary>Whether a plan member or plan scout explicitly searches without potions.</summary>
+    private static bool PlanPotionFree(ContinuationSearchRequest request)
+    {
+        if (request.PotionPolicyOverride == SolverPotionPolicy.Disabled)
+            return true;
+        SearchPolicySnapshot policy = EffectivePolicy(request);
+        if (policy.PotionStrategy.HasForcedDirectives)
+            return false;
+        if (request.PotionPolicyOverride == SolverPotionPolicy.RequireAtLeastOne
+            || policy.PotionPolicy == SolverPotionPolicy.RequireAtLeastOne)
+        {
+            return false;
+        }
+        // A zero maximum means no explicit potion can be enumerated, matching the existing solver.
+        return request.MaximumPotionUses == 0
+            || policy.PotionPolicy == SolverPotionPolicy.Disabled;
     }
 
     /// <summary>Whether the request carries one of the potion features opened by this batch.</summary>
@@ -480,6 +555,9 @@ internal static class BeamSolveDispatch
                 earliestPotionTurn: request.EarliestPotionTurn,
                 continuationPurpose: request.Purpose,
                 potionFreePolicyBaseline: request.PotionFreePolicyBaseline,
+                planCommitment: request.Commitment,
+                earlyTurnScoutDepth: request.EarlyTurnScoutDepth,
+                earlyTurnScoutObserver: request.EarlyTurnScoutObserver,
                 resetFixedPrefixSchedulingBaseline: request.Purpose == ContinuationPurpose.SmartOpeningPotionPosterior
                     ? request.ResetFixedPrefixSchedulingBaseline : null);
             return new FlashAttempt(outcome, null, outcome.ConstraintFailure);
