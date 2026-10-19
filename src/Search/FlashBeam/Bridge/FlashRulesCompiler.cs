@@ -226,10 +226,17 @@ internal static class FlashRulesCompiler
         HashSet<(string, int)> seenCards = [];
         HashSet<string> seenPools = new(StringComparer.Ordinal);
         HashSet<string> seenPowerDefs = new(StringComparer.Ordinal);
+        HashSet<ushort> seenPotionDefs = [];
+        ushort[]? inCombatPotionPool = null;
+        ushort[]? outOfCombatPotionPool = null;
         bool needsPotionPool = false;
+        bool needsOutOfCombatPotionPool = false;
         void Declare(FlashContentDef def)
         {
             needsPotionPool |= def.GeneratesRandomPotion;
+            needsOutOfCombatPotionPool |= def is FlashPotionDef { GeneratesOutOfCombatPotion: true };
+            if (def is FlashPotionDef && !seenPotionDefs.Add(def.Id))
+                return;
             foreach ((string cardId, int upgrade) in def.GeneratedCards)
             {
                 if (seenCards.Add((cardId, upgrade)))
@@ -271,6 +278,14 @@ internal static class FlashRulesCompiler
                 && FlashRegistry.TryPotion(potion.Id.Entry, out ushort id))
                 Declare(FlashRegistry.Potion(id));
         }
+        for (int slot = 0; slot < combat.PotionSlotCountForFlash(player); slot++)
+        {
+            if (combat.GetPotionAtSlot(player, slot) is { } rootPotion
+                && FlashRegistry.TryPotion(rootPotion.Id.Entry, out ushort rootPotionId))
+            {
+                builder.SetRootPotion(slot, rootPotionId);
+            }
+        }
         foreach (Creature enemy in combat.KnownEnemies)
         {
             if (enemy.Monster is { } monster && FlashRegistry.TryMonster(monster.Id.Entry, out ushort id))
@@ -278,8 +293,10 @@ internal static class FlashRulesCompiler
         }
         foreach (ushort monsterId in spawnClosure)
             Declare(FlashRegistry.Monster(monsterId));
-        while (pendingCards.Count > 0 || pendingPools.Count > 0 || pendingPowers.Count > 0)
+        while (true)
         {
+          while (pendingCards.Count > 0 || pendingPools.Count > 0 || pendingPowers.Count > 0)
+          {
             while (pendingPowers.Count > 0)
             {
                 string powerId = pendingPowers.Dequeue();
@@ -316,19 +333,38 @@ internal static class FlashRulesCompiler
                 : throw new FlashImportException(FlashRejection.UnsupportedClosure, $"原版没有卡牌 {cardId}");
             AddStatsWithUpgrade(builder, cardInternalId, upgrade, canonical, player);
             Declare(FlashRegistry.Card(cardInternalId));
+          }
+          // A random-potion candidate can itself generate cards or potions (Alchemize class
+          // potions), so declaring the frozen pool must re-run the closure before it is complete.
+          if (needsPotionPool && inCombatPotionPool == null)
+          {
+              inCombatPotionPool = FreezePotionPool(player, inCombat: true);
+              builder.SetPotionPool(inCombatPotionPool);
+              foreach (ushort id in inCombatPotionPool)
+                  Declare(FlashRegistry.Potion(id));
+              continue;
+          }
+          if (needsOutOfCombatPotionPool && outOfCombatPotionPool == null)
+          {
+              outOfCombatPotionPool = FreezePotionPool(player, inCombat: false);
+              builder.SetOutOfCombatPotionPool(outOfCombatPotionPool);
+              foreach (ushort id in outOfCombatPotionPool)
+                  Declare(FlashRegistry.Potion(id));
+              continue;
+          }
+          break;
         }
-        if (needsPotionPool)
-            builder.SetPotionPool(FreezePotionPool(player));
     }
 
     /// <summary>
-    /// <c>PotionFactory.CreateRandomPotionInCombat</c>'s option pool: the character and shared potion
-    /// pools' unlocked options, filtered by <c>CanBeGeneratedInCombat</c>, in that order.
+    /// The random-potion option pool: the character and shared potion pools' unlocked options in
+    /// that order. <paramref name="inCombat"/> selects <c>CreateRandomPotionInCombat</c>'s
+    /// <c>CanBeGeneratedInCombat</c> filter; the out-of-combat pool (EntropicBrew) has no filter.
     /// </summary>
-    private static ushort[] FreezePotionPool(Player player)
+    private static ushort[] FreezePotionPool(Player player, bool inCombat)
     {
         List<PotionModel> options = PotionFactory.GetPotionOptions(player)
-            .Where(static potion => potion.CanBeGeneratedInCombat)
+            .Where(potion => !inCombat || potion.CanBeGeneratedInCombat)
             .ToList();
         ushort[] ids = new ushort[options.Count];
         for (int index = 0; index < options.Count; index++)
@@ -465,6 +501,7 @@ internal static class FlashRulesCompiler
         {
             Target = (FlashTargetType)(byte)canonical.TargetType,
             Rarity = (FlashPotionRarity)(byte)canonical.Rarity,
+            StrategicCost = PotionUsePolicy.StrategicHpCost(canonical),
             Vars = vars,
             VarProps = props,
         });

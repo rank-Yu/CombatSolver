@@ -86,6 +86,13 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
                 target.Aux0 = Claim<CounterPredictionState>(power)?.Value
                     ?? slow.DynamicVars["SlowAmount"].IntValue;
                 break;
+            // SlothPower.Aux0 = the native _cardsPlayedThisTurn counter
+            // (BeforeCardPlayedMirrors.HandleSlothPower/ShouldPlayMirrors.HandleSlothPower use a
+            // CounterPredictionState; without an entry the constructor reads the model field).
+            case SlothPower sloth:
+                target.Aux0 = Claim<CounterPredictionState>(power)?.Value
+                    ?? sloth._cardsPlayedThisTurn;
+                break;
             // SkittishPower.Aux0 = HasGainedBlockThisTurn (AfterAttackMirrors.HandleSkittishPower,
             // captured by SkittishPredictionState; without an entry the constructor reads the live
             // internal-data flag).
@@ -571,6 +578,17 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             {
                 continue;
             }
+            // AutomationPower retires when its card's power leaves the roster; the per-instance counter
+            // state remains keyed by the retired model. Its only reader is its own recurring-energy
+            // evaluation/update, and a re-acquired Automation is a fresh native instance.
+            if (model is AutomationPower { Amount: 0 } && state is AutomationPredictionState)
+                continue;
+            // SlothPower retires with its last duration tick; the native counter state remains keyed by
+            // the retired model. Its only readers are the power's own ShouldPlay/BeforeCardPlayed and
+            // the fingerprint, all of which visit positive EffectivePowers entries; a re-applied Sloth
+            // is a fresh native instance with a new state. The positive case is claimed above.
+            if (model is SlothPower { Amount: 0 } && state is CounterPredictionState)
+                continue;
             // CurlUpPower consumes itself in AfterCardPlayed; the store entry keeps Consumed and the
             // cleared card. AfterDamageReceived/AfterCardPlayed only visit a positive effective power.
             if (model is CurlUpPower { Amount: 0 } && state is CurlUpPredictionState)

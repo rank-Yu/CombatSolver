@@ -88,7 +88,7 @@ internal static class FlashStateImporter
         ImportCards(ref battle, combat, playerState, rules);
         RejectRunListenerDeckCards(player);
         ImportRelics(ref battle, combat, player, projections);
-        ImportPotions(ref battle, combat, player);
+        ImportPotions(ref battle, combat, player, rules);
         ImportOrbs(ref battle, playerState);
         projections.RequireAllMonsterIntsClaimed();
         projections.RequireAllClaimed();
@@ -614,12 +614,14 @@ internal static class FlashStateImporter
         }
     }
 
-    private static void ImportPotions(ref FlashBattle battle, SimulatedCombatState combat, Player player)
+    private static void ImportPotions(ref FlashBattle battle, SimulatedCombatState combat, Player player,
+        FlashRules rules)
     {
         int slots = combat.PotionSlotCountForFlash(player);
         if (slots > FlashLimits.PotionSlots)
             throw new FlashImportException(FlashRejection.Capacity, $"药水槽 {slots}");
         battle.PotionSlotCount = (byte)slots;
+        int freeMask = 0;
         for (int slot = 0; slot < slots; slot++)
         {
             PotionModel? potion = combat.GetPotionAtSlot(player, slot);
@@ -628,7 +630,31 @@ internal static class FlashStateImporter
             if (!FlashRegistry.TryPotion(potion.Id.Entry, out ushort id))
                 throw new FlashImportException(FlashRejection.UnsupportedPotion, potion.Id.Entry);
             battle.Potions[slot] = (ushort)(id + 1);
+            if (combat.IsFreeEntropicPotionAtSlot(player, slot))
+                freeMask |= 1 << slot;
         }
+        battle.SetCounter(FlashCounter.EntropicFreePotionMask, freeMask);
+        // PotionUses records every consumed potion. A use is generated when its slot does not hold the
+        // root potion (the same rule the kernel uses); freeFromEntropic uses already carry cost 0.
+        int generatedUses = 0, generatedExplicitCost = 0, generatedAutomaticCost = 0;
+        foreach (PredictedPotionUse use in combat.PotionUses)
+        {
+            if (!FlashRegistry.TryPotion(use.PotionId, out ushort usedId))
+                throw new FlashImportException(FlashRejection.UnsupportedPotion, use.PotionId);
+            if (rules.RootPotion(use.Slot) == usedId + 1)
+                continue;
+            generatedUses++;
+            int cost = Math.Max(0, use.StrategicHpCost);
+            if (use.Automatic)
+                generatedAutomaticCost += cost;
+            else
+                generatedExplicitCost += cost;
+        }
+        if (generatedExplicitCost > 0xFFFF || generatedAutomaticCost > 0xFFFF)
+            throw new FlashImportException(FlashRejection.UnrepresentableState, "生成药水战略成本超出打包范围");
+        battle.SetCounter(FlashCounter.GeneratedPotionUseCount, generatedUses);
+        battle.SetCounter(FlashCounter.GeneratedPotionStrategicCost,
+            generatedExplicitCost | (generatedAutomaticCost << 16));
     }
 
     private static void ImportOrbs(ref FlashBattle battle, SimPlayerCombatState playerState)

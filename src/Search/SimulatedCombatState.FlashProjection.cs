@@ -82,6 +82,17 @@ internal sealed partial class SimulatedCombatState
         // model-field write, so the dictionary is the value the existing engine reads.
         if (creature.Monster?.GetType().Name == "Fabricator" && name == "fabricator_last_spawn")
             return GetFabricatorLastSpawn(creature);
+        // KnowledgeDemon._curseOfKnowledgeCounter is not one of the captured root monster ints; the
+        // existing engine's BranchMonsterAi/KnowledgeDemonChoiceSupport read it from the model field
+        // when no branch entry exists. Project that same value (the entry wins when present).
+        if (creature.Monster?.GetType().Name == "KnowledgeDemon" && name == "_curseOfKnowledgeCounter")
+        {
+            if (_monsterIntStates?.TryGetValue((creature, name), out int captured) == true)
+                return captured;
+            if (_knowledgeDemonCurseCounters?.TryGetValue(creature, out int predicted) == true)
+                return predicted;
+            return MonsterValueReader.ReadInt(creature.Monster, name);
+        }
         if (creature.Monster?.GetType().Name == "Aeonglass"
             && name is "AdditionalStrength" or "WitherUpgradeCount")
         {
@@ -241,8 +252,20 @@ internal sealed partial class SimulatedCombatState
                     return nameof(_simulatedOstyMaxHp);
             }
         }
-        if (_knowledgeDemonCurseCounters is { Count: > 0 })
-            return nameof(_knowledgeDemonCurseCounters);
+        // _knowledgeDemonCurseCounters is projected into the owning KnowledgeDemon's AI register
+        // (FlashMonsterDef.AiRegisterNames), with the model field as the fallback value. Every key must
+        // be a known KnowledgeDemon; an entry on any other creature has no defined projection.
+        if (_knowledgeDemonCurseCounters is { Count: > 0 } curseCounters)
+        {
+            foreach (Creature creature in curseCounters.Keys)
+            {
+                if (!KnownEnemies.Contains(creature)
+                    || creature.Monster?.GetType().Name != "KnowledgeDemon")
+                {
+                    return nameof(_knowledgeDemonCurseCounters);
+                }
+            }
+        }
         if (_pressureGunBonus is { Count: > 0 })
             return nameof(_pressureGunBonus);
         if (_steamEruptionDamage is { Count: > 0 } || _steamEruptionPhases is { Count: > 0 })
@@ -260,8 +283,9 @@ internal sealed partial class SimulatedCombatState
         }
         if (_drawNextTurn != null && _drawNextTurn.Values.Any(value => value != 0))
             return nameof(_drawNextTurn);
-        if (_freeEntropicPotions is { Count: > 0 })
-            return nameof(_freeEntropicPotions);
+        // _freeEntropicPotions is projected onto FlashCounter.EntropicFreePotionMask by
+        // FlashStateImporter: true entries mark slots that hold a generated free potion and are cleared
+        // when the slot is consumed; false entries are retired flags that no reader inspects.
         // Stateful relic states are claimed by the Flash bridge's relic projections
         // (StatefulRelicKeysForFlash); root capture may also record inert states for relics outside
         // IsStatefulRelic, which no reader consumes.
@@ -297,5 +321,5 @@ internal sealed partial class SimulatedCombatState
     /// <summary>Instanced power types Flash represents as one row per instance and projects.</summary>
     private static bool IsProjectedInstancedPower(PowerModel power)
         => power is AutomationPower or PanachePower or RollingBoulderPower or TheBombPower
-            or GigantificationPower;
+            or GigantificationPower or SandpitPower;
 }

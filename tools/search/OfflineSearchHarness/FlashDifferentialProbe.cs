@@ -415,6 +415,12 @@ internal static class FlashDifferentialProbe
                     (FlashChoiceRequest flash, FlashBattle partial) = completion.Requests[index];
                     requestDiff.AddRange(FlashChoiceTranslator.CompareRequest(partial, flash, request, spec)
                         .Select(line => $"选择[{index}] {line}"));
+                },
+                (index, knowledge) =>
+                {
+                    (FlashChoiceRequest flash, FlashBattle partial) = completion.Requests[index];
+                    requestDiff.AddRange(FlashChoiceTranslator.CompareKnowledgeRequest(partial, flash, knowledge)
+                        .Select(line => $"选择[{index}] {line}"));
                 });
         }
         catch (Exception ex) when (ex is FlashChoiceMismatchException or InvalidPlannedChoiceBranchException)

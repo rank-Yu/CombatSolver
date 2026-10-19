@@ -13,13 +13,46 @@ internal static class FlashChoiceTranslator
 {
     public static SimulationSnapshot Replay(CombatBeamSolver replay, SimulationSnapshot parent, Player player,
         in FlashAction action, out PlanAction planned,
-        Action<int, TurnStartChoiceRequest, CardChoiceSpec>? inspect = null)
+        Action<int, TurnStartChoiceRequest, CardChoiceSpec>? inspect = null,
+        Action<int, KnowledgeDemonChoiceRequest>? inspectKnowledge = null)
     {
         planned = FlashActionTranslator.ToPlanAction(parent, player, action);
         ulong[] selections = new ulong[action.ChoiceCount];
         for (int index = 0; index < selections.Length; index++)
             selections[index] = action.Choices[index];
-        return replay.ReplayWithChoicesForFlash(ref planned, parent, selections, inspect);
+        return replay.ReplayWithChoicesForFlash(ref planned, parent, selections, inspect, inspectKnowledge);
+    }
+
+    /// <summary>
+    /// Differences between a Flash fixed-option request and the existing engine's knowledge choice.
+    /// The old request carries option card ids; the Flash request carries their values in
+    /// <see cref="FlashChoiceRequest.GeneratedOptions"/>.
+    /// </summary>
+    public static List<string> CompareKnowledgeRequest(in FlashBattle partial, in FlashChoiceRequest flash,
+        KnowledgeDemonChoiceRequest request)
+    {
+        List<string> differences = [];
+        if (flash.Kind != FlashChoiceKind.SelectOption)
+            differences.Add($"种类 old=SelectOption flash={flash.Kind}");
+        if (flash.Effect.ToString() != nameof(PlanChoiceEffect.ApplyKnowledgeCurse))
+            differences.Add($"效果 old=ApplyKnowledgeCurse flash={flash.Effect}");
+        if (flash.Timing.ToString() != nameof(PlanChoiceTiming.EnemyTurn))
+            differences.Add($"时机 old=EnemyTurn flash={flash.Timing}");
+        if (flash.MinCount != 1 || flash.MaxCount != 1)
+            differences.Add($"数量 old=1..1 flash={flash.MinCount}..{flash.MaxCount}");
+        if (!flash.OptionsAreGenerated || !flash.SourceIsNone)
+            differences.Add("选项来源 old=None/Generated flash=不是");
+        if (flash.OptionCount != request.OptionIds.Count)
+            differences.Add($"选项数 old={request.OptionIds.Count} flash={flash.OptionCount}");
+        int shared = Math.Min(flash.OptionCount, request.OptionIds.Count);
+        for (int index = 0; index < shared; index++)
+        {
+            FlashCard card = flash.GeneratedOptions[index];
+            string flashId = FlashRegistry.Card(card.Id).NativeId;
+            if (flashId != request.OptionIds[index] || card.Upgrade != 0)
+                differences.Add($"选项[{index}] old={request.OptionIds[index]}+0 flash={flashId}+{card.Upgrade}");
+        }
+        return differences;
     }
 
     /// <summary>

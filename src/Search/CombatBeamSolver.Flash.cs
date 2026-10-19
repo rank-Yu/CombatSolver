@@ -65,7 +65,8 @@ internal sealed partial class CombatBeamSolver
         ref PlanAction action,
         SimulationSnapshot parent,
         IReadOnlyList<ulong> selections,
-        Action<int, TurnStartChoiceRequest, CardChoiceSpec>? inspect = null)
+        Action<int, TurnStartChoiceRequest, CardChoiceSpec>? inspect = null,
+        Action<int, KnowledgeDemonChoiceRequest>? inspectKnowledge = null)
     {
         PrimaryChoiceMatch? primary = null;
         int taken = 0;
@@ -95,6 +96,33 @@ internal sealed partial class CombatBeamSolver
                 return child;
             }
             SimulatedCombatState combat = (SimulatedCombatState)child.Simulator.State.CombatState;
+            // Knowledge Demon's curse choice is a fixed two-card option list, not a CardChoiceSpec:
+            // KnowledgeDemonChoiceSupport.Resolve consumes a PlanCardChoice with SourcePile None and
+            // one card token, and the existing search appends it to TurnStartChoices.
+            if (combat.PendingKnowledgeDemonChoice is { } knowledge)
+            {
+                IReadOnlyList<PlanCardChoice> knowledgeBranches =
+                    KnowledgeDemonChoiceSupport.BuildChoices(knowledge, displayNames);
+                if (taken >= selections.Count)
+                {
+                    throw new FlashChoiceMismatchException(
+                        $"旧引擎请求第 {taken + 1} 次选择（知识恶魔 {knowledge.SourceId}），Flash 没有做。");
+                }
+                inspectKnowledge?.Invoke(taken, knowledge);
+                ulong knowledgeBits = selections[taken++];
+                if (knowledgeBits == 0 || (knowledgeBits & (knowledgeBits - 1)) != 0
+                    || knowledgeBits >> knowledgeBranches.Count != 0)
+                {
+                    throw new FlashChoiceMismatchException(
+                        $"知识恶魔选择 {knowledgeBits:X} 不是单个合法选项（{knowledgeBranches.Count} 项）。");
+                }
+                List<PlanCardChoice> nextKnowledge = new((action.TurnStartChoices ?? []).Count + 1);
+                nextKnowledge.AddRange(action.TurnStartChoices ?? []);
+                nextKnowledge.Add(knowledgeBranches[System.Numerics.BitOperations.TrailingZeroCount(knowledgeBits)]);
+                action = action with { TurnStartChoices = nextKnowledge };
+                child.ReleaseSimulator();
+                continue;
+            }
             TurnStartChoiceRequest request = combat.PendingTurnStartChoice
                 ?? throw new FlashChoiceMismatchException("旧引擎的待定选择不是卡牌选择。");
             CardChoiceSpec spec = TurnStartChoiceSupport.BuildPendingSpec(

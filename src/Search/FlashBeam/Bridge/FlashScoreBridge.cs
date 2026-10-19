@@ -72,6 +72,7 @@ internal static class FlashScoreBridge
             PoisonPowerId = PowerId<PoisonPower>(),
             DemisePowerId = PowerId<DemisePower>(),
             DoomPowerId = PowerId<DoomPower>(),
+            SandpitPowerId = PowerId<SandpitPower>(),
             SummonNextTurnPowerId = PowerId<SummonNextTurnPower>(),
             DieForYouPowerId = PowerId<DieForYouPower>(),
             SleightOfFleshPowerId = PowerId<SleightOfFleshPower>(),
