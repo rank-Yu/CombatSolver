@@ -240,6 +240,7 @@ internal static class FlashRulesCompiler
     /// </summary>
     private static void AddStatsWithUpgrade(FlashRulesBuilder builder, ushort id, int upgrade, CardModel canonical, Player player)
     {
+        builder.HasDecimalCardVars |= FlashRegistry.Card(id).UsesDecimalDamageVar;
         if (!builder.HasCard(id, upgrade))
             builder.SetCard(id, upgrade, CanonicalStats(canonical, upgrade, player));
         if (upgrade < canonical.MaxUpgradeLevel && !builder.HasCard(id, upgrade + 1))

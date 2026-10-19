@@ -91,6 +91,8 @@ internal static class FlashStateImporter
         ImportRelics(ref battle, combat, player, projections);
         ImportPotions(ref battle, combat, player, rules);
         ImportOrbs(ref battle, playerState);
+        if (rules.HasDecimalCardVars && !FlashDecimalVars.TryCanonicalize(ref battle, out _))
+            throw new FlashImportException(FlashRejection.Capacity, "卡牌小数变量表");
         projections.RequireAllMonsterIntsClaimed();
         projections.RequireAllClaimed();
         return battle;
@@ -440,7 +442,7 @@ internal static class FlashStateImporter
         PredictedCard? selected = combat.NightmareSelectionForFlash(power);
         if (selected == null)
             throw new FlashImportException(FlashRejection.UnrepresentableState, "Nightmare 选定卡缺失");
-        FlashCard value = Card(selected, rules, rootCard: false, dampenOriginalUpgrade: -1);
+        FlashCard value = Card(ref battle, selected, rules, rootCard: false, dampenOriginalUpgrade: -1);
         for (int slot = 0; slot < FlashLimits.DetachedCards; slot++)
         {
             if (battle.DetachedCards[slot].Id != 0)
@@ -461,7 +463,7 @@ internal static class FlashStateImporter
     {
         if (power.StolenCard == null)
             return;
-        FlashCard value = Card(new PredictedCard(power.StolenCard), rules, rootCard: true, dampenOriginalUpgrade: -1);
+        FlashCard value = Card(ref battle, new PredictedCard(power.StolenCard), rules, rootCard: true, dampenOriginalUpgrade: -1);
         for (int slot = 0; slot < FlashLimits.DetachedCards; slot++)
         {
             if (battle.DetachedCards[slot].Id != 0)
@@ -516,7 +518,7 @@ internal static class FlashStateImporter
             {
                 imported.Add(card);
                 int originalUpgrade = dampen.TryGetValue(card, out int level) ? level : -1;
-                FlashCard value = Card(card, rules, combat.IsRootCardForFlash(card), originalUpgrade);
+                FlashCard value = Card(ref battle, card, rules, combat.IsRootCardForFlash(card), originalUpgrade);
                 if (card.Preview is MegaCrit.Sts2.Core.Models.Cards.SovereignBlade)
                 {
                     int? applied = combat.SwordSageAppliedForFlash(card);
@@ -542,7 +544,8 @@ internal static class FlashStateImporter
         }
     }
 
-    private static FlashCard Card(PredictedCard predicted, FlashRules rules, bool rootCard, int dampenOriginalUpgrade)
+    private static FlashCard Card(ref FlashBattle battle, PredictedCard predicted, FlashRules rules, bool rootCard,
+        int dampenOriginalUpgrade)
     {
         CardModel card = predicted.Preview;
         ushort id = FlashRulesCompiler.CardId(card);
@@ -656,6 +659,19 @@ internal static class FlashStateImporter
             decimal delta = current - stats.Vars[index];
             if (delta == 0)
                 continue;
+            if (index == 0 && def.UsesDecimalDamageVar)
+            {
+                // At the native clamp the private ExtraDamage may exceed the observable BaseValue
+                // offset, so downgrade/upgrade cannot be reproduced from the projection.
+                if (current >= FlashLimits.ValueClamp)
+                    throw new FlashImportException(FlashRejection.UnrepresentableState,
+                        $"{card.Id.Entry} 的小数伤害变量已到 DynamicVar.BaseValue 的 999999999 钳制上限");
+                if (!FlashDecimalVars.TryAllocate(ref battle, delta, out short encoded))
+                    throw new FlashImportException(FlashRejection.Capacity,
+                        $"{card.Id.Entry} 小数变量 {def.VarNames[index]}（需要更多同时并存的值）");
+                result.Private = encoded;
+                continue;
+            }
             if (index > 1 || delta != decimal.Truncate(delta) || delta < short.MinValue || delta > short.MaxValue)
                 throw new FlashImportException(FlashRejection.UnrepresentableState, $"{card.Id.Entry} 变量 {def.VarNames[index]} 偏移 {delta}");
             if (index == 0) result.Var0 = (short)delta;
