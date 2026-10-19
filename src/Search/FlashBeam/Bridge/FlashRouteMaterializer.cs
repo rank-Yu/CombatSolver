@@ -46,6 +46,13 @@ internal static class FlashRouteMaterializer
     /// </summary>
     internal const int ProfileWidthScale = 4;
 
+    /// <summary>
+    /// Requests at or below this soft budget keep the 25% offensive diversity lane. The 10 s
+    /// natural-root benchmark and short player budgets use it; the 120 s Medium coordinator path
+    /// ranks the whole beam by the existing rank order.
+    /// </summary>
+    internal const int ShortSearchOffensiveShareBudgetMs = 30_000;
+
     public static FlashSolveOutcome Solve(
         CombatRootSnapshot root,
         SolverDisplayNames displayNames,
@@ -173,6 +180,16 @@ internal static class FlashRouteMaterializer
             AmbergrisPotionId = FlashPotionBridge.AmbergrisPotionId(),
             InitialAmbergrisUses = CountAmbergrisUses(prefix),
             AuditPotionPolicy = auditPotionPolicy,
+        };
+        // The offensive-reserved lane is a Flash-specific diversity seat (the existing RankBest has
+        // no such lane). Short searches rely on it to keep aggressive lines; the production Medium
+        // coordinator budget has enough rank seats without reserving a quarter of the beam.
+        options = options with
+        {
+            OffensiveShare = policy.Profile.SoftTimeBudgetMilliseconds
+                <= ShortSearchOffensiveShareBudgetMs
+                    ? 0.25d
+                    : 0d,
         };
         FlashBeamResult search = new FlashBeamSolver(rules, options).Solve(battle, cancellationToken);
         if (!search.PotionPolicySatisfied)
