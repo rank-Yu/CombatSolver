@@ -40,6 +40,7 @@ internal static class FlashScoreProjection
         MostVulnerableTargetCombatId = snapshot.MostVulnerableTargetCombatId,
         EnemyVulnerableTurns = snapshot.EnemyVulnerableTurns,
         Energy = snapshot.Energy,
+        HandCount = snapshot.HandCount,
         PersistentBuffValue = snapshot.PersistentBuffValue,
         LatentSetupValue = snapshot.LatentSetupValue,
         FutureResourceValue = snapshot.FutureResourceValue,
