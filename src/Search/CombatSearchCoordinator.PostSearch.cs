@@ -103,11 +103,31 @@ internal static partial class CombatSearchCoordinator
                     BaseScoreOnly = variant == 2,
                     AggressivePowerCommitment = variant == 0,
                 };
-                SolverResult discovery = new CombatBeamSolver(root, displayNames,
-                    battleDamage, policy, cancellationToken, progressCallback,
-                    discoveryProfile, potionPolicyOverride: SolverPotionPolicy.Disabled,
-                    maximumPotionUses: 0,
-                    directSearchPurpose: DirectSearchPurpose.TurnBoundaryDiscovery).Solve();
+                SolverResult discovery;
+                if (variant == 2)
+                {
+                    // BaseScoreOnly is ported by Flash; the other two variants need the existing
+                    // retention structures and stay on the legacy search with an explicit reason.
+                    discovery = BeamSolveDispatch.Solve(new BeamSolveRequest(root, displayNames,
+                        battleDamage, policy, cancellationToken, progressCallback,
+                        discoveryProfile, SolverPotionPolicy.Disabled, PrimaryIncumbent: null,
+                        DirectSearchPurpose.TurnBoundaryDiscovery)
+                    {
+                        MaximumPotionUses = 0,
+                    });
+                }
+                else
+                {
+                    string unsupported = variant == 0
+                        ? "aggressive-power-commitment" : "second-rank-band";
+                    discovery = FlashLegacyLog.Run(policy, "TurnBoundaryDiscovery",
+                        $"direct:turn-boundary-discovery:{unsupported}",
+                        () => new CombatBeamSolver(root, displayNames, battleDamage, policy,
+                            cancellationToken, progressCallback, discoveryProfile,
+                            potionPolicyOverride: SolverPotionPolicy.Disabled,
+                            maximumPotionUses: 0,
+                            directSearchPurpose: DirectSearchPurpose.TurnBoundaryDiscovery).Solve());
+                }
                 PlanAction[] opening = discovery.BestNode.Actions
                     .TakeWhile(action => action.Turn == root.StartTurnNumber)
                     .ToArray();

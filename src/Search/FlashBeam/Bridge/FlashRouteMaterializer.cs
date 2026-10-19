@@ -71,7 +71,8 @@ internal static class FlashRouteMaterializer
         int? earliestPotionTurn = null,
         ContinuationPurpose? continuationPurpose = null,
         PotionFreePolicyBaseline? potionFreePolicyBaseline = null,
-        bool? resetFixedPrefixSchedulingBaseline = null)
+        bool? resetFixedPrefixSchedulingBaseline = null,
+        int profileScale = ProfileWidthScale)
     {
         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
         Player player = root.PlayerIdentity;
@@ -85,8 +86,32 @@ internal static class FlashRouteMaterializer
             earliestPotionTurn: earliestPotionTurn);
         SimulationSnapshot rootSnapshot = replay.ReplayForFlash([], null);
         FlashPruningRequest pruning = replay.CapturePruningRequestForFlash();
-        // The existing solver's _run.Initial* values come from the request root, so the evaluation
-        // and bound frozen tables keep reading rootSnapshot even when the search starts at a prefix end.
+        bool enforceForcedPotionDirectives = potionPolicyOverride == null;
+        FlashForcedPotionDirectives forcedDirectives;
+        try
+        {
+            forcedDirectives = enforceForcedPotionDirectives
+                ? FlashPotionBridge.CaptureForcedDirectives(policy.PotionStrategy, prefix,
+                    root.HasRenewablePotionShapedRock)
+                : FlashForcedPotionDirectives.None;
+        }
+        catch (FlashImportException ex)
+        {
+            return new FlashSolveOutcome(null, ex.Reason, ex.Detail, null, [],
+                watch.Elapsed, TimeSpan.Zero, TimeSpan.Zero);
+        }
+        // The existing final ordering's potion filter is the target for every request that carries a
+        // potion bound, baseline, forced directive or an at-least-one policy. Requests without one keep
+        // the prior route key so the adoption decisions they already passed do not move.
+        bool auditPotionPolicy = purpose == DirectSearchPurpose.SmartPotionGradient
+            || continuationPurpose == ContinuationPurpose.SmartOpeningPotionPosterior
+            || (continuationPurpose != null
+                && (potionPolicyOverride ?? pruning.EffectivePotionPolicy) == SolverPotionPolicy.Smart)
+            || minimumPotionUses is > 0
+            || maximumPotionUses is > 0
+            || potionFreePolicyBaseline != null
+            || pruning.EffectivePotionPolicy == SolverPotionPolicy.RequireAtLeastOne
+            || forcedDirectives.Count > 0;
         SimulationSnapshot searchRootSnapshot = rootSnapshot;
         if (prefixLength > 0)
         {
@@ -110,8 +135,6 @@ internal static class FlashRouteMaterializer
             }
             searchRootSnapshot = prefixEnd;
         }
-        bool auditPotionPolicy = purpose == DirectSearchPurpose.SmartPotionGradient
-            || continuationPurpose == ContinuationPurpose.SmartOpeningPotionPosterior;
         FlashPotionUsageForBridge potionUsage =
             CombatBeamSolver.CapturePotionUsageForFlash(searchRootSnapshot);
         int initialAutomaticPotionUses = potionUsage.PotionUseCount - potionUsage.ExplicitPotionUseCount;
@@ -122,7 +145,8 @@ internal static class FlashRouteMaterializer
         try
         {
             rules = FlashRulesCompiler.Compile(searchRootSnapshot.Simulator, player);
-            battle = FlashStateImporter.Import(searchRootSnapshot, player, rules, potionUsage.PotionUseCount);
+            battle = FlashStateImporter.Import(searchRootSnapshot, player, rules,
+                potionUsage.PotionUseCount, requirePlayPhase: true);
             scorer = FlashScoreBridge.Create(root, policy, profile, rootSnapshot, searchRootSnapshot,
                 player, rules, battle);
             bound = FlashBoundBridge.Create(root, policy, rootSnapshot, player, rules, battle, pruning,
@@ -155,8 +179,8 @@ internal static class FlashRouteMaterializer
             ? seed with { CombatEndedTurn = seed.CombatEndedTurn - rootSnapshot.Turn + rootPlayerTurn }
             : null;
         FlashBeamOptions options = (flashOptions ?? new FlashBeamOptions(
-            checked(profile.BeamWidth * ProfileWidthScale),
-            checked(profile.MaxExpandedNodes * ProfileWidthScale),
+            checked(profile.BeamWidth * profileScale),
+            checked(profile.MaxExpandedNodes * profileScale),
             MaxTurns: 64,
             TimeSpan.FromMilliseconds(profile.SoftTimeBudgetMilliseconds),
             root.InitialPlayerMaxHp)) with
@@ -165,11 +189,14 @@ internal static class FlashRouteMaterializer
             Scorer = scorer,
             Ordering = new FlashRouteOrdering(root.InitialPlayerHp, root.InitialPlayerMaxHp, root.BossHpRelief,
                 root.PostCombatRelicHeal),
-            HpTargetStop = HpTargetStop(policy, battleDamage, potionPolicyOverride),
+            HpTargetStop = HpTargetStop(policy, battleDamage, pruning.EffectivePotionPolicy,
+                minimumPotionUses, enforceForcedPotionDirectives),
             Bound = bound,
             Incumbent = incumbent,
             EffectivePotionPolicy = pruning.EffectivePotionPolicy,
             TheftPolicy = policy.TheftPolicy,
+            ForcedPotionDirectives = forcedDirectives,
+            EnforceForcedPotionDirectives = enforceForcedPotionDirectives,
             MinimumPotionUses = pruning.MinimumPotionUses,
             InitialActionCount = prefixLength,
             InitialExplicitPotionUses = potionUsage.ExplicitPotionUseCount,
@@ -274,9 +301,16 @@ internal static class FlashRouteMaterializer
                 ConstraintFailure = $"materialize-potion-policy {ex.Message}",
             };
         }
-        if (auditPotionPolicy
-            && FlashPotionBridge.VerifyRoute(result, minimumPotionUses, maximumPotionUses,
-                potionPolicyOverride) is { } failure)
+        bool verifyPotion = auditPotionPolicy
+            || minimumPotionUses != null
+            || maximumPotionUses != null
+            || potionPolicyOverride != null
+            || earliestPotionTurn != null
+            || enforceForcedPotionDirectives && policy.PotionStrategy.HasForcedDirectives;
+        if (verifyPotion
+            && FlashPotionBridge.VerifyRoute(result, policy, enforceForcedPotionDirectives,
+                root.HasRenewablePotionShapedRock, minimumPotionUses, maximumPotionUses,
+                potionPolicyOverride, earliestPotionTurn) is { } failure)
         {
             return new FlashSolveOutcome(null, FlashRejection.None, failure, search, plan,
                 admission, verification, watch.Elapsed)
@@ -302,23 +336,22 @@ internal static class FlashRouteMaterializer
         return uses;
     }
 
-    /// <summary>The existing search's potion constraints at the root, in Flash player-turn units.</summary>
     /// <summary>
     /// The existing search stops at the HP target only for victories it counts as eligible
-    /// (<c>IsEligibleCompleteVictory</c>). Requests that require explicit potion uses add conditions
-    /// FlashBeam does not track, so they keep searching instead.
+    /// (<c>IsEligibleCompleteVictory</c>): at least the request's minimum/at-least-one uses, at most its
+    /// early-stop count, and every enforced forced directive satisfied.
     /// </summary>
     private static FlashHpTargetStop? HpTargetStop(SearchPolicySnapshot policy, BattleDamageSnapshot battleDamage,
-        SolverPotionPolicy? potionPolicyOverride)
+        SolverPotionPolicy effectivePolicy, int? minimumPotionUses, bool enforceForcedPotionDirectives)
     {
-        if (!policy.CanStopAtHpTarget
-            || (potionPolicyOverride ?? policy.PotionPolicy) == SolverPotionPolicy.RequireAtLeastOne
-            || policy.PotionStrategy.HasForcedDirectives)
-        {
+        if (!policy.CanStopAtHpTarget)
             return null;
-        }
+        int requiredPotionUses = Math.Max(minimumPotionUses ?? 0,
+            effectivePolicy == SolverPotionPolicy.RequireAtLeastOne
+                && battleDamage.PotionsUsedSoFar == 0 ? 1 : 0);
         return new FlashHpTargetStop(policy.AcceptableBattleHpLoss, battleDamage.HpLostSoFar,
-            policy.MinimumRequiredPotionUses(battleDamage.PotionsUsedSoFar));
+            policy.MinimumRequiredPotionUses(battleDamage.PotionsUsedSoFar), requiredPotionUses,
+            enforceForcedPotionDirectives && policy.PotionStrategy.HasForcedDirectives);
     }
 
     private static FlashPotionPolicy PotionPolicy(CombatBeamSolver replay, SimulationSnapshot rootSnapshot,

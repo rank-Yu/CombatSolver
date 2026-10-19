@@ -100,11 +100,13 @@ internal static partial class CombatSearchCoordinator
         int scoutExpanded;
         try
         {
-            SolverResult scout = new CombatBeamSolver(root, displayNames, battleDamage,
-                scoutPolicy, cancellationToken, progressCallback, scoutProfile,
-                earlyTurnScoutDepth: policy.EarlyTurnExplorationDepth,
-                earlyTurnScoutObserver: Observe,
-                directSearchPurpose: DirectSearchPurpose.EarlyTurnScout).Solve();
+            SolverResult scout = FlashLegacyLog.Run(policy, "EarlyTurnScout",
+                "direct:early-turn-scout",
+                () => new CombatBeamSolver(root, displayNames, battleDamage,
+                    scoutPolicy, cancellationToken, progressCallback, scoutProfile,
+                    earlyTurnScoutDepth: policy.EarlyTurnExplorationDepth,
+                    earlyTurnScoutObserver: Observe,
+                    directSearchPurpose: DirectSearchPurpose.EarlyTurnScout).Solve());
             scoutExpanded = (int)Math.Max(0, workTotals.Snapshot().ExpandedNodes
                 - scoutExpandedBeforeForMetrics);
             if (IsCompleteVictory(scout)

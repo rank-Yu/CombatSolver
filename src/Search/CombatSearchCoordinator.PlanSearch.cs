@@ -87,10 +87,17 @@ internal static partial class CombatSearchCoordinator
         context.PlanDiscovery.NarrowOpeningIncumbentAttempted = true;
         SolverSearchProfile pilot = window.Limit(context.Profile, 60_000, 20_000, 2_000)
             with { BeamWidth = Math.Max(8, context.Profile.BeamWidth / 16) };
-        SolverResult result = new CombatBeamSolver(context.Root, context.DisplayNames,
-            context.BattleDamage, context.Policy, context.CancellationToken, context.ProgressCallback,
-            pilot, potionPolicyOverride: SolverPotionPolicy.Disabled,
-            directSearchPurpose: DirectSearchPurpose.NarrowOpeningIncumbent).Solve();
+        SolverResult result = BeamSolveDispatch.Solve(new BeamSolveRequest(
+            context.Root,
+            context.DisplayNames,
+            context.BattleDamage,
+            context.Policy,
+            context.CancellationToken,
+            context.ProgressCallback,
+            pilot,
+            SolverPotionPolicy.Disabled,
+            PrimaryIncumbent: null,
+            DirectSearchPurpose.NarrowOpeningIncumbent));
         bool qualified = BuildRefinementPrimarySearchIncumbent(context.Root, context.Policy,
             potionPolicyOverride, result) != null;
         context.Policy.Diagnostics.Info($"[CombatSolver/Test] NARROW_OPENING_INCUMBENT "

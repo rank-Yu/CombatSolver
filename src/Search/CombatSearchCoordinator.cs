@@ -687,10 +687,10 @@ internal static partial class CombatSearchCoordinator
                     PotionPolicy = SolverPotionPolicy.Disabled,
                     PotionStrategy = new PotionStrategySnapshot(SolverPotionPolicy.Disabled, []),
                 };
-                SolverResult potionFree = new CombatBeamSolver(root, displayNames,
-                    battleDamage, potionFreePolicy, cancellationToken, progressCallback,
-                    passProfile, potionPolicyOverride: SolverPotionPolicy.Disabled,
-                    directSearchPurpose: DirectSearchPurpose.PotionFreeAudit).Solve();
+                SolverResult potionFree = BeamSolveDispatch.Solve(new BeamSolveRequest(
+                    root, displayNames, battleDamage, potionFreePolicy, cancellationToken,
+                    progressCallback, passProfile, SolverPotionPolicy.Disabled,
+                    PrimaryIncumbent: null, DirectSearchPurpose.PotionFreeAudit));
                 if (potionFree.ResultScope != SolverResultScope.SearchCompletion)
                     return CapturePassResult(potionFree, null, false);
                 SolverResult audited = RunSupplementalAudits(auditContext,
@@ -947,11 +947,15 @@ internal static partial class CombatSearchCoordinator
     private static SolverResult? SolveOptionalPotionPosterior(
         CombatBeamSolver solver,
         SearchPolicySnapshot policy,
-        string diagnostic)
+        string diagnostic,
+        string? legacyPurpose = null,
+        string? legacyReason = null)
     {
         try
         {
-            return solver.Solve();
+            return legacyReason is null
+                ? solver.Solve()
+                : FlashLegacyLog.Run(policy, legacyPurpose!, legacyReason, solver.Solve);
         }
         catch (PotionPolicyUnsatisfiedException)
         {

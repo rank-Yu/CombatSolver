@@ -2,6 +2,7 @@ using CombatSolver.Engine.InCombat.Flash;
 using System.Diagnostics;
 using System.Globalization;
 using CombatSolver.FlashBeam;
+using MegaCrit.Sts2.Core.Combat;
 
 namespace CombatSolver;
 
@@ -42,11 +43,12 @@ internal sealed record BeamSolveRequest(
 /// <summary>
 /// The single point where a coordinator Beam solve picks its backend (docs/flash-search/search.md §4).
 /// The beam-width portfolio members (<see cref="DirectSearchPurpose.PrimaryBeam"/> and
-/// <see cref="DirectSearchPurpose.RefinementBeam"/>) consult <see cref="SearchPolicySnapshot.FlashMode"/>;
-/// members whose profile switches Flash does not model (continuous threat ranking, contextual ranking)
-/// are rejected at admission and fall back. Fixed-prefix continuations go through
-/// <see cref="SolveContinuation"/> under the same mode; only clean requests are offered to Flash.
-/// Audits, plan searches and scouts do not come through here.
+/// <see cref="DirectSearchPurpose.RefinementBeam"/>), the Smart potion gradient and the coordinator's
+/// direct audit members consult <see cref="SearchPolicySnapshot.FlashMode"/>; members whose profile
+/// switches Flash does not model (continuous threat ranking, contextual ranking) are rejected at
+/// admission and fall back. Fixed-prefix continuations go through <see cref="SolveContinuation"/>
+/// under the same mode. Every legacy search that actually runs in On mode writes one
+/// <c>FLASH_LEGACY</c> line; Off and Shadow do not.
 /// </summary>
 internal static class BeamSolveDispatch
 {
@@ -54,8 +56,18 @@ internal static class BeamSolveDispatch
     {
         bool auditable = request.Purpose is DirectSearchPurpose.PrimaryBeam
             or DirectSearchPurpose.RefinementBeam
-            or DirectSearchPurpose.SmartPotionGradient;
+            or DirectSearchPurpose.SmartPotionGradient
+            or DirectSearchPurpose.PotionFreeAudit
+            or DirectSearchPurpose.RequiredPotionAudit
+            or DirectSearchPurpose.NarrowOpeningIncumbent
+            or DirectSearchPurpose.TurnBoundaryDiscovery;
         FlashSearchMode mode = auditable ? request.Policy.FlashMode : FlashSearchMode.Off;
+        if (mode == FlashSearchMode.On && TurnSetupBoundary(request) is { } turnSetup)
+        {
+            // The turn-setup root protocol is not part of this batch; admit the root explicitly and
+            // keep the existing search rather than searching a phase Flash does not model.
+            return SolveExisting(request, turnSetup);
+        }
         if (mode != FlashSearchMode.Off
             && request.Purpose == DirectSearchPurpose.SmartPotionGradient
             && PotionAuditBoundary(request) is { } boundary)
@@ -72,7 +84,7 @@ internal static class BeamSolveDispatch
             request.Policy.Diagnostics.Info(
                 $"[CombatSolver/Flash] FLASH_FALLBACK purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
                 + $"flash=[status=boundary ms=0 detail={boundary}]");
-            return SolveExisting(request);
+            return SolveExisting(request, $"potion-audit-boundary:{boundary}");
         }
         switch (mode)
         {
@@ -108,7 +120,7 @@ internal static class BeamSolveDispatch
                 }
                 request.Policy.Diagnostics.Info(
                     $"[CombatSolver/Flash] FLASH_FALLBACK purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} flash=[{Describe(flash, flashTime)}]");
-                return SolveExisting(request);
+                return SolveExisting(request, LegacyReason(flash));
             }
             default:
                 throw new InvalidOperationException($"Unknown Flash search mode {mode}.");
@@ -116,16 +128,22 @@ internal static class BeamSolveDispatch
     }
 
     /// <summary>
-    /// A fixed-prefix continuation solve. Only a "clean" request (no explicit potion policy, no potion
-    /// baseline, no plan commitment, no early-turn scout, no earliest-potion restriction) is offered to
-    /// Flash; anything else goes straight to the existing solver without a Flash log line.
+    /// A fixed-prefix continuation solve. Requests with a potion policy or fixed-prefix state Flash
+    /// does not model are still refused with a stable reason and go straight to the existing solver.
     /// </summary>
     public static SolverResult SolveContinuation(ContinuationSearchRequest request)
     {
         bool potionAudit = request.Purpose == ContinuationPurpose.SmartOpeningPotionPosterior;
-        FlashSearchMode mode = potionAudit
-            ? EffectivePolicy(request).FlashMode
-            : CanTakeOver(request) ? EffectivePolicy(request).FlashMode : FlashSearchMode.Off;
+        SearchPolicySnapshot effectivePolicy = EffectivePolicy(request);
+        string? turnSetup = TurnSetupBoundary(request);
+        string? gate = turnSetup ?? (potionAudit ? null : TakeOverBoundary(request));
+        FlashSearchMode mode = gate is null ? effectivePolicy.FlashMode : FlashSearchMode.Off;
+        if (gate is not null && effectivePolicy.FlashMode == FlashSearchMode.On)
+        {
+            // On mode must account for every legacy search it runs; off/shadow comparison modes do not log.
+            return SolveExistingContinuation(request,
+                turnSetup is not null ? turnSetup : $"can-take-over:{gate}");
+        }
         if (potionAudit && mode != FlashSearchMode.Off
             && PotionAuditBoundary(request) is { } boundary)
         {
@@ -133,16 +151,16 @@ internal static class BeamSolveDispatch
             {
                 Stopwatch watch = Stopwatch.StartNew();
                 SolverResult existing = SolveExistingContinuation(request);
-                EffectivePolicy(request).Diagnostics.Info(
+                effectivePolicy.Diagnostics.Info(
                     $"[CombatSolver/Flash] FLASH_SHADOW purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
                     + $"prefix={request.Prefix.Length} existing=[{Describe(existing, watch.Elapsed)}] "
                     + $"flash=[status=boundary ms=0 detail={boundary}] same_route=n/a");
                 return existing;
             }
-            EffectivePolicy(request).Diagnostics.Info(
+            effectivePolicy.Diagnostics.Info(
                 $"[CombatSolver/Flash] FLASH_FALLBACK purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
                 + $"prefix={request.Prefix.Length} flash=[status=boundary ms=0 detail={boundary}]");
-            return SolveExistingContinuation(request);
+            return SolveExistingContinuation(request, $"potion-audit-boundary:{boundary}");
         }
         switch (mode)
         {
@@ -158,7 +176,7 @@ internal static class BeamSolveDispatch
                 {
                     PolicyOverride = Isolated(EffectivePolicy(request)),
                 });
-                EffectivePolicy(request).Diagnostics.Info(
+                effectivePolicy.Diagnostics.Info(
                     $"[CombatSolver/Flash] FLASH_SHADOW purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} prefix={request.Prefix.Length} "
                     + $"existing=[{Describe(existing, existingTime)}] flash=[{Describe(flash, watch.Elapsed)}] "
                     + $"same_route={SameRoute(existing, flash.Outcome?.Result)}");
@@ -171,15 +189,15 @@ internal static class BeamSolveDispatch
                 TimeSpan flashTime = watch.Elapsed;
                 if (flash.Outcome?.Result is { } adopted)
                 {
-                    EffectivePolicy(request).Diagnostics.Info(
+                    effectivePolicy.Diagnostics.Info(
                         $"[CombatSolver/Flash] FLASH_ADOPTED purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
                         + $"prefix={request.Prefix.Length} flash=[{Describe(flash, flashTime)}]");
                     return adopted;
                 }
-                EffectivePolicy(request).Diagnostics.Info(
+                effectivePolicy.Diagnostics.Info(
                     $"[CombatSolver/Flash] FLASH_FALLBACK purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
                     + $"prefix={request.Prefix.Length} flash=[{Describe(flash, flashTime)}]");
-                return SolveExistingContinuation(request);
+                return SolveExistingContinuation(request, LegacyReason(flash));
             }
             default:
                 throw new InvalidOperationException($"Unknown Flash search mode {mode}.");
@@ -190,36 +208,23 @@ internal static class BeamSolveDispatch
         => request.PolicyOverride ?? request.Context.Policy;
 
     /// <summary>
-    /// The explicit fallback reasons of a Smart potion-gradient request. Anything outside the ported
-    /// exact-layer semantics is refused at the dispatch point with a boundary line instead of being
-    /// searched with a half-ported policy.
+    /// The explicit fallback reasons of a Smart potion-gradient request. The gradient is only defined for
+    /// a Smart policy with a searchable potion; every other request feature now goes through the same
+    /// audited final ordering as the existing solver.
     /// </summary>
     private static string? PotionAuditBoundary(BeamSolveRequest request)
     {
         if (request.Policy.PotionPolicy != SolverPotionPolicy.Smart)
             return "potion-policy";
-        if (request.Policy.PotionStrategy.HasForcedDirectives)
-            return "forced-directives";
-        if (request.Policy.TheftPolicy == SolverTheftPolicy.PreserveResources)
-            return "theft-policy";
-        if (request.Policy.IncludeTurnSetup)
-            return "turn-setup";
-        if (request.PotionPolicyOverride != SolverPotionPolicy.RequireAtLeastOne)
-            return "potion-override";
-        if (request.MinimumPotionUses is not > 0
-            || request.MaximumPotionUses != request.MinimumPotionUses)
-        {
-            return "exact-potion-layer";
-        }
         if (request.Root.SearchablePotions.Count == 0)
             return "no-searchable-potion";
         return null;
     }
 
     /// <summary>
-    /// The explicit fallback reasons of a Smart opening-potion posterior request. The Smart-opening
-    /// audit only produces potion prefixes with <c>RequireAtLeastOne</c>; other continuation features
-    /// (plan commitment, scouts, earliest-potion gates, forced directives) remain unmodelled.
+    /// The explicit fallback reasons of a Smart opening-potion posterior request. The audit itself is
+    /// only defined for a Smart policy with a searchable potion; plan commitments and early-turn scouts
+    /// are separate kernel structures and stay out of this batch.
     /// </summary>
     private static string? PotionAuditBoundary(ContinuationSearchRequest request)
     {
@@ -229,25 +234,13 @@ internal static class BeamSolveDispatch
             return "plan-commitment";
         if (request.EarlyTurnScoutDepth != 0 || request.EarlyTurnScoutObserver != null)
             return "early-turn-scout";
-        if (request.EarliestPotionTurn != null)
-            return "earliest-potion-turn";
-        if (request.PotionPolicyOverride != SolverPotionPolicy.RequireAtLeastOne)
-            return "potion-override";
         SearchPolicySnapshot policy = EffectivePolicy(request);
         if (policy.PotionPolicy != SolverPotionPolicy.Smart)
             return "potion-policy";
-        if (policy.PotionStrategy.HasForcedDirectives)
-            return "forced-directives";
-        if (policy.TheftPolicy == SolverTheftPolicy.PreserveResources)
-            return "theft-policy";
-        if (policy.IncludeTurnSetup)
-            return "turn-setup";
         if (request.Context.Root.SearchablePotions.Count == 0)
             return "no-searchable-potion";
-        if (request.MaximumPotionUses is not > 0)
-            return "maximum-potion-uses";
-        if (request.MinimumPotionUses is < 0)
-            return "minimum-potion-uses";
+        if (request.MinimumPotionUses is < 0 || request.MaximumPotionUses is < 0)
+            return "potion-bounds";
         if (request.MinimumPotionUses is { } minimum
             && request.MaximumPotionUses is { } maximum && minimum > maximum)
         {
@@ -257,44 +250,101 @@ internal static class BeamSolveDispatch
     }
 
     /// <summary>
-    /// The "clean request" gate. The existing solver's other potion and continuation switches change
-    /// its policy, ordering or scheduling in ways Flash does not model, so those requests are never
-    /// offered to Flash and never produce a Flash log line.
+    /// The continuation features Flash does not model in this batch. Commitment (plan vision and
+    /// representative seats) and early-turn scouts are separate structures; invalid potion bounds keep
+    /// the existing solver's own argument validation.
     /// </summary>
-    private static bool CanTakeOver(ContinuationSearchRequest request)
+    private static string? TakeOverBoundary(ContinuationSearchRequest request)
     {
-        if (request.MaximumPotionUses is not (null or 0)
-            || request.MinimumPotionUses is not (null or 0)
-            || request.PotionFreePolicyBaseline != null
-            || request.Commitment != null
-            || request.EarlyTurnScoutDepth != 0
-            || request.EarlyTurnScoutObserver != null
-            || request.EarliestPotionTurn != null)
+        if (request.Commitment != null)
+            return "commitment";
+        if (request.EarlyTurnScoutDepth != 0 || request.EarlyTurnScoutObserver != null)
+            return "early-turn-scout";
+        if (request.MinimumPotionUses is < 0 || request.MaximumPotionUses is < 0)
+            return "potion-bounds";
+        if (request.MinimumPotionUses is { } minimum
+            && request.MaximumPotionUses is { } maximum && minimum > maximum)
         {
-            return false;
+            return "potion-bounds";
         }
-        return PotionFree(request);
+        // Requests opened by this batch must not silently drop a retention switch Flash does not
+        // model. Clean requests keep their prior behavior (their profile was already offered to Flash).
+        if (HasPotionConstraint(request))
+        {
+            if (request.Profile.SecondRankBand)
+                return "second-rank-band";
+            if (request.Profile.AggressivePowerCommitment)
+                return "aggressive-power-commitment";
+        }
+        return null;
+    }
+
+    /// <summary>Whether the request carries one of the potion features opened by this batch.</summary>
+    private static bool HasPotionConstraint(ContinuationSearchRequest request)
+    {
+        SearchPolicySnapshot policy = EffectivePolicy(request);
+        SolverPotionPolicy effectivePolicy = request.PotionPolicyOverride ?? policy.PotionPolicy;
+        return request.MaximumPotionUses is > 0
+            || request.MinimumPotionUses is > 0
+            || request.PotionFreePolicyBaseline != null
+            || request.EarliestPotionTurn != null
+            || effectivePolicy == SolverPotionPolicy.RequireAtLeastOne
+            || request.PotionPolicyOverride == null && policy.PotionStrategy.HasForcedDirectives;
     }
 
     /// <summary>
-    /// Whether the request cannot spend an explicit potion. A forced directive can require one even
-    /// under a disabled default policy, and a RequireAtLeastOne policy is never a potion-free request.
+    /// The root protocol boundary. For now only ordinary play-phase roots are admitted; turn-setup
+    /// roots need a kernel/protocol port and are refused explicitly before Flash runs.
     /// </summary>
-    private static bool PotionFree(ContinuationSearchRequest request)
+    private static string? TurnSetupBoundary(BeamSolveRequest request)
     {
-        if (request.PotionPolicyOverride == SolverPotionPolicy.Disabled)
-            return true;
-        SearchPolicySnapshot policy = EffectivePolicy(request);
-        if (policy.PotionStrategy.HasForcedDirectives)
-            return false;
-        if (request.PotionPolicyOverride == SolverPotionPolicy.RequireAtLeastOne
-            || policy.PotionPolicy == SolverPotionPolicy.RequireAtLeastOne)
+        if (request.Policy.IncludeTurnSetup
+            || request.Root.CurrentSide != CombatSide.Player
+            || request.Root.PlayerPhase != PlayerTurnPhase.Play)
         {
-            return false;
+            return "turn-setup";
         }
-        // A zero maximum means no explicit potion can be enumerated, matching the existing solver.
-        return request.MaximumPotionUses == 0
-            || policy.PotionPolicy == SolverPotionPolicy.Disabled;
+        return null;
+    }
+
+    private static string? TurnSetupBoundary(ContinuationSearchRequest request)
+    {
+        SearchPolicySnapshot policy = EffectivePolicy(request);
+        if (policy.IncludeTurnSetup
+            || request.Context.Root.CurrentSide != CombatSide.Player
+            || request.Context.Root.PlayerPhase != PlayerTurnPhase.Play)
+        {
+            return "turn-setup";
+        }
+        return null;
+    }
+
+    private static string StableConstraintReason(string detail)
+    {
+        int space = detail.IndexOf(' ');
+        string head = space < 0 ? detail : detail[..space];
+        return head switch
+        {
+            "smart-potion-bound" => "smart-potion-bound",
+            "materialize-potion-policy" => "materialize-potion-policy",
+            "flash-potion-policy-no-route" => "flash-potion-policy-no-route",
+            _ when head.StartsWith("route-", StringComparison.Ordinal) => head,
+            _ => head.Length == 0 ? "constraint" : head,
+        };
+    }
+
+    private static string LegacyReason(FlashAttempt attempt)
+    {
+        if (attempt.Mismatch != null)
+            return "flash-mismatch";
+        if (attempt.Outcome?.ConstraintFailure is { } constraint)
+            return $"flash-rejected:{StableConstraintReason(constraint)}";
+        if (attempt.Boundary != null)
+            return "flash-boundary";
+        FlashRejection rejection = attempt.Outcome?.Rejection ?? FlashRejection.None;
+        return rejection == FlashRejection.RootPhase
+            ? "turn-setup"
+            : $"flash-rejected:{rejection}";
     }
 
     /// <summary>
@@ -310,44 +360,59 @@ internal static class BeamSolveDispatch
         Diagnostics = new SearchDiagnosticsSink(static _ => { }, static _ => { }),
     };
 
-    private static SolverResult SolveExisting(BeamSolveRequest request)
-        => new CombatBeamSolver(
-            request.Root,
-            request.DisplayNames,
-            request.BattleDamage,
-            request.Policy,
-            request.CancellationToken,
-            request.ProgressCallback,
-            request.Profile,
-            potionPolicyOverride: request.PotionPolicyOverride,
-            potionFreePolicyBaseline: request.PotionFreePolicyBaseline,
-            maximumPotionUses: request.MaximumPotionUses,
-            minimumPotionUses: request.MinimumPotionUses,
-            primaryIncumbent: request.PrimaryIncumbent,
-            directSearchPurpose: request.Purpose).Solve();
+    private static SolverResult SolveExisting(BeamSolveRequest request, string? legacyReason = null)
+    {
+        SolverResult Solve()
+            => new CombatBeamSolver(
+                request.Root,
+                request.DisplayNames,
+                request.BattleDamage,
+                request.Policy,
+                request.CancellationToken,
+                request.ProgressCallback,
+                request.Profile,
+                potionPolicyOverride: request.PotionPolicyOverride,
+                potionFreePolicyBaseline: request.PotionFreePolicyBaseline,
+                maximumPotionUses: request.MaximumPotionUses,
+                minimumPotionUses: request.MinimumPotionUses,
+                primaryIncumbent: request.PrimaryIncumbent,
+                directSearchPurpose: request.Purpose).Solve();
+        return legacyReason is null
+            ? Solve()
+            : FlashLegacyLog.Run(request.Policy, request.Purpose.ToString(), legacyReason, Solve);
+    }
 
     /// <summary>The existing solver's fixed-prefix continuation path; Off must stay byte-identical.</summary>
     private static SolverResult SolveExistingContinuation(ContinuationSearchRequest request)
+        => SolveExistingContinuation(request, null);
+
+    private static SolverResult SolveExistingContinuation(ContinuationSearchRequest request,
+        string? legacyReason)
     {
         SearchPassContext input = request.Context;
-        return new CombatBeamSolver(
-            input.Root, input.DisplayNames, input.BattleDamage,
-            request.PolicyOverride ?? input.Policy,
-            input.CancellationToken,
-            request.ProgressCallbackOverride ?? input.ProgressCallback,
-            request.Profile,
-            potionPolicyOverride: request.PotionPolicyOverride,
-            potionFreePolicyBaseline: request.PotionFreePolicyBaseline,
-            maximumPotionUses: request.MaximumPotionUses,
-            fixedPrefixActions: request.Prefix,
-            resetFixedPrefixSchedulingBaseline: request.ResetFixedPrefixSchedulingBaseline,
-            minimumPotionUses: request.MinimumPotionUses,
-            primaryIncumbent: request.PrimaryIncumbent,
-            earliestPotionTurn: request.EarliestPotionTurn,
-            planCommitment: request.Commitment,
-            earlyTurnScoutDepth: request.EarlyTurnScoutDepth,
-            earlyTurnScoutObserver: request.EarlyTurnScoutObserver,
-            attributionPurpose: request.Purpose).Solve();
+        SolverResult Solve()
+            => new CombatBeamSolver(
+                input.Root, input.DisplayNames, input.BattleDamage,
+                request.PolicyOverride ?? input.Policy,
+                input.CancellationToken,
+                request.ProgressCallbackOverride ?? input.ProgressCallback,
+                request.Profile,
+                potionPolicyOverride: request.PotionPolicyOverride,
+                potionFreePolicyBaseline: request.PotionFreePolicyBaseline,
+                maximumPotionUses: request.MaximumPotionUses,
+                fixedPrefixActions: request.Prefix,
+                resetFixedPrefixSchedulingBaseline: request.ResetFixedPrefixSchedulingBaseline,
+                minimumPotionUses: request.MinimumPotionUses,
+                primaryIncumbent: request.PrimaryIncumbent,
+                earliestPotionTurn: request.EarliestPotionTurn,
+                planCommitment: request.Commitment,
+                earlyTurnScoutDepth: request.EarlyTurnScoutDepth,
+                earlyTurnScoutObserver: request.EarlyTurnScoutObserver,
+                attributionPurpose: request.Purpose).Solve();
+        return legacyReason is null
+            ? Solve()
+            : FlashLegacyLog.Run(EffectivePolicy(request), request.Purpose.ToString(), legacyReason,
+                Solve);
     }
 
     /// <summary>
@@ -371,7 +436,11 @@ internal static class BeamSolveDispatch
                 primaryIncumbent: request.PrimaryIncumbent,
                 maximumPotionUses: request.MaximumPotionUses,
                 minimumPotionUses: request.MinimumPotionUses,
-                potionFreePolicyBaseline: request.PotionFreePolicyBaseline);
+                potionFreePolicyBaseline: request.PotionFreePolicyBaseline,
+                // The narrow opening incumbent deliberately searches a 1/16-width pilot. Keep that
+                // intent instead of applying Flash's usual 4x profile scale to it.
+                profileScale: request.Purpose == DirectSearchPurpose.NarrowOpeningIncumbent
+                    ? 1 : FlashRouteMaterializer.ProfileWidthScale);
             return new FlashAttempt(outcome, null, outcome.ConstraintFailure);
         }
         catch (FlashVerificationException ex)

@@ -19,12 +19,13 @@ namespace CombatSolver.FlashBeam;
 internal static class FlashStateImporter
 {
     public static FlashBattle Import(SimulationSnapshot snapshot, Player player, FlashRules rules,
-        int skippedPotionUses)
+        int skippedPotionUses, bool requirePlayPhase = false)
         => Import(snapshot.Simulator, player, rules, snapshot.ShufflesCrossed, snapshot.ProcessedEnemyDeaths,
-            snapshot.HasRisk, skippedPotionUses);
+            snapshot.HasRisk, skippedPotionUses, requirePlayPhase);
 
     public static FlashBattle Import(CombatPredictionSimulator simulator, Player player, FlashRules rules,
-        int shufflesCrossed, IReadOnlySet<uint> processedDeaths, bool hasRisk, int skippedPotionUses)
+        int shufflesCrossed, IReadOnlySet<uint> processedDeaths, bool hasRisk, int skippedPotionUses,
+        bool requirePlayPhase = false)
     {
         // The existing engine's per-turn counter getters fill their caches from root history on first
         // read. Reading a private fork keeps the caller's state, which other workers may fork, untouched.
@@ -32,6 +33,16 @@ internal static class FlashStateImporter
         SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
         if (combat.Players.Count != 1)
             throw new FlashImportException(FlashRejection.MultiPlayer, $"玩家数 {combat.Players.Count}");
+        SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(player);
+        // Only an ordinary play-phase root has the protocol Flash searches. A turn-setup root keeps a
+        // Start-phase choice context that Flash does not model, and searching it as a play root would
+        // silently drop that choice.
+        if (requirePlayPhase
+            && (combat.CurrentSide != CombatSide.Player || playerState.Phase != PlayerTurnPhase.Play))
+        {
+            throw new FlashImportException(FlashRejection.RootPhase,
+                $"根不在玩家出牌阶段：side={combat.CurrentSide} phase={playerState.Phase}");
+        }
         if (simulator.HasPendingChoice)
             throw new FlashImportException(FlashRejection.PendingChoice, "模拟器有待处理选择");
         if (combat.DescribeFlashUnrepresentableState() is { } unrepresentable)
@@ -39,7 +50,6 @@ internal static class FlashStateImporter
         FlashStateProjections projections = new(simulator.StateStore, simulator.State, combat);
 
         FlashBattle battle = default;
-        SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(player);
 
         battle.Round = combat.RoundNumber;
         battle.PlayerTurn = combat.GetPlayerTurnNumber(player);

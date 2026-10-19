@@ -38,7 +38,8 @@ internal static partial class CombatSearchCoordinator
         SolverResult? exploration = SolveOptionalPotionPosterior(new CombatBeamSolver(root, names, damage,
             policy with { NoveltySearch = policy.NoveltySearch ?? new() }, cancellation,
             progress, explorationProfile, potionPolicyOverride: potionOverride,
-            directSearchPurpose: DirectSearchPurpose.NoveltyExploration), policy, "novelty_exploration");
+            directSearchPurpose: DirectSearchPurpose.NoveltyExploration), policy, "novelty_exploration",
+            "NoveltyExploration", "direct:novelty-exploration");
         long explorationExpanded = totals.Snapshot().ExpandedNodes - expandedBefore;
         long explorationElapsed = clock.ElapsedMilliseconds;
         if (exploration != null && IsCompleteVictory(exploration)) publish?.Invoke(exploration);
@@ -125,7 +126,8 @@ internal static partial class CombatSearchCoordinator
             root, names, damage, policy with { NoveltySearch = policy.NoveltySearch ?? new() },
             cancellation, progress, refinement, potionPolicyOverride: potionOverride,
             directSearchPurpose: DirectSearchPurpose.AdaptiveNoveltyRefinement),
-            policy, "adaptive_novelty_refinement");
+            policy, "adaptive_novelty_refinement",
+            "AdaptiveNoveltyRefinement", "direct:adaptive-novelty-refinement");
         SearchRequestWorkSnapshot scoutAfter = totals.Snapshot();
         long expanded = scoutAfter.ExpandedNodes - scoutBefore.ExpandedNodes;
         long transitions = scoutAfter.TransitionCount - scoutBefore.TransitionCount;

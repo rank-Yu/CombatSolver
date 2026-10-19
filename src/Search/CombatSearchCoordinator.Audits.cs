@@ -391,7 +391,7 @@ internal static partial class CombatSearchCoordinator
         policy.Diagnostics.Info(
             $"[CombatSolver/Test] REQUIRED_POTION_AUDIT start potion_count={primary.PotionCount} " +
             $"reported_saved={primary.PotionHpSaved} required={primary.PotionHpRequired}");
-        SolverResult potionFree = new CombatBeamSolver(
+        SolverResult potionFree = BeamSolveDispatch.Solve(new BeamSolveRequest(
             root,
             displayNames,
             battleDamage,
@@ -400,7 +400,8 @@ internal static partial class CombatSearchCoordinator
             progressCallback,
             profile,
             SolverPotionPolicy.Disabled,
-            directSearchPurpose: DirectSearchPurpose.PotionFreeAudit).Solve();
+            PrimaryIncumbent: null,
+            DirectSearchPurpose.PotionFreeAudit));
         if (potionFree.ResultScope != SolverResultScope.SearchCompletion)
             return potionFree;
 
@@ -584,7 +585,7 @@ internal static partial class CombatSearchCoordinator
         {
             DeathSaveUseCount = potionFree.Snapshot.ProjectedDeathSaveUseCount,
         };
-        SolverResult audited = new CombatBeamSolver(
+        SolverResult audited = BeamSolveDispatch.Solve(new BeamSolveRequest(
             root,
             displayNames,
             battleDamage,
@@ -593,9 +594,12 @@ internal static partial class CombatSearchCoordinator
             progressCallback,
             profile,
             SolverPotionPolicy.RequireAtLeastOne,
-            baseline,
-            maximumPotionUses: 1,
-            directSearchPurpose: DirectSearchPurpose.RequiredPotionAudit).Solve();
+            PrimaryIncumbent: null,
+            DirectSearchPurpose.RequiredPotionAudit)
+        {
+            PotionFreePolicyBaseline = baseline,
+            MaximumPotionUses = 1,
+        });
         if (audited.ResultScope != SolverResultScope.SearchCompletion)
             return audited;
 
