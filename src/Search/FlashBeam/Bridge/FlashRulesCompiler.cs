@@ -14,6 +14,7 @@ using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Monsters;
 using MegaCrit.Sts2.Core.Models.Modifiers;
 using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.MonsterMoves;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
 
@@ -101,13 +102,32 @@ internal static class FlashRulesCompiler
                 hasIdentityContent |= FlashRegistry.Power(powerId).IsIdentityContent;
             }
         }
+        bool hasPaelsLegion = false;
+        bool furCoatSpawnHpOne = false;
         foreach (RelicModel relic in combat.RelicsOf(player))
         {
             if (FlashRegistry.TryRelic(relic.Id.Entry, out ushort relicId))
                 hasIdentityContent |= FlashRegistry.Relic(relicId).MayGenerateIdentityContent
                     || FlashRegistry.Relic(relicId).IsIdentityContent;
+            if (relic.IsMelted)
+                continue;
+            if (FlashRegistry.TryRelic(relic.Id.Entry, out ushort relicRuleId)
+                && FlashRegistry.Relic(relicRuleId).IsPaelsLegion)
+            {
+                hasPaelsLegion = true;
+            }
+            // MonsterSpawnSupport.ApplyCreatureAddedRelics: FurCoat marks the current map coordinate
+            // outside combat; the marked-coordinate check is root data, so freeze its result.
+            if (relic is FurCoat furCoat
+                && combat.CurrentMapCoord is { } mapCoord
+                && furCoat.GetMarkedCoords()?.Contains(mapCoord) == true)
+            {
+                furCoatSpawnHpOne = true;
+            }
         }
         builder.HasIdentityContent = hasIdentityContent;
+        builder.HasPaelsLegion = hasPaelsLegion;
+        builder.FurCoatSpawnHpOne = furCoatSpawnHpOne;
         builder.HasTheftContent = HasTheftContent(combat);
         foreach (string nativeId in PowerIdsWithVars())
             AddPowerVars(builder, nativeId);
@@ -118,6 +138,19 @@ internal static class FlashRulesCompiler
         IReadOnlyList<Creature> known = combat.KnownEnemies;
         if (known.Count > FlashLimits.Enemies)
             throw new FlashImportException(FlashRejection.Capacity, $"敌人数 {known.Count}");
+        // AdvancePlayerTurn drops the prediction cache; HasLostHpThisTurn then falls back to the
+        // immutable root history. Freeze the root answer per owner for extra-turn restoration.
+        ushort rootLostHpMask = 0;
+        if (combat.HasLostHpThisTurn(player.Creature))
+            rootLostHpMask |= 1 << FlashLimits.PlayerOwner;
+        if (combat.GetOsty(player) is { } osty && combat.HasLostHpThisTurn(osty))
+            rootLostHpMask |= 1 << FlashLimits.OstyOwner;
+        for (int index = 0; index < known.Count && index < FlashLimits.Enemies; index++)
+        {
+            if (combat.HasLostHpThisTurn(known[index]))
+                rootLostHpMask |= (ushort)(1 << FlashKernel.EnemyOwner(index));
+        }
+        builder.RootLostHpMask = rootLostHpMask;
         List<ushort> spawnClosure = SpawnClosure(known);
         builder.HasInfiniteHpDisplayMonster = HasInfiniteHpDisplayMonster(known, spawnClosure);
         AddGeneratedCardClosure(builder, simulator, combat, player, spawnClosure);

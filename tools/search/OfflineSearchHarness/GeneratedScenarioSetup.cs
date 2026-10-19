@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CombatSolver;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Map;
@@ -82,6 +83,12 @@ internal sealed class GeneratedScenarioSetup
     {
         UnattendedTestRequest request = Request;
         IDisposable? choiceScope = Session.BeginSetupChoices();
+        // ChoicesParadox and ToastyMittens own a native first-turn card selection that runs before
+        // the captured root. Direct scenario fixtures have no generated-scenario selector, so the
+        // PR batch's fixtures opt into the deterministic first-option answer for that setup window.
+        choiceScope ??= Request.ScenarioId.StartsWith("FLASH-PR-", StringComparison.Ordinal)
+            ? CardSelectCmd.PushSelector(new UnattendedCardSelector(["__FIRST__"]), localOnly: true)
+            : null;
         try
         {
             CharacterModel character = ResolveUnique(ModelDb.AllCharacters, request.CharacterId, "角色");

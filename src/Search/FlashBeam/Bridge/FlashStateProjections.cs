@@ -5,6 +5,7 @@ using CombatSolver.Engine.InCombat.Mirrors.Hooks.Attack;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Card;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Damage;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Death;
+using CombatSolver.Engine.InCombat.Mirrors.Hooks.Orb;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.TurnEnd;
 using CombatSolver.Engine.InCombat.Simulation;
 using MegaCrit.Sts2.Core.Combat;
@@ -482,6 +483,54 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             // FakeHappyFlower.Counter = TurnsSeen (StatefulRelicState Current, CaptureLiveState).
             case FakeHappyFlower:
                 target.Counter = ClaimStatefulRelic(relic).Current;
+                break;
+            // MusicBox.Counter = the once-per-turn use latch (MusicBoxPredictionState.WasUsedThisTurn;
+            // the constructor reads the live _wasUsedThisTurn field when no entry exists). The
+            // in-flight CardBeingPlayed reference must be null at a stable boundary.
+            case MusicBox musicBox:
+            {
+                MusicBoxPredictionState? state = Claim<MusicBoxPredictionState>(relic);
+                if (state?.CardBeingPlayed != null)
+                    throw new FlashImportException(FlashRejection.UnrepresentableState,
+                        $"MusicBox 正在结算卡牌 {state.CardBeingPlayed.Id.Entry}");
+                target.Counter = (state?.WasUsedThisTurn ?? musicBox._wasUsedThisTurn) ? 1 : 0;
+                break;
+            }
+            // ThrowingAxe.Counter = used this combat (ThrowingAxePredictionState.UsedThisCombat;
+            // the constructor reads _usedThisCombat when no entry exists).
+            case ThrowingAxe axe:
+                target.Counter = (Claim<ThrowingAxePredictionState>(relic)?.UsedThisCombat
+                    ?? axe._usedThisCombat) ? 1 : 0;
+                break;
+            // Metronome.Counter = orbs channelled (MetronomePredictionState.OrbsChanneled; the
+            // constructor reads _orbsChanneled when no entry exists).
+            case Metronome metronome:
+                target.Counter = Claim<MetronomePredictionState>(relic)?.OrbsChanneled
+                    ?? metronome._orbsChanneled;
+                break;
+            // PaelsLegion.Counter = cooldown; FlashRelicFlags.UsedThisCombat = the display-only
+            // TriggeredBlockLastTurn latch (the native relic reads it only for its sleep animation).
+            // The affected CardPlay reference is transient: a non-null or finished-before-prediction
+            // reference cannot occur at a stable boundary, so it is rejected.
+            case PaelsLegion paelsLegion:
+            {
+                PaelsLegionPredictionState? state = Claim<PaelsLegionPredictionState>(relic);
+                if (state != null && (state.AffectedCardPlay != null || state.HasCompletedAffectedCardPlay))
+                    throw new FlashImportException(FlashRejection.UnrepresentableState, "PaelsLegion 记录的 CardPlay 未完成");
+                target.Counter = state?.Cooldown ?? paelsLegion._cooldown;
+                if (state?.TriggeredBlockLastTurn ?? paelsLegion._triggeredBlockLastTurn)
+                    target.Flags |= FlashRelicFlags.UsedThisCombat;
+                break;
+            }
+            // EmotionChip.Counter = lost HP in the previous turn, .Aux = lost HP since the last
+            // round record (StatefulRelicState Current/Previous; the live model has neither field).
+            case EmotionChip:
+                (target.Counter, target.Aux) = ClaimStatefulRelic(relic);
+                break;
+            // PaelsEye.Counter = used this combat, .Aux = the "owner was part of the last player turn"
+            // latch (StatefulRelicState Current/Previous; both set by the relic's own hooks).
+            case PaelsEye:
+                (target.Counter, target.Aux) = ClaimStatefulRelic(relic);
                 break;
             // FakeVenerableTeaSet.Counter = GainEnergyInNextCombat (StatefulRelicState Current).
             case FakeVenerableTeaSet:
