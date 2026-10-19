@@ -77,6 +77,17 @@ internal sealed partial class SimulatedCombatState
     /// </summary>
     internal int GetMonsterIntForFlash(Creature creature, string name)
     {
+        // WaterfallGiant's dynamic move values live in the branch dictionaries
+        // (_pressureGunBonus / _steamEruptionDamage), with zero as the constructor's value.
+        if (creature.Monster?.GetType().Name == "WaterfallGiant"
+            && name is "PressureGunBonus" or "SteamEruptionDamage")
+        {
+            if (_monsterIntStates?.TryGetValue((creature, name), out int captured) == true)
+                return captured;
+            return name == "PressureGunBonus"
+                ? _pressureGunBonus?.GetValueOrDefault(creature) ?? 0
+                : _steamEruptionDamage?.GetValueOrDefault(creature) ?? 0;
+        }
         // Aeonglass._additionalStrength/_witherUpgradeCount are branch dictionaries with the model
         // field as their fallback (ReadAeonglassCounter); a root captured after the boss acted has no
         // model-field write, so the dictionary is the value the existing engine reads.
@@ -105,6 +116,16 @@ internal sealed partial class SimulatedCombatState
         }
         return GetMonsterInt(creature, name);
     }
+
+    /// <summary>
+    /// Waterfall Giant's forced Steam Eruption phase as 0/1/2
+    /// (<c>FlashSteamPhase.None/AboutToBlow/Explode</c>). The branch dictionary is keyed by the known
+    /// Waterfall Giant creature; the importer writes the value into <c>FlashEnemy.SteamPhase</c>.
+    /// </summary>
+    internal int SteamEruptionPhaseForFlash(Creature creature)
+        => _steamEruptionPhases?.TryGetValue(creature, out SteamEruptionPhase phase) == true
+            ? (int)phase + 1
+            : 0;
 
     /// <summary>
     /// The possession ledgers (<c>_stolenStrength</c>/<c>_stolenDexterity</c>) as (possessor, target,
@@ -251,10 +272,33 @@ internal sealed partial class SimulatedCombatState
                 }
             }
         }
-        if (_pressureGunBonus is { Count: > 0 })
-            return nameof(_pressureGunBonus);
-        if (_steamEruptionDamage is { Count: > 0 } || _steamEruptionPhases is { Count: > 0 })
-            return "steam eruption";
+        // _pressureGunBonus/_steamEruptionDamage/_steamEruptionPhases are projected onto the
+        // WaterfallGiant AI registers and FlashEnemy.SteamPhase; every key must be a known
+        // WaterfallGiant or the entry has no defined projection.
+        if (_pressureGunBonus is { Count: > 0 } pressureBonus)
+        {
+            foreach (Creature creature in pressureBonus.Keys)
+            {
+                if (!KnownEnemies.Contains(creature) || creature.Monster?.GetType().Name != "WaterfallGiant")
+                    return nameof(_pressureGunBonus);
+            }
+        }
+        if (_steamEruptionDamage is { Count: > 0 } eruptionDamage)
+        {
+            foreach (Creature creature in eruptionDamage.Keys)
+            {
+                if (!KnownEnemies.Contains(creature) || creature.Monster?.GetType().Name != "WaterfallGiant")
+                    return nameof(_steamEruptionDamage);
+            }
+        }
+        if (_steamEruptionPhases is { Count: > 0 } eruptionPhases)
+        {
+            foreach (Creature creature in eruptionPhases.Keys)
+            {
+                if (!KnownEnemies.Contains(creature) || creature.Monster?.GetType().Name != "WaterfallGiant")
+                    return nameof(_steamEruptionPhases);
+            }
+        }
         // Possession ledgers are projected into the matching power's Aux0 (one player target).
         foreach ((Creature possessor, Creature target, bool strength, int _) in PossessedEntriesForFlash())
         {
@@ -274,8 +318,9 @@ internal sealed partial class SimulatedCombatState
         // Stateful relic states are claimed by the Flash bridge's relic projections
         // (StatefulRelicKeysForFlash); root capture may also record inert states for relics outside
         // IsStatefulRelic, which no reader consumes.
-        if (_escapedCreatures.Count > 0)
-            return nameof(_escapedCreatures);
+        // _escapedCreatures is a run-facing list (the encounter's post-combat gold proportion);
+        // CreatureEscaped also removes the creature from _knownEnemies and the roster, which are the
+        // only prediction state. A non-empty list therefore has no unprojected prediction value.
         // _returnToHandNextTurn (Bolas/ThrummingHatchet) is projected onto FlashCard.ReturnToHandNextTurn
         // by FlashStateImporter; the set holds the same cards as their piles.
         // Instanced powers are represented as one FlashPower row per native instance: EffectivePowers
@@ -296,8 +341,6 @@ internal sealed partial class SimulatedCombatState
         // (FlashStateProjections.ProjectPower). An entry can outlive the power when the owner dies and
         // its powers are cleared, but no reader calls GetTenderCardsPlayed without a positive
         // TenderPower, so a retired entry is inert.
-        if (_outstandingStolenGold is > 0 || _outstandingStolenCards is > 0)
-            return "theft";
         if (_battlewornDummyTimedOut)
             return nameof(_battlewornDummyTimedOut);
         return null;
@@ -306,7 +349,8 @@ internal sealed partial class SimulatedCombatState
     /// <summary>Instanced power types Flash represents as one row per instance and projects.</summary>
     private static bool IsProjectedInstancedPower(PowerModel power)
         => power is AutomationPower or PanachePower or RollingBoulderPower or TheBombPower
-            or GigantificationPower or SandpitPower or MonologuePower or OrbitPower or NightmarePower;
+            or GigantificationPower or SandpitPower or MonologuePower or OrbitPower or NightmarePower
+            or ThieveryPower or HeistPower or SwipePower;
 
     /// <summary>The applied SwordSage replay bonus of one blade, as the normalization table records it.</summary>
     internal int? SwordSageAppliedForFlash(PredictedCard card)

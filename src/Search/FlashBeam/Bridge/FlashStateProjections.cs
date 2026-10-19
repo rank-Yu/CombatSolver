@@ -41,6 +41,7 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
     /// </summary>
     public void ProjectMonster(Creature creature, FlashMonsterDef def, ref FlashEnemy target)
     {
+        target.SteamPhase = (FlashSteamPhase)combat.SteamEruptionPhaseForFlash(creature);
         if (def.AiRegisterNames.Count > FlashLimits.EnemyAiRegisters)
             throw new FlashImportException(FlashRejection.Capacity,
                 $"{creature.Monster?.Id.Entry} AI 寄存器 {def.AiRegisterNames.Count}");
@@ -114,6 +115,12 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             case HardenedShellPower hardened:
                 target.Aux0 = (int)(Claim<HardenedShellPredictionState>(power)?.DamageReceivedThisTurn
                     ?? hardened.GetInternalData<HardenedShellPower.Data>().damageReceivedThisTurn);
+                break;
+            // ThieveryPower.Aux0 = DynamicVars.Gold (the stolen-gold ledger accumulated by
+            // SimulatedCombatState.RecordThievery). HeistPower uses Amount; SwipePower's stolen card is
+            // imported into the detached table by FlashStateImporter.
+            case ThieveryPower thievery:
+                target.Aux0 = thievery.DynamicVars.Gold.IntValue;
                 break;
             // GigantificationPower keeps the armed AttackCommand in its private State. At a stable
             // boundary no attack is in flight, so the entry is idle (Aux0 zero); a live capture is not

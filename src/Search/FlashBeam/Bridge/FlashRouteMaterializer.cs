@@ -169,6 +169,7 @@ internal static class FlashRouteMaterializer
             Bound = bound,
             Incumbent = incumbent,
             EffectivePotionPolicy = pruning.EffectivePotionPolicy,
+            TheftPolicy = policy.TheftPolicy,
             MinimumPotionUses = pruning.MinimumPotionUses,
             InitialActionCount = prefixLength,
             InitialExplicitPotionUses = potionUsage.ExplicitPotionUseCount,

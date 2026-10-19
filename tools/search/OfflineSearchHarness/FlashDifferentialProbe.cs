@@ -297,7 +297,16 @@ internal static class FlashDifferentialProbe
             if (flashFeatures is not { } features)
                 return;
             Checked++;
-            List<string> diff = FlashScoreFeatures.Diff(FlashScoreProjection.FromSnapshot(old), features);
+            int oldMinimumOutstanding = 0;
+            if (old.HasSimulator)
+            {
+                CombatPredictionSimulator oldSimulator = (CombatPredictionSimulator)old.Simulator;
+                oldMinimumOutstanding =
+                    ((SimulatedCombatState)oldSimulator.State.CombatState)
+                    .MinimumOutstandingStolenResource(oldSimulator);
+            }
+            List<string> diff = FlashScoreFeatures.Diff(
+                FlashScoreProjection.FromSnapshot(old, oldMinimumOutstanding), features);
             if (diff.Count == 0)
                 return;
             Failed++;

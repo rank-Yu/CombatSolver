@@ -230,6 +230,11 @@ internal static class FlashStateImporter
                 orbChannels = checked(orbChannels + 1);
         }
         battle.SetCounter(FlashCounter.OrbChannels, orbChannels);
+        // Theft: SimulatedCombatState's outstanding-stolen-resource ledger, read without
+        // materializing its lazy cache (the caller may be forked concurrently).
+        (int stolenGold, int stolenCards) = combat.UnrecoveredLootForFlash(simulator);
+        battle.SetCounter(FlashCounter.OutstandingStolenGold, stolenGold);
+        battle.SetCounter(FlashCounter.OutstandingStolenCards, stolenCards);
     }
 
     private static void ImportRng(ref FlashBattle battle, CombatPredictionRngSet rng)
@@ -419,6 +424,8 @@ internal static class FlashStateImporter
             projections.ProjectPower(power, ref battle.Powers[index]);
             if (power is NightmarePower nightmare)
                 ImportNightmareSelection(ref battle, combat, nightmare, rules, index);
+            if (power is SwipePower swipe)
+                ImportSwipeSelection(ref battle, swipe, rules, index);
         }
     }
 
@@ -443,6 +450,27 @@ internal static class FlashStateImporter
             return;
         }
         throw new FlashImportException(FlashRejection.Capacity, $"Nightmare 选定卡 {FlashLimits.DetachedCards}");
+    }
+
+    /// <summary>
+    /// SwipePower.StolenCard is the removed card's full value. Flash keeps it in the detached-card
+    /// table, referenced by Aux0 = slot + 1; a missing card leaves Aux0 zero, matching the native
+    /// null check in RecoverStolenResources and KnownNativeHealingPotential.
+    /// </summary>
+    private static void ImportSwipeSelection(ref FlashBattle battle, SwipePower power, FlashRules rules, int row)
+    {
+        if (power.StolenCard == null)
+            return;
+        FlashCard value = Card(new PredictedCard(power.StolenCard), rules, rootCard: true, dampenOriginalUpgrade: -1);
+        for (int slot = 0; slot < FlashLimits.DetachedCards; slot++)
+        {
+            if (battle.DetachedCards[slot].Id != 0)
+                continue;
+            battle.DetachedCards[slot] = value;
+            battle.Powers[row].Aux0 = slot + 1;
+            return;
+        }
+        throw new FlashImportException(FlashRejection.Capacity, $"SwipePower 被偷卡 {FlashLimits.DetachedCards}");
     }
 
     /// <summary>

@@ -3,7 +3,8 @@ namespace CombatSolver.FlashBeam;
 /// <summary>The K4 reference side: the existing engine's <see cref="SimulationSnapshot"/> read into <see cref="FlashScoreFeatures"/>.</summary>
 internal static class FlashScoreProjection
 {
-    public static FlashScoreFeatures FromSnapshot(SimulationSnapshot snapshot) => new()
+    public static FlashScoreFeatures FromSnapshot(SimulationSnapshot snapshot,
+        int minimumOutstandingStolenResource = 0) => new()
     {
         Score = snapshot.Score,
         PlayerDead = snapshot.PlayerDead,
@@ -33,6 +34,7 @@ internal static class FlashScoreProjection
         LiveDeckClutter = snapshot.LiveDeckClutter,
         LiveDeckSize = snapshot.LiveDeckSize,
         OutstandingStolenResource = snapshot.OutstandingStolenResource,
+        MinimumOutstandingStolenResource = minimumOutstandingStolenResource,
         RetainedAttackValue = snapshot.RetainedAttackValue,
         FocusTargetCombatId = snapshot.FocusTargetCombatId,
         FocusTargetPressure = snapshot.FocusTargetPressure,

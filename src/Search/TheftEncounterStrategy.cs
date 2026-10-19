@@ -1,5 +1,6 @@
 using CombatSolver.Engine.InCombat.Simulation;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Models.Monsters;
 
 namespace CombatSolver;
@@ -24,8 +25,15 @@ internal static class TheftEncounterStrategy
         => policy != SolverTheftPolicy.PreserveResources || outstanding == 0;
 
     public static bool IsApplicable(CombatState state)
-        => state.Encounter?.Id.Entry is "GREMLIN_MERC_NORMAL" or "THIEVING_HOPPER_WEAK"
-            || state.Creatures.Any(creature => creature.Monster is GremlinMerc or ThievingHopper or FatGremlin);
+        => IsApplicable(state.Encounter?.Id.Entry, state.Creatures);
+
+    /// <summary>
+    /// The encounter/monster half of <see cref="IsApplicable(CombatState)"/>, for callers that only
+    /// hold the simulated combat view (the Flash rule compiler's theft-content flag).
+    /// </summary>
+    public static bool IsApplicable(string? encounterId, IEnumerable<Creature> creatures)
+        => encounterId is "GREMLIN_MERC_NORMAL" or "THIEVING_HOPPER_WEAK"
+            || creatures.Any(creature => creature.Monster is GremlinMerc or ThievingHopper or FatGremlin);
 
     public static int OutstandingStolenResource(
         CombatPredictionSimulator simulator,

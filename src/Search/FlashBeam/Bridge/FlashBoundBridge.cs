@@ -166,8 +166,9 @@ internal static class FlashBoundBridge
                     return Disabled("regen_potion_policy");
             }
         }
-        // KnownNativeHealingPotential ignores a SwipePower's stolen card unless the card is NotYet/Feed;
-        // the Flash state does not carry that card, so any SwipePower disables the bound.
+        // KnownNativeHealingPotential ignores a SwipePower's stolen card unless the card is NotYet/Feed.
+        // Flash now carries the full card value, but the bound's card-semantics certificate would have
+        // to classify it; keep the same explicit disable reason until that certificate covers it.
         for (int index = 0; index < flashRoot.PowerCount; index++)
         {
             if (swipePower[flashRoot.Powers[index].Id])

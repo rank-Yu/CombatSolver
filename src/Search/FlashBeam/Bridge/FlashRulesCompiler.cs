@@ -13,6 +13,7 @@ using MegaCrit.Sts2.Core.Models.CardPools;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Monsters;
 using MegaCrit.Sts2.Core.Models.Modifiers;
+using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.MonsterMoves;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
 
@@ -100,6 +101,7 @@ internal static class FlashRulesCompiler
                     || FlashRegistry.Relic(relicId).IsIdentityContent;
         }
         builder.HasIdentityContent = hasIdentityContent;
+        builder.HasTheftContent = HasTheftContent(combat);
         foreach (string nativeId in PowerIdsWithVars())
             AddPowerVars(builder, nativeId);
         for (ushort id = 0; id < FlashRegistry.PotionCount; id++)
@@ -131,6 +133,22 @@ internal static class FlashRulesCompiler
         foreach (ushort monsterId in spawnClosure)
             CompileSpawnedMonster(builder, simulator, monsterId);
         return builder.Build();
+    }
+
+    /// <summary>
+    /// The two thief encounters and any root that already carries a theft power. Only those roots pay
+    /// for the outstanding-stolen-resource counters and the evaluation's theft scans.
+    /// </summary>
+    private static bool HasTheftContent(SimulatedCombatState combat)
+    {
+        if (TheftEncounterStrategy.IsApplicable(combat.Encounter?.Id.Entry, combat.KnownEnemies))
+            return true;
+        foreach (PowerModel power in combat.EffectivePowers())
+        {
+            if (power is ThieveryPower or HeistPower or SwipePower or SurprisePower)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>

@@ -42,7 +42,7 @@ internal static class FlashBattleDump
             string recent = string.Join(",", recentMoves);
             lines.Add($"Enemy[{index}]={monster} {Creature(enemy.Creature)} move={enemy.Move} flags={enemy.Flags} death={enemy.DeathPhase} "
                 + $"combatId={enemy.CombatId} rules={enemy.Rules} slot={enemy.Slot} logged={enemy.LoggedMoves} recent=[{recent}] everUsed={enemy.EverUsedMoves:X} "
-                + $"ai=[{enemy.Ai[0]},{enemy.Ai[1]},{enemy.Ai[2]},{enemy.Ai[3]}]");
+                + $"ai=[{enemy.Ai[0]},{enemy.Ai[1]},{enemy.Ai[2]},{enemy.Ai[3]}] steam={enemy.SteamPhase}");
         }
         for (int index = 0; index < battle.PowerCount; index++)
         {
@@ -56,6 +56,11 @@ internal static class FlashBattleDump
             ReadOnlySpan<FlashCard> cards = FlashPiles.ReadCards(battle, pile);
             for (int index = 0; index < cards.Length; index++)
                 lines.Add($"{pile}[{index}]={Card(cards[index])}");
+        }
+        for (int slot = 0; slot < FlashLimits.DetachedCards; slot++)
+        {
+            if (battle.DetachedCards[slot].Id != 0)
+                lines.Add($"Detached[{slot}]={Card(battle.DetachedCards[slot])}");
         }
         for (int index = 0; index < battle.RelicCount; index++)
             lines.Add($"Relic[{index}]={FlashRegistry.Relic(battle.Relics[index].Id).NativeId} flags={battle.Relics[index].Flags} counter={battle.Relics[index].Counter}");

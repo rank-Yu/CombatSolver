@@ -43,6 +43,16 @@ internal sealed partial class SimulatedCombatState
         return (int)Math.Max(0, outstanding - recoverable);
     }
 
+    /// <summary>
+    /// Read-only form of <see cref="UnrecoveredLoot"/> for the Flash importer: when the branch has not
+    /// materialized the cache yet, scan without writing it, so projecting a state never mutates the
+    /// caller's simulator.
+    /// </summary>
+    internal (int Gold, int Cards) UnrecoveredLootForFlash(CombatPredictionSimulator simulator)
+        => _outstandingStolenGold.HasValue
+            ? (_outstandingStolenGold.Value, _outstandingStolenCards ?? 0)
+            : ScanHeldLoot(simulator);
+
     public void RecordStolenCard(CombatPredictionSimulator simulator)
     {
         EnsureOutstandingStolenResourcesInitialized(simulator);
@@ -76,6 +86,11 @@ internal sealed partial class SimulatedCombatState
     {
         if (_outstandingStolenGold.HasValue)
             return;
+        (_outstandingStolenGold, _outstandingStolenCards) = ScanHeldLoot(simulator);
+    }
+
+    private (int Gold, int Cards) ScanHeldLoot(CombatPredictionSimulator simulator)
+    {
         int gold = 0;
         int cards = 0;
         foreach (var power in EffectivePowers())
@@ -95,7 +110,6 @@ internal sealed partial class SimulatedCombatState
                     break;
             }
         }
-        _outstandingStolenGold = gold;
-        _outstandingStolenCards = cards;
+        return (gold, cards);
     }
 }

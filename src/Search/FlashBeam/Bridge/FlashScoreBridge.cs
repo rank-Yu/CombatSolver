@@ -36,7 +36,6 @@ internal static class FlashScoreBridge
         FlashPowerScore[] powers = CompilePowers();
         int[] potionCosts = CompilePotionCosts(player, rootSnapshot);
         ValidateAdmittedCards(flashRoot, cards);
-        ValidateMonsterSpecials(root);
 
         ushort[] rootPotions = new ushort[FlashLimits.PotionSlots];
         for (int slot = 0; slot < FlashLimits.PotionSlots && slot < flashRoot.PotionSlotCount; slot++)
@@ -122,30 +121,6 @@ internal static class FlashScoreBridge
             throw Reject("Profile.ContinuousThreatRanking", "连续致命意图定价未移植");
         if (profile.ContextualRanking != null)
             throw Reject("Profile.ContextualRanking", "上下文排序模型未移植");
-        if (TheftApplicable(root))
-            throw Reject("TheftEncounter", "偷窃战未移植（OutstandingStolenResource 计数）");
-    }
-
-    private static bool TheftApplicable(CombatRootSnapshot root)
-    {
-        for (int index = 0; index < root.Enemies.Count; index++)
-        {
-            string? name = root.Enemies[index].Monster?.GetType().Name;
-            if (name is "GremlinMerc" or "ThievingHopper" or "FatGremlin")
-                return true;
-        }
-        return false;
-    }
-
-    private static void ValidateMonsterSpecials(CombatRootSnapshot root)
-    {
-        for (int index = 0; index < root.Enemies.Count; index++)
-        {
-            MonsterModel? monster = root.Enemies[index].Monster;
-            if (monster is WaterfallGiant)
-                throw new FlashImportException(FlashRejection.UnsupportedMonster,
-                    $"{monster.Id.Entry} 的 AdjustMonsterMoveDamage 特例未移植");
-        }
     }
 
     private static void ValidateAdmittedCards(in FlashBattle flashRoot, FlashCardScore?[][] cards)
