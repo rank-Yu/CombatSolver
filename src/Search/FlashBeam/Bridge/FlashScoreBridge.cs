@@ -33,7 +33,7 @@ internal static class FlashScoreBridge
         RejectUnsupportedSettings(root, policy, profile);
 
         FlashCardScore?[][] cards = CompileCards(player);
-        FlashPowerScore[] powers = CompilePowers();
+        FlashPowerScore[] powers = CompilePowers(policy.Act3BossStrategy);
         int[] potionCosts = CompilePotionCosts(player, rootSnapshot);
         ValidateAdmittedCards(flashRoot, cards);
 
@@ -51,6 +51,7 @@ internal static class FlashScoreBridge
             PotionStrategicCost = potionCosts,
             InitialPlayerMaxHp = root.InitialPlayerMaxHp,
             IsActEndingBoss = root.IsActEndingBoss,
+            Act3BossStrategy = policy.Act3BossStrategy,
             BaseScoreOnly = profile.BaseScoreOnly,
             BeamWeightPerturbation = profile.BeamWeightPerturbation,
             IgnoreLongTermRewards = policy.IgnoreLongTermRewards,
@@ -87,6 +88,9 @@ internal static class FlashScoreBridge
             ReattachPowerId = PowerId<ReattachPower>(),
             AdaptablePowerId = PowerId<AdaptablePower>(),
             BodySlamCardId = CardId<BodySlam>(),
+            EradicateCardId = CardId<Eradicate>(),
+            FiddleRelicId = RelicId<Fiddle>(),
+            DropletOfPrecognitionPotionId = PotionId<DropletOfPrecognition>(),
             TheHuntCardId = CardId<TheHunt>(),
             TheHuntPowerId = PowerId<TheHuntPower>(),
             BufferPowerId = PowerId<MegaCrit.Sts2.Core.Models.Powers.BufferPower>(),
@@ -109,8 +113,6 @@ internal static class FlashScoreBridge
             throw Reject("GrowthBudgets", "成长额度（GrowthHpCredit）未移植");
         if (policy.RelicTargets.Count != 0)
             throw Reject("RelicTargets", $"遗物计数目标 {policy.RelicTargets.Count} 项未移植");
-        if (policy.Act3BossStrategy)
-            throw Reject("Act3BossStrategy", "Act 3 Boss 交互估值未移植");
         if (policy.DevelopmentStrategy != null)
             throw Reject("DevelopmentStrategy", "开发策略的排序调整未移植");
         if (!StrategicEffectMirrors.IsEmpty)
@@ -184,6 +186,8 @@ internal static class FlashScoreBridge
             BaseBlock = DynamicVarBaseValue(card.DynamicVars, "Block"),
             BaseCards = DynamicVarBaseValue(card.DynamicVars, "Cards"),
             IsPower = card.Type == CardType.Power,
+            PrimaryMoveToHandChoice = card is Hologram or Graveblast or SecretWeapon or SecretTechnique
+                or Wish or Dredge or NeowsFury or SeekerStrike,
             DamageVar = VarIndex(names, "Damage"),
             BlockVar = VarIndex(names, "Block"),
             CardsVar = VarIndex(names, "Cards"),
@@ -304,7 +308,7 @@ internal static class FlashScoreBridge
         _ => FlashSetupTraits.None,
     };
 
-    private static FlashPowerScore[] CompilePowers()
+    private static FlashPowerScore[] CompilePowers(bool act3BossStrategy)
     {
         Dictionary<string, PowerModel> canonical = [];
         foreach (PowerModel power in ModelDb.All.OfType<PowerModel>())
@@ -317,17 +321,21 @@ internal static class FlashScoreBridge
                 throw new InvalidOperationException($"原版没有 Power {def.NativeId}。");
             result[id] = new FlashPowerScore
             {
-                Kind = StrategicKind(model),
-                Requirements = (FlashStrategicRequirements)(int)StrategicEffectModel.Requirements(model, false),
+                Kind = StrategicKind(model, act3BossStrategy),
+                Requirements = (FlashStrategicRequirements)(int)StrategicEffectModel.Requirements(
+                    model, act3BossStrategy),
                 Trait = PersistentPowerTrait(model),
                 IsTemporary = model is ITemporaryPower,
                 Type = (FlashPowerType)(byte)model.Type,
+                DanseMacabreEnergyThreshold = model is DanseMacabrePower danseMacabre
+                    ? danseMacabre.DynamicVars.Energy.IntValue
+                    : 0,
             };
         }
         return result;
     }
 
-    private static FlashStrategicKind StrategicKind(PowerModel power) => power switch
+    private static FlashStrategicKind StrategicKind(PowerModel power, bool act3BossStrategy) => power switch
     {
         AfterimagePower => FlashStrategicKind.Afterimage,
         MegaCrit.Sts2.Core.Models.Powers.BufferPower => FlashStrategicKind.Buffer,
@@ -348,6 +356,10 @@ internal static class FlashScoreBridge
         CreativeAiPower => FlashStrategicKind.CreativeAi,
         IterationPower => FlashStrategicKind.Iteration,
         MasterPlannerPower => FlashStrategicKind.MasterPlanner,
+        PagestormPower when act3BossStrategy => FlashStrategicKind.Pagestorm,
+        DanseMacabrePower when act3BossStrategy => FlashStrategicKind.DanseMacabre,
+        DemesnePower when act3BossStrategy => FlashStrategicKind.Demesne,
+        PrepTimePower when act3BossStrategy => FlashStrategicKind.PrepTime,
         FocusPower => FlashStrategicKind.Focus,
         FurnacePower => FlashStrategicKind.Furnace,
         ThunderPower => FlashStrategicKind.Thunder,

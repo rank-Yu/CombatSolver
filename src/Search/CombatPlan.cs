@@ -1325,6 +1325,18 @@ internal sealed class SimulationSnapshot(
     public int ReachableHandValue { get; } = reachableHandValue;
     public int PlayableAttackCount { get; init; }
     public int ZeroCostPlayableCount { get; } = zeroCostPlayableCount;
+
+    /// <summary>
+    /// The three-act boss interaction inputs the evaluation read for this state. Diagnostic K4 fields;
+    /// they do not enter the state key, and zero means the branch did not apply.
+    /// </summary>
+    public bool Act3BossInteractions { get; init; }
+    public int FirstAttackDamage { get; init; }
+    public int EtherealDrawTriggers { get; init; }
+    public int PagestormBonusDrawCapacity { get; init; }
+    public int HighEnergyPlays { get; init; }
+    public int DemesneEnergyGain { get; init; }
+    public int DemesneDrawGain { get; init; }
     public bool CanTriggerArtOfWarNextTurn { get; } = canTriggerArtOfWarNextTurn;
     public int PocketwatchCardsPlayedThisTurn { get; } = pocketwatchCardsPlayedThisTurn;
     public int PocketwatchCardsPlayedLastTurn { get; } = pocketwatchCardsPlayedLastTurn;

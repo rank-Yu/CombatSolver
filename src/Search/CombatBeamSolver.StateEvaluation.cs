@@ -620,6 +620,13 @@ internal sealed partial class CombatBeamSolver
             DeathSaveUseCount = combat.DeathSaveUseCount,
             ProjectedDeathSaveUseCount = combat.DeathSaveUseCount + threat.DeathSaveUseCount,
             PlayableAttackCount = playableAttackCount,
+            Act3BossInteractions = strategicContext?.Act3BossInteractions ?? false,
+            FirstAttackDamage = strategicContext?.FirstAttackDamage ?? 0,
+            EtherealDrawTriggers = strategicContext?.EtherealDrawTriggers ?? 0,
+            PagestormBonusDrawCapacity = strategicContext?.PagestormBonusDrawCapacity ?? 0,
+            HighEnergyPlays = strategicContext?.HighEnergyPlays ?? 0,
+            DemesneEnergyGain = strategicContext?.DemesneEnergyGain ?? 0,
+            DemesneDrawGain = strategicContext?.DemesneDrawGain ?? 0,
         };
     }
 

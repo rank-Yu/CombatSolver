@@ -181,6 +181,7 @@ internal static class FlashRouteMaterializer
             AmbergrisPotionId = FlashPotionBridge.AmbergrisPotionId(),
             InitialAmbergrisUses = CountAmbergrisUses(prefix),
             AuditPotionPolicy = auditPotionPolicy,
+            Act3BossStrategy = policy.Act3BossStrategy,
         };
         // The offensive-reserved lane is a Flash-specific diversity seat (the existing RankBest has
         // no such lane). Short searches rely on it to keep aggressive lines; the production Medium
