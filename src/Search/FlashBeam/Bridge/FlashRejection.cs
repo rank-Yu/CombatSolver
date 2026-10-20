@@ -20,6 +20,12 @@ internal enum FlashRejection
     UnrepresentableState,
     Capacity,
     UnsupportedRequest,
+
+    /// <summary>Mock/test content (MockCardPool and MOCK_* powers); never part of a vanilla run.</summary>
+    TestContent,
+
+    /// <summary>Deprecated content (DeprecatedCardPool); kept by the game only for old saves.</summary>
+    DeprecatedContent,
 }
 
 /// <summary>The existing engine's state cannot be projected into Flash; the request falls back.</summary>

@@ -303,7 +303,7 @@ internal static class FlashRulesCompiler
     public static ushort CardId(CardModel card)
         => FlashRegistry.TryCard(card.Id.Entry, out ushort id)
             ? id
-            : throw new FlashImportException(FlashRejection.UnsupportedCard, card.Id.Entry);
+            : throw FlashUnsupportedContent.Card(card);
 
     private static void AddCard(FlashRulesBuilder builder, CardModel card, Player player)
     {
@@ -366,6 +366,7 @@ internal static class FlashRulesCompiler
             Tags = MapTags(copy.Tags),
             IsSoul = copy.Id.Entry == "SOUL",
             IsColorless = copy.VisualCardPool.IsColorless,
+            HasDynamicType = FlashRegistry.Card(CardId(canonical)).HasDynamicCardType,
             Vars = vars,
         };
     }

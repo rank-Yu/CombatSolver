@@ -446,7 +446,7 @@ internal static class FlashStateImporter
         {
             (byte owner, _, PowerModel power) = ordered[index];
             if (!FlashRegistry.TryPower(power.Id.Entry, out ushort id))
-                throw new FlashImportException(FlashRejection.UnsupportedPower, power.Id.Entry);
+                throw FlashUnsupportedContent.Power(power);
             FlashPowerDef def = FlashRegistry.Power(id);
             FlashPowerFlags flags = FlashPowerFlags.None;
             if (def.UsesNativeDurationSkip && power.SkipNextDurationTick)
@@ -728,6 +728,16 @@ internal static class FlashStateImporter
             else result.Var1 = (short)delta;
         }
         def.ProjectPrivate(ref result);
+        // MadScience's native Type and rider are saved properties, not dynamic variables; they select
+        // the card's whole effect and its result location (Power removes the card from combat).
+        if (card is MegaCrit.Sts2.Core.Models.Cards.MadScience madScience)
+        {
+            if (madScience.TinkerTimeType is not (CardType.Attack or CardType.Skill or CardType.Power))
+                throw new FlashImportException(FlashRejection.UnrepresentableState,
+                    $"{card.Id.Entry} 的 TinkerTimeType {(int)madScience.TinkerTimeType}");
+            result.Private = CombatSolver.Engine.InCombat.Flash.Content.Cards.Event.MadScience.Encode(
+                (int)madScience.TinkerTimeType, (int)madScience.TinkerTimeRider);
+        }
         return result;
     }
 

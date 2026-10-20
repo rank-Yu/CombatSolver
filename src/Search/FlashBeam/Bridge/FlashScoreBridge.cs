@@ -225,6 +225,7 @@ internal static class FlashScoreBridge
             BaseBlock = DynamicVarBaseValue(card.DynamicVars, "Block"),
             BaseCards = DynamicVarBaseValue(card.DynamicVars, "Cards"),
             IsPower = card.Type == CardType.Power,
+            DynamicCardType = def.HasDynamicCardType,
             PrimaryMoveToHandChoice = card is Hologram or Graveblast or SecretWeapon or SecretTechnique
                 or Wish or Dredge or NeowsFury or SeekerStrike,
             DamageVar = VarIndex(names, "Damage"),

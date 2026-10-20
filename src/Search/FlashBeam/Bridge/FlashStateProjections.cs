@@ -296,6 +296,17 @@ internal sealed class FlashStateProjections(PredictionStateStore store, CombatPr
             case TheBombPower bomb:
                 target.Aux0 = bomb.DynamicVars.Damage.IntValue;
                 break;
+            // ToricToughnessPower.Aux0 = the block granted when the owner's block clears
+            // (SetBlock's DynamicVars.Block); Amount is the remaining turn count.
+            case ToricToughnessPower toric:
+            {
+                decimal block = toric.DynamicVars.Block.BaseValue;
+                if (block != decimal.Truncate(block) || block < 0m || block > int.MaxValue)
+                    throw new FlashImportException(FlashRejection.UnrepresentableState,
+                        $"ToricToughness 格挡量 {block} 不是可表示的整数");
+                target.Aux0 = (int)block;
+                break;
+            }
             // RollingBoulderPower has no private state: Amount is the damage and the increment is the
             // canonical power Damage var, both already in the row.
             case RollingBoulderPower:

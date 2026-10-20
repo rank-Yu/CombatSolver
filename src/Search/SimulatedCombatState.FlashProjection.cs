@@ -350,7 +350,7 @@ internal sealed partial class SimulatedCombatState
     private static bool IsProjectedInstancedPower(PowerModel power)
         => power is AutomationPower or PanachePower or RollingBoulderPower or TheBombPower
             or GigantificationPower or SandpitPower or MonologuePower or OrbitPower or NightmarePower
-            or ThieveryPower or HeistPower or SwipePower;
+            or ThieveryPower or HeistPower or SwipePower or ToricToughnessPower;
 
     /// <summary>The applied SwordSage replay bonus of one blade, as the normalization table records it.</summary>
     internal int? SwordSageAppliedForFlash(PredictedCard card)
