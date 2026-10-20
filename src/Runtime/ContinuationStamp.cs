@@ -238,6 +238,7 @@ internal sealed record ContinuationStamp(string StateText)
             int count = Math.Max(expectedItems.Count, actualItems.Count);
             List<string> itemDifferences = [];
             int differingItems = 0;
+            int reportedItems = 0;
             for (int index = 0; index < count; index++)
             {
                 string expectedItem = index < expectedItems.Count ? expectedItems[index] : "<missing>";
@@ -247,18 +248,56 @@ internal sealed record ContinuationStamp(string StateText)
                 differingItems++;
                 if (itemDifferences.Count >= MaximumItemDifferencesPerField)
                     continue;
-                itemDifferences.Add($"field={name}[{index}] expected={LogValue(expectedItem)} actual={LogValue(actualItem)} " +
-                                    $"expected_count={expectedItems.Count} actual_count={actualItems.Count}");
+                // Equal final costs do not imply equal ordered local layers. Put the
+                // cost-state sub-difference before the whole-item line so
+                // SEARCH_REUSE_MISS reports the layer that deployment will match on
+                // even when the card text itself is truncated by LogValue.
+                if (DescribePileItemCostStateDifference(name, index, expectedItem, actualItem) is { } costDifference)
+                    itemDifferences.Add(costDifference);
+                if (itemDifferences.Count < MaximumItemDifferencesPerField)
+                    itemDifferences.Add($"field={name}[{index}] expected={LogValue(expectedItem)} actual={LogValue(actualItem)} " +
+                                        $"expected_count={expectedItems.Count} actual_count={actualItems.Count}");
+                reportedItems++;
             }
             if (itemDifferences.Count == 0)
                 return [$"field={name} expected={LogValue(expected)} actual={LogValue(actual)}"];
-            if (differingItems > itemDifferences.Count)
-                itemDifferences.Add($"field={name} additional_differences={differingItems - itemDifferences.Count} " +
+            if (differingItems > reportedItems)
+                itemDifferences.Add($"field={name} additional_differences={differingItems - reportedItems} " +
                                     $"expected_count={expectedItems.Count} actual_count={actualItems.Count}");
             return itemDifferences;
         }
 
         return [$"field={name} expected={LogValue(expected)} actual={LogValue(actual)}"];
+    }
+
+    private static string? DescribePileItemCostStateDifference(
+        string field,
+        int index,
+        string expectedItem,
+        string actualItem)
+    {
+        string? expectedCost = ExtractCostState(expectedItem);
+        string? actualCost = ExtractCostState(actualItem);
+        if (expectedCost == null && actualCost == null)
+            return null;
+        if (string.Equals(expectedCost, actualCost, StringComparison.Ordinal))
+            return null;
+        string expectedId = expectedItem.Split('/', 2)[0];
+        string actualId = actualItem.Split('/', 2)[0];
+        return $"field={field}[{index}].cost-state " +
+               $"expected={LogValue(expectedCost ?? "<missing>", 360)} " +
+               $"actual={LogValue(actualCost ?? "<missing>", 360)} " +
+               $"expected_card={LogValue(expectedId)} actual_card={LogValue(actualId)}";
+    }
+
+    private static string? ExtractCostState(string item)
+    {
+        const string marker = "|cost-state=";
+        int start = item.IndexOf(marker, StringComparison.Ordinal);
+        if (start < 0)
+            return null;
+        int end = item.IndexOf("/keywords=[", start, StringComparison.Ordinal);
+        return end < 0 ? item[start..] : item[start..end];
     }
 
     private static IReadOnlyList<string> SplitTopLevelItems(string value)
@@ -288,9 +327,10 @@ internal sealed record ContinuationStamp(string StateText)
         return items;
     }
 
-    private static string LogValue(string value)
+    private static string LogValue(string value) => LogValue(value, 180);
+
+    private static string LogValue(string value, int maxLength)
     {
-        const int maxLength = 180;
         string normalized = value.Replace('\r', ' ').Replace('\n', ' ');
         return normalized.Length <= maxLength
             ? $"{{{normalized}}}"

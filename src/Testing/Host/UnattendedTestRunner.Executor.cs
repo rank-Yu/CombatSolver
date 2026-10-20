@@ -22,6 +22,7 @@ internal sealed partial class UnattendedTestRunner
 
         public void RestoreSettings()
         {
+            SolverController.ClearPendingTheftPolicyForTesting();
             if (_settingsBeforeTest != null)
                 SolverSettings.ApplyForTesting(_settingsBeforeTest);
         }
@@ -577,6 +578,11 @@ internal sealed partial class UnattendedTestRunner
             if (request.ScenarioId == "CARD-CONTINUATION-CONTRACT")
             {
                 await runner.RunCardContinuationContractAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "CONTINUATION-COST-STATE-DIAGNOSTIC")
+            {
+                await runner.AssertContinuationCostStateDiagnosticAsync(combatState, player);
                 return Observation(combatEnded: false);
             }
             if (request.ScenarioId == "NATIVE-HAND-CHOICE-REPLAY")

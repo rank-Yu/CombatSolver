@@ -535,6 +535,12 @@ function Enter-HeadlessHostLease([hashtable]$Context, [Diagnostics.Process]$Exis
         try {
             $leases = Get-HeadlessHostLeases $Context
             $own = @($leases | Where-Object { $_.path -eq $Context.LeasePath })
+            # This path always rewrites the lease below, so a verified live marker
+            # without a lease (launcher died between process bind and lease write)
+            # is recovered into a new running reservation instead of being orphaned.
+            if ($own.Count -eq 0 -and $null -ne $game) {
+                Write-Host "HEADLESS_LEASE_RECREATED instance=$($Context.Instance) pid=$($game.pid) reason=live_marker_without_lease"
+            }
             if ($own.Count -gt 0 -and -not [string]::Equals($own[0].runtimeRoot, $Context.Root, [StringComparison]::OrdinalIgnoreCase)) {
                 throw "The host lease path belongs to another runtime."
             }

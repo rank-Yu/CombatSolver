@@ -47,6 +47,10 @@ internal sealed partial class UnattendedTestRunner
 
         public async Task<ScenarioContext> BuildAsync()
         {
+            // Register the theft override before any restoration/combat-start path can
+            // capture a turn-setup root. The executor's late validation/backstop remains.
+            if (runner._request.TheftPolicyForTest is { } theftPolicy)
+                SolverController.SetPendingTheftPolicyForTesting(theftPolicy);
             if (!string.IsNullOrWhiteSpace(runner._request.GeneratedScenarioPath)
                 && (!string.IsNullOrWhiteSpace(runner._request.CheckpointArchivePath)
                     || !string.IsNullOrWhiteSpace(runner._request.RunSnapshotPath)

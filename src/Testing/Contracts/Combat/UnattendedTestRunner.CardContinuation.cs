@@ -25,6 +25,16 @@ internal sealed partial class UnattendedTestRunner
             await InjectCardAsync(live, player, new UnattendedCardInjection { CardId = id, Pile = "Hand" });
         foreach (string id in new[] { "WOUND", "DAZED", "STRIKE_SILENT" })
             await InjectCardAsync(live, player, new UnattendedCardInjection { CardId = id, Pile = "Draw" });
+        // The contract compares the post-play discard identity. Simulated AddToPile refuses
+        // combat-pile moves once the combat is ending, so keep every enemy above the single
+        // Dagger Throw's damage instead of inheriting a caller's lethal --enemy-current-hp.
+        const int contractEnemyHp = 5000;
+        foreach (Creature enemy in live.Enemies)
+        {
+            if (enemy.MaxHp < contractEnemyHp)
+                await CreatureCmd.SetMaxHp(enemy, contractEnemyHp);
+            await CreatureCmd.SetCurrentHp(enemy, enemy.MaxHp);
+        }
         SetEnergy(player, 5);
         CombatRootSnapshot root = CombatRootSnapshot.Capture(live);
         SolverDisplayNames names = SolverDisplayNames.Capture(live);
@@ -64,6 +74,10 @@ internal sealed partial class UnattendedTestRunner
             if (!CorePowerSupport.ApplyEnemyDeathPowers(sim, combat, combat.KnownEnemies, deaths)
                 || !CombatBeamSolver.SettleReplayActionBoundary(sim, combat))
                 throw new InvalidOperationException("Continuation fixture unexpectedly opens a post-action choice.");
+            if (sim.IsEnding)
+                throw new InvalidOperationException(
+                    "Continuation fixture ended combat before the card result boundary; " +
+                    "the target must survive the replay.");
             sim.CheckWinCondition(root.StartTurnNumber);
         }
         CardContinuationContractCheckpoint Pause()
@@ -168,16 +182,36 @@ internal sealed partial class UnattendedTestRunner
 
     private static void AssertCardContinuationContractIdentity(CombatPredictionSimulator sim, Player player, string cardId = "DAGGER_THROW")
     {
+        if (sim.IsEnding || !sim.IsInProgress)
+            throw new InvalidOperationException(
+                $"Card continuation identity requires an active combat: ending={sim.IsEnding} " +
+                $"in_progress={sim.IsInProgress}.");
         var starts = sim.History.OfType<CombatPredictionCardPlayStartedEntry>().ToArray();
         var ends = sim.History.OfType<CombatPredictionCardPlayFinishedEntry>().ToArray();
+        var playerState = sim.State.GetPlayerCombatState(player);
+        string[] hand = playerState.Hand.Cards.Select(card => card.Preview.Id.Entry).ToArray();
+        string[] draw = playerState.DrawPile.Cards.Select(card => card.Preview.Id.Entry).ToArray();
+        string[] discard = playerState.DiscardPile.Cards.Select(card => card.Preview.Id.Entry).ToArray();
+        string[] exhaust = playerState.ExhaustPile.Cards.Select(card => card.Preview.Id.Entry).ToArray();
+        string[] play = playerState.PlayPile.Cards.Select(card => card.Preview.Id.Entry).ToArray();
+        string describes = string.Join(",", starts.Select(entry =>
+            $"{entry.CardPlay.Card.Id.Entry}@play{entry.CardPlay.PlayIndex}/{entry.CardPlay.PlayCount}" +
+            $"->{entry.CardPlay.ResultPile}")) + "|ends=" + string.Join(",", ends.Select(entry =>
+            $"{entry.CardPlay.Card.Id.Entry}@play{entry.CardPlay.PlayIndex}/{entry.CardPlay.PlayCount}"));
         if (starts.Length != 1 || ends.Length != 1 || !ReferenceEquals(starts[0].CardPlay, ends[0].CardPlay)
             || !ReferenceEquals(starts[0].Trace, ends[0].Trace)
             || !sim.History.HasCardPlayStartedSince(0, ends[0].Trace!)
-            || !ReferenceEquals(starts[0].CardPlay.Card, sim.State.GetPlayerCombatState(player).DiscardPile.Cards
-                .Single(c => c.Preview.Id.Entry == cardId).Preview))
-            throw new InvalidOperationException("Active play/trace/card remapping failed.");
-        foreach (var draw in sim.History.OfType<CombatPredictionCardDrawnEntry>())
-            if (!ReferenceEquals(sim.History.GetResolvedEntry<CombatPredictionCardDrawResolvedEntry>(draw).OriginalEntry, draw))
+            || !ReferenceEquals(starts[0].CardPlay.Card, playerState.DiscardPile.Cards
+                .SingleOrDefault(c => c.Preview.Id.Entry == cardId)?.Preview))
+        {
+            throw new InvalidOperationException(
+                $"Active play/trace/card remapping failed. starts={describes} " +
+                $"hand=[{string.Join(",", hand)}] draw=[{string.Join(",", draw)}] " +
+                $"discard=[{string.Join(",", discard)}] exhaust=[{string.Join(",", exhaust)}] " +
+                $"play=[{string.Join(",", play)}]");
+        }
+        foreach (var drawEntry in sim.History.OfType<CombatPredictionCardDrawnEntry>())
+            if (!ReferenceEquals(sim.History.GetResolvedEntry<CombatPredictionCardDrawResolvedEntry>(drawEntry).OriginalEntry, drawEntry))
                 throw new InvalidOperationException("Deferred draw history pairing failed.");
     }
 

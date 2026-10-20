@@ -103,6 +103,12 @@ internal static class Program
                 payload["resolvedScenario"] = generated!.Resolved?.Options;
                 payload["catalogFingerprint"] = generated.Resolved?.CatalogFingerprint;
 
+                // TurnSetupRootCapture resolves the theft policy when SetupPlayerTurn starts,
+                // before G1.3. Register the request override before entering the encounter so
+                // the captured pre-setup root uses it; the late set below remains a backstop.
+                if (generated.Request.TheftPolicyForTest is { } earlyTheftPolicy)
+                    SolverController.SetPendingTheftPolicyForTesting(earlyTheftPolicy);
+
                 IDisposable? turnSetupChoiceScope = null;
                 if (generated.Request.FlashTurnSetupRootForTest)
                 {

@@ -187,14 +187,41 @@ hr_acquire() {
             fi
         fi
         if [[ -z $HR_TOKEN ]]; then
-            if [[ -n $game_pid ]]; then hr_host_unlock; hr_error 'live process has no host lease; cannot adopt'; return 1; fi
-            HR_TOKEN="$(cat /proc/sys/kernel/random/uuid)"
-            ticket="$(date +%s%N)-$HR_TOKEN"
-            record="$(jq -cn --arg root "$HR_ROOT" --arg id "$HR_INSTANCE" --arg exe "$HR_EXECUTABLE" --arg data "$HR_DATA" \
-                --arg token "$HR_TOKEN" --arg ticket "$ticket" --arg mode "$HR_MODE" --arg birth "$HR_LAUNCHER_START" \
-                --argjson pid "$HR_LAUNCHER_PID" --argjson memory "$HR_MEMORY" --argjson cpu "$HR_CPU" \
-                '{schemaVersion:1,instanceRoot:$root,instanceId:$id,executable:$exe,dataHome:$data,token:$token,ticket:$ticket,mode:$mode,memoryMiB:$memory,cpu:$cpu,launcherPid:$pid,launcherStart:$birth,state:"queued"}')"
-            hr_write_lease "$record"
+            if [[ -n $game_pid ]]; then
+                # Spawn/bind/marker publication and lease publication are not one
+                # atomic rename. A launcher killed between bind and marker (or a
+                # marker retained after a crash) can leave an exact live game
+                # without its lease. The instance producer lock is held and the
+                # marker identity/executable were verified by the caller, so
+                # recreate the running reservation instead of orphaning it.
+                if ! hr_identity_state "$game_pid" "$game_start" \
+                    || [[ $(readlink -f -- "/proc/$game_pid/exe" 2>/dev/null) != "$HR_EXECUTABLE" ]]; then
+                    hr_host_unlock
+                    hr_error 'live process cannot recreate its host lease; identity is not owned'
+                    return 1
+                fi
+                HR_TOKEN="$(cat /proc/sys/kernel/random/uuid)"
+                ticket="$(date +%s%N)-$HR_TOKEN"
+                record="$(jq -cn --arg root "$HR_ROOT" --arg id "$HR_INSTANCE" --arg exe "$HR_EXECUTABLE" \
+                    --arg data "$HR_DATA" --arg token "$HR_TOKEN" --arg ticket "$ticket" --arg mode "$HR_MODE" \
+                    --arg launcher_birth "$HR_LAUNCHER_START" --arg birth "$game_start" \
+                    --argjson pid "$game_pid" --argjson launcher_pid "$HR_LAUNCHER_PID" \
+                    --argjson memory "$HR_MEMORY" --argjson cpu "$HR_CPU" \
+                    '{schemaVersion:1,instanceRoot:$root,instanceId:$id,executable:$exe,dataHome:$data,token:$token,ticket:$ticket,mode:$mode,memoryMiB:$memory,cpu:$cpu,launcherPid:$launcher_pid,launcherStart:$launcher_birth,state:"running",gamePid:$pid,gameStart:$birth}')" \
+                    || { hr_host_unlock; hr_error 'could not encode recovered host lease'; return 1; }
+                hr_write_lease "$record" \
+                    || { hr_host_unlock; hr_error 'could not publish recovered host lease'; return 1; }
+                warm=1
+                echo "HEADLESS_LEASE_RECREATED instance=$HR_INSTANCE pid=$game_pid reason=live_marker_without_lease" >&2
+            else
+                HR_TOKEN="$(cat /proc/sys/kernel/random/uuid)"
+                ticket="$(date +%s%N)-$HR_TOKEN"
+                record="$(jq -cn --arg root "$HR_ROOT" --arg id "$HR_INSTANCE" --arg exe "$HR_EXECUTABLE" --arg data "$HR_DATA" \
+                    --arg token "$HR_TOKEN" --arg ticket "$ticket" --arg mode "$HR_MODE" --arg birth "$HR_LAUNCHER_START" \
+                    --argjson pid "$HR_LAUNCHER_PID" --argjson memory "$HR_MEMORY" --argjson cpu "$HR_CPU" \
+                    '{schemaVersion:1,instanceRoot:$root,instanceId:$id,executable:$exe,dataHome:$data,token:$token,ticket:$ticket,mode:$mode,memoryMiB:$memory,cpu:$cpu,launcherPid:$pid,launcherStart:$birth,state:"queued"}')"
+                hr_write_lease "$record"
+            fi
         fi
         if ! existing="$(jq -ce --arg token "$HR_TOKEN" 'select(.token == $token)' "$HR_LEASE_PATH")"; then
             hr_host_unlock; hr_error 'own lease disappeared or changed while queued'; return 1

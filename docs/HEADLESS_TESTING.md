@@ -13,6 +13,8 @@
 
 固定小预算搜索使用 `-FixedSearchBudget -SearchBudgetOverrideMilliseconds 1500`，Bash 对应 `--fixed-search-budget --search-budget-override-milliseconds 1500`。需要在不改玩家设置的情况下覆盖多策略路线搜索时，使用 `-UseNoveltyPortfolioForTest` / `--use-novelty-portfolio-for-test`；该开关只存在于无人测试协议，结束请求时由 `ProtocolHost` 重置。生产只有一套搜索配置；旧 ForceShortSearchOnly 和短/深预算输入仅作为兼容入口，不能据此断言阶段。旧 ExpectedInitialSearchPhase/DeepSearchTriggered/DeepSearchImprovedResult 参数已删除，改断言总工作量、边界和实际路线。新回放政策覆盖文件使用 `profile` / `fixedBudget`；旧归档的 `deepProfile` 仍可读取。
 
+`-TheftPolicyForTest` / `--theft-policy-for-test`（`PreserveResources` / `LetEscape`）在场景进入战斗前登记，由 `SolverController.BeginCombat` 在第一次回合准备根捕获前消费；`full_auto` 阶段的 `SetTheftPolicyForTesting` 仍保留为校验与兜底。偷窃战带回合开始选择遗物的验证使用 `--encounter-id GREMLIN_MERC_NORMAL --relics-json '[{"relicId":"TOASTY_MITTENS","addWithoutObtainedEffects":true}]' --theft-policy-for-test LetEscape --expected-initial-theft-policy LetEscape --stop-after-initial-solver-result-assertion`；`InitialPolicy` 结果必须显示 `Theft=LetEscape`。
+
 先在各任务自己的 worktree 构建，禁止两个 agent 同时构建同一 worktree：
 
 ```sh
@@ -45,6 +47,7 @@ Coding agent 运行无头游戏测试时必须加 `-CleanupInstanceOnExit`，Bas
 - CPU 默认预约 2（单核机为 1），内存默认预约 4096 MiB；累计 CPU 不超主机逻辑 CPU，内存预留至少 2 GiB 主机余量，同时考虑当前可用内存及其他尚未兑现预约。预约只是准入记账，不是 OS 硬配额，也不自动降低 DOP 或 NoGC。应按峰值、NoGC 堆预算与原生开销选择预约；4 GiB 不保证容纳所有场景。
 - Passed 不代表进程可复用；仍需匹配本请求的静稳 Ready ACK。小批次可以复用同一进程，最后一项必须请求 ExitOnComplete，否则暖进程仍占名额并阻塞独占队列。Held 继续占名额且不能复用；发布本实例 release 文件后只退出本实例。
 - 取消、Failed、超时只清理本实例精确 PID/出生身份。PID 复用、无法读取身份、损坏或孤儿 lease 必须封闭失败/保留，不能按进程名杀掉其他任务。
+- 进程标记与 host lease 分两次发布，崩溃/被杀可能只留下其中一边。实例 producer 锁内已由启动器逐项验证标记的 PID、出生身份、私有可执行文件和 data 目录后，缺少 lease 的活标记会重建为 `running` 预约并输出 `HEADLESS_LEASE_RECREATED`；标记已失效而租约对应进程已退出时，由 host 扫描回收该租约。仍存活但没有标记的租约、身份不确定或损坏文件继续封闭失败，不做猜测接管。
 - 未登记游戏（包括旧版启动器与可见游戏）会阻止新请求准入，两个模式都一样。主机锁不能约束不使用它的第三方启动器；做性能测试前仍需协调其他任务，不能声称它是系统级排他锁。
 
 `COMBATSOLVER_HEADLESS_ROOT` 仍可指定精确实例目录，迁移前遗留的活进程/不兼容 marker 不会冒险接管。并行结果只作正确性和总测试吞吐证据，不用于单场速度、GC 暂停或峰值内存 A/B；最终性能结论仍来自正常可见 Steam 的独占测试。
@@ -65,3 +68,5 @@ Coding agent 运行无头游戏测试时必须加 `-CleanupInstanceOnExit`，Bas
 GC 研究分支移植时，Linux 暖进程准入改为只预约尚未兑现的增长量（预约减已用 RSS，最小为 0），与 Windows 口径一致；总预约、CPU 和主机余量限制仍生效。`bash tools/testing/test-headless-runtime.sh --warm-memory` 定向覆盖该边界和等待期间的租约替换。HoldAfterInitialSearch 与 StopAfterInitialSolverResultAssertion 互斥，两端入口在准入前拒绝同时使用；采样停在初次结果时使用 Hold 保持游戏存活。
 
 `test-headless-matrix-runtime.sh` / `.ps1` 检查矩阵参数、暖进程尾部清理、拒绝外来身份和取消隔离；`--stop-only` / `-StopOnly` 另调用真实启动器入口，验证无构建产物时也不会为清理启动游戏。Linux 停止测试使用原生进程替身；Linux 上的 PowerShell 测试不代表 Windows 实机或原生 Ctrl+C 通过。
+
+`CONTINUATION-COST-STATE-DIAGNOSTIC` 在普通战斗内构造两张最终费用相同、`|cost-state=` 有序修正层不同的同名牌，断言 `ContinuationStamp.DescribeDifferences` 的第一条差异是 `field=H[0].cost-state`；它只验证对账诊断，不改变续接匹配。`CARD-CONTINUATION-CONTRACT` 会把敌人生命抬到非致死值，并在弃牌身份断言前要求战斗仍在进行；否则 `AddToPile` 在收尾阶段拒绝移动手牌，弃牌堆为空并不是夹具时点错误。

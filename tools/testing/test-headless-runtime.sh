@@ -832,6 +832,23 @@ finish_driver warm-peer
 finish_driver warm-third
 pass 'warm game retains capacity; reuse keeps one lease while the pool is full'
 
+new_case
+start_driver lease-recover-first recover parallel
+await_acquired lease-recover-first
+recover_pid="$(field lease-recover-first pid)"
+recover_birth="$(field lease-recover-first birth)"
+recover_lease="$(field lease-recover-first lease)"
+send_control lease-recover-first warm
+await_exit lease-recover-first 0
+rm -f -- "$recover_lease"
+start_driver lease-recover-second recover parallel hold "$recover_pid" "$recover_birth"
+await_acquired lease-recover-second
+[[ "$(field lease-recover-second pid)" == "$recover_pid" ]] || fail 'lease recovery started a different process'
+jq -e --argjson pid "$recover_pid" '.state == "running" and .gamePid == $pid' "$recover_lease" >/dev/null \
+    || fail 'verified live marker without a lease did not recreate a running reservation'
+finish_driver lease-recover-second
+pass 'verified live marker without a lease recreates its host reservation'
+
 run_warm_memory_tests
 
 new_case

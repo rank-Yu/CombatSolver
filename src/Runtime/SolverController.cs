@@ -499,6 +499,8 @@ internal static partial class SolverController
     /// </summary>
     internal static Func<string> DisplayServerNameProvider { get; set; } = static () => DisplayServer.GetName();
 
+    private static SolverTheftPolicy? _pendingTheftPolicyForTesting;
+
     internal static SearchPolicySnapshot CaptureSearchPolicy(
         SolverSettingsSnapshot settings,
         CombatState state,
@@ -589,6 +591,7 @@ internal static partial class SolverController
     public static void BeginCombat(ICombatState? state)
     {
         AssertMainThread();
+        SolverTheftPolicy? pendingTheftPolicy = _pendingTheftPolicyForTesting;
         ResetCore("combat_starting");
         if (state is CombatState contentState)
             _combat.UploadPolicy.Observe(contentState);
@@ -606,9 +609,17 @@ internal static partial class SolverController
         BattleDamageTracker.Begin(state);
         CombatShowcaseCollector.BeginCombat();
         CombatBugReportExporter.BeginCombat(state);
-        _combat.TheftPolicy = state is CombatState combat && TheftEncounterStrategy.IsApplicable(combat)
-            ? SolverTheftPolicy.PreserveResources
+        bool theftCombat = state is CombatState theftState && TheftEncounterStrategy.IsApplicable(theftState);
+        _combat.TheftPolicy = theftCombat
+            ? pendingTheftPolicy ?? SolverTheftPolicy.PreserveResources
             : null;
+        if (theftCombat && pendingTheftPolicy is { } earlyTheftPolicy)
+        {
+            _pendingTheftPolicyForTesting = null;
+            Entry.Logger.Info(
+                $"[CombatSolver/Test] THEFT_POLICY_TEST_OVERRIDE_EARLY " +
+                $"policy={earlyTheftPolicy} phase=combat_start");
+        }
         if (state is CombatState activeCombat)
             ReconcilePersistedPotionDirectives(activeCombat);
         Entry.Logger.Info(
@@ -2059,6 +2070,24 @@ internal static partial class SolverController
             ? _combat.TheftPolicy ?? SolverTheftPolicy.PreserveResources
             : null;
 
+    /// <summary>
+    /// The turn-setup root is captured from <see cref="CombatStartingEvent"/> before the
+    /// unattended executor reaches full-auto. The test override must be registered before
+    /// that capture, otherwise the first root keeps the persisted/default theft policy.
+    /// </summary>
+    internal static void SetPendingTheftPolicyForTesting(SolverTheftPolicy policy)
+    {
+        AssertMainThread();
+        if (!UnattendedTestRunner.IsActive)
+            throw new InvalidOperationException("偷窃策略测试覆盖只能在无人测试中使用。");
+        _pendingTheftPolicyForTesting = policy;
+    }
+
+    internal static void ClearPendingTheftPolicyForTesting()
+    {
+        _pendingTheftPolicyForTesting = null;
+    }
+
     internal static void SetTheftPolicyForTesting(CombatState state, SolverTheftPolicy policy)
     {
         AssertMainThread();
@@ -2893,6 +2922,7 @@ internal static partial class SolverController
             .FirstOrDefault(action => action.Turn == turn && action.Kind == PlanActionKind.EndTurn);
         FastModeType originalFastMode = SaveManager.Instance.PrefsSave.FastMode;
         FastModeType? overrideFastMode = ResolveDeploymentFastMode(deploymentSettings.DeploymentFastMode);
+        PlanAction? actionInFlight = null;
         try
         {
             if (overrideFastMode is { } requestedFastMode)
@@ -2904,6 +2934,7 @@ internal static partial class SolverController
             for (int actionIndex = 0; actionIndex < actions.Count; actionIndex++)
             {
                 PlanAction action = actions[actionIndex];
+                actionInFlight = action;
                 token.ThrowIfCancellationRequested();
                 if (!IsSamePlayableTurn(state, turn))
                     throw new InvalidOperationException("部署途中已不再是原玩家回合。");
@@ -3194,6 +3225,8 @@ internal static partial class SolverController
             CompleteDeployment(deployment);
             Entry.Logger.Warn(
                 $"[CombatSolver/Test] DEPLOY_REPLAN turn={turn} reason=card_missing " +
+                $"card={actionInFlight?.CardId ?? "-"} occurrence={actionInFlight?.CardOccurrence ?? -1} " +
+                $"planned_state_key={actionInFlight?.CardStateKey ?? "-"} " +
                 $"message={ex.Message}");
             RequestSearch(
                 host,
