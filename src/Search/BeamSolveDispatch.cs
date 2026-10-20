@@ -81,24 +81,6 @@ internal static class BeamSolveDispatch
             // modeled. Other sides/phases keep the existing solver and say so with a stable reason.
             return SolveExisting(request, $"root-phase:{rootPhase}");
         }
-        if (mode != FlashSearchMode.Off
-            && request.Purpose == DirectSearchPurpose.SmartPotionGradient
-            && PotionAuditBoundary(request) is { } boundary)
-        {
-            if (mode == FlashSearchMode.Shadow)
-            {
-                Stopwatch watch = Stopwatch.StartNew();
-                SolverResult existing = SolveExisting(request);
-                request.Policy.Diagnostics.Info(
-                    $"[CombatSolver/Flash] FLASH_SHADOW purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
-                    + $"existing=[{Describe(existing, watch.Elapsed)}] flash=[status=boundary ms=0 detail={boundary}] same_route=n/a");
-                return existing;
-            }
-            request.Policy.Diagnostics.Info(
-                $"[CombatSolver/Flash] FLASH_FALLBACK purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
-                + $"flash=[status=boundary ms=0 detail={boundary}]");
-            return SolveExisting(request, $"potion-audit-boundary:{boundary}");
-        }
         switch (mode)
         {
             case FlashSearchMode.Off:
@@ -125,6 +107,9 @@ internal static class BeamSolveDispatch
             }
             case FlashSearchMode.On:
             {
+                // The existing solver rejects these arguments in SolveCore before any search runs.
+                // Flash reproduces that exact failure instead of reporting a takeover boundary.
+                ValidatePotionBounds(request.MinimumPotionUses, request.MaximumPotionUses);
                 Stopwatch watch = Stopwatch.StartNew();
                 FlashAttempt flash = SolveFlash(request);
                 TimeSpan flashTime = watch.Elapsed;
@@ -144,40 +129,21 @@ internal static class BeamSolveDispatch
     }
 
     /// <summary>
-    /// A fixed-prefix continuation solve. The gate (<see cref="TakeOverBoundary"/>) offers plan members,
-    /// the plan pass's depth-one scout and the potion-constrained requests to Flash; requests with a
-    /// feature Flash does not model are refused with a stable reason and go straight to the existing solver.
+    /// A fixed-prefix continuation solve. Every continuation shape FlashBeam models goes through the
+    /// Flash backend: plan members (including any early-turn scout, potion baseline, earliest-turn bound,
+    /// forced directive and potion bounds), the plan pass's own scout, and the Smart potion posterior.
+    /// The only remaining non-Flash continuation is an unsupported root phase, which is an explicit
+    /// kernel boundary; Off and Shadow keep their existing behavior.
     /// </summary>
     public static SolverResult SolveContinuation(ContinuationSearchRequest request)
     {
-        bool potionAudit = request.Purpose == ContinuationPurpose.SmartOpeningPotionPosterior;
         SearchPolicySnapshot effectivePolicy = EffectivePolicy(request);
         string? rootPhase = RootPhaseBoundary(request);
-        string? gate = rootPhase ?? (potionAudit ? null : TakeOverBoundary(request));
-        FlashSearchMode mode = gate is null ? effectivePolicy.FlashMode : FlashSearchMode.Off;
-        if (gate is not null && effectivePolicy.FlashMode == FlashSearchMode.On)
+        FlashSearchMode mode = rootPhase is null ? effectivePolicy.FlashMode : FlashSearchMode.Off;
+        if (rootPhase is not null && effectivePolicy.FlashMode == FlashSearchMode.On)
         {
             // On mode must account for every legacy search it runs; off/shadow comparison modes do not log.
-            return SolveExistingContinuation(request,
-                rootPhase is not null ? $"root-phase:{rootPhase}" : $"can-take-over:{gate}");
-        }
-        if (potionAudit && mode != FlashSearchMode.Off
-            && PotionAuditBoundary(request) is { } boundary)
-        {
-            if (mode == FlashSearchMode.Shadow)
-            {
-                Stopwatch watch = Stopwatch.StartNew();
-                SolverResult existing = SolveExistingContinuation(request);
-                effectivePolicy.Diagnostics.Info(
-                    $"[CombatSolver/Flash] FLASH_SHADOW purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
-                    + $"prefix={request.Prefix.Length} existing=[{Describe(existing, watch.Elapsed)}] "
-                    + $"flash=[status=boundary ms=0 detail={boundary}] same_route=n/a");
-                return existing;
-            }
-            effectivePolicy.Diagnostics.Info(
-                $"[CombatSolver/Flash] FLASH_FALLBACK purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
-                + $"prefix={request.Prefix.Length} flash=[status=boundary ms=0 detail={boundary}]");
-            return SolveExistingContinuation(request, $"potion-audit-boundary:{boundary}");
+            return SolveExistingContinuation(request, $"root-phase:{rootPhase}");
         }
         switch (mode)
         {
@@ -201,6 +167,8 @@ internal static class BeamSolveDispatch
             }
             case FlashSearchMode.On:
             {
+                // SolveCore rejects these arguments before any search runs; reproduce that failure.
+                ValidatePotionBounds(request.MinimumPotionUses, request.MaximumPotionUses);
                 Stopwatch watch = Stopwatch.StartNew();
                 FlashAttempt flash = SolveFlashContinuation(request);
                 TimeSpan flashTime = watch.Elapsed;
@@ -225,138 +193,20 @@ internal static class BeamSolveDispatch
         => request.PolicyOverride ?? request.Context.Policy;
 
     /// <summary>
-    /// The explicit fallback reasons of a Smart potion-gradient request. The gradient is only defined for
-    /// a Smart policy with a searchable potion; every other request feature now goes through the same
-    /// audited final ordering as the existing solver.
+    /// The existing solver's argument validation for the exact-use bounds (<c>CombatBeamSolver.SolveCore</c>):
+    /// a negative bound or a minimum above the maximum is invalid input, not a request shape Flash can
+    /// search. Throwing the same exception keeps the Flash backend's result identical instead of logging
+    /// a takeover fallback for a request the existing search would reject before searching.
     /// </summary>
-    private static string? PotionAuditBoundary(BeamSolveRequest request)
+    private static void ValidatePotionBounds(int? minimumPotionUses, int? maximumPotionUses)
     {
-        if (request.Policy.PotionPolicy != SolverPotionPolicy.Smart)
-            return "potion-policy";
-        if (request.Root.SearchablePotions.Count == 0)
-            return "no-searchable-potion";
-        return null;
-    }
-
-    /// <summary>
-    /// The explicit fallback reasons of a Smart opening-potion posterior request. The audit itself is
-    /// only defined for a Smart policy with a searchable potion; plan commitments and early-turn scouts
-    /// are separate kernel structures and stay out of this batch.
-    /// </summary>
-    private static string? PotionAuditBoundary(ContinuationSearchRequest request)
-    {
-        if (request.Purpose != ContinuationPurpose.SmartOpeningPotionPosterior)
-            return "purpose";
-        if (request.Commitment != null)
-            return "plan-commitment";
-        if (request.EarlyTurnScoutDepth != 0 || request.EarlyTurnScoutObserver != null)
-            return "early-turn-scout";
-        SearchPolicySnapshot policy = EffectivePolicy(request);
-        if (policy.PotionPolicy != SolverPotionPolicy.Smart)
-            return "potion-policy";
-        if (request.Context.Root.SearchablePotions.Count == 0)
-            return "no-searchable-potion";
-        if (request.MinimumPotionUses is < 0 || request.MaximumPotionUses is < 0)
-            return "potion-bounds";
-        if (request.MinimumPotionUses is { } minimum
-            && request.MaximumPotionUses is { } maximum && minimum > maximum)
+        int minimum = minimumPotionUses ?? 0;
+        if (minimum < 0 || maximumPotionUses is { } maximum && minimum > maximum)
         {
-            return "potion-bounds";
+            throw new ArgumentOutOfRangeException(
+                "_minimumPotionUses",
+                "最少用药数必须非负且不能超过最多用药数。");
         }
-        return null;
-    }
-
-    /// <summary>
-    /// The continuation gate. Plan members and the plan pass's own depth-one scout are admitted by the
-    /// two plan helpers below; other early-turn scouts and invalid potion bounds keep the existing
-    /// solver (the latter for its own argument validation). The band and power-commitment profile
-    /// switches are executed by FlashBeam and no longer reject potion-constrained requests.
-    /// </summary>
-    private static string? TakeOverBoundary(ContinuationSearchRequest request)
-    {
-        if (request.Commitment != null)
-            return CanTakeOverPlanMember(request) ? null : "commitment";
-        if (request.EarlyTurnScoutDepth != 0 || request.EarlyTurnScoutObserver != null)
-            return CanTakeOverPlanScout(request) ? null : "early-turn-scout";
-        if (request.MinimumPotionUses is < 0 || request.MaximumPotionUses is < 0)
-            return "potion-bounds";
-        if (request.MinimumPotionUses is { } minimum
-            && request.MaximumPotionUses is { } maximum && minimum > maximum)
-        {
-            return "potion-bounds";
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// A <c>ContinuationPurpose.PlanCommitment</c> member. The plan prefix is replayed by the existing
-    /// engine before the Flash root; the commitment adds route payoff counting and the CopyPower
-    /// representative seats (<c>CombatBeamSolver.Expansion</c> / <c>BeamRetentionPolicy</c>). Potion
-    /// bounds on a plan use the same audited final ordering as every other potion-constrained request;
-    /// the materialized route is re-checked for both the plan payoff count and the potion constraints.
-    /// </summary>
-    private static bool CanTakeOverPlanMember(ContinuationSearchRequest request)
-    {
-        if (request.Purpose != ContinuationPurpose.PlanCommitment
-            || request.Commitment is not { } plan
-            || request.EarlyTurnScoutDepth != 0
-            || request.EarlyTurnScoutObserver != null
-            || request.PotionFreePolicyBaseline != null
-            || request.EarliestPotionTurn != null
-            || request.MinimumPotionUses is < 0
-            || request.MaximumPotionUses is < 0
-            || request.MinimumPotionUses is { } minimum
-                && request.MaximumPotionUses is { } maximum
-                && minimum > maximum)
-        {
-            return false;
-        }
-        if (EffectivePolicy(request).PotionStrategy.HasForcedDirectives)
-            return false;
-        // Potion bounds, explicit-use policies and the potion-free baseline are all materialized by
-        // the same audited final ordering; the Flash route still replays through the existing engine
-        // and the post-materialization check re-reads the potion identity and count.
-        return true;
-    }
-
-    /// <summary>
-    /// The deferred-power plan's own scout (<c>RunDeferredPowerPlanSearchPass</c>, empty prefix) at any
-    /// searched depth. Other early-turn exploration requests keep their own direct member. The bridge
-    /// translates the reported Flash routes back to <see cref="EarlyTurnFrontierCandidate"/>s.
-    /// </summary>
-    private static bool CanTakeOverPlanScout(ContinuationSearchRequest request)
-    {
-        if (request.Purpose != ContinuationPurpose.PlanCommitment
-            || request.Commitment != null
-            || request.EarlyTurnScoutDepth <= 0
-            || request.EarlyTurnScoutObserver == null
-            || request.Prefix.Length != 0
-            || request.PotionFreePolicyBaseline != null
-            || request.EarliestPotionTurn != null
-            || request.MaximumPotionUses is not (null or 0)
-            || request.MinimumPotionUses is not (null or 0))
-        {
-            return false;
-        }
-        return PlanPotionFree(request);
-    }
-
-    /// <summary>Whether the plan scout explicitly searches without potions.</summary>
-    private static bool PlanPotionFree(ContinuationSearchRequest request)
-    {
-        if (request.PotionPolicyOverride == SolverPotionPolicy.Disabled)
-            return true;
-        SearchPolicySnapshot policy = EffectivePolicy(request);
-        if (policy.PotionStrategy.HasForcedDirectives)
-            return false;
-        if (request.PotionPolicyOverride == SolverPotionPolicy.RequireAtLeastOne
-            || policy.PotionPolicy == SolverPotionPolicy.RequireAtLeastOne)
-        {
-            return false;
-        }
-        // A zero maximum means no explicit potion can be enumerated, matching the existing solver.
-        return request.MaximumPotionUses == 0
-            || policy.PotionPolicy == SolverPotionPolicy.Disabled;
     }
 
     /// <summary>

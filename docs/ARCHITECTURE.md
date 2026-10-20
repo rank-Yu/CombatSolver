@@ -51,7 +51,7 @@
 | `Probes/SearchRouteMaterializer.cs` | 原搜索与 Flash 共用的最终路线物化：按既有顺序标注、可选的 Afterimage/格挡药水调整，并构建 `SolverResult`、计划与快照 |
 | `Probes/SearchEvaluator.cs` | 原搜索与探针共用的状态评分、指纹与威胁投影；不持有搜索前沿 |
 | `PrimaryIncumbentTable` / `ResourceIncumbentPolicy` | 同根同政策的资源桶见证、未来收益上界与认证回退 |
-| `BeamSolveDispatch` | 协调器主搜索成员与干净固定前缀续接的后端分发（Off/Shadow/On）、Shadow 隔离与回落 |
+| `BeamSolveDispatch` | 协调器主搜索成员与固定前缀续接的后端分发（Off/Shadow/On）、Shadow 隔离与回落；续接把计划、侦察、药水约束与任意承诺交给 Flash，只有不支持的根阶段显式回落 |
 | `FlashBeam/Bridge/` / `CardChoiceSupport.Flash.cs` | Flash 准入、规则编译、旧引擎状态投影、动作与选择翻译、固定前缀回放；桥接与物化只依赖 `SearchReplayCore`、`OpeningProbe` 与 `SearchRouteMaterializer`（[Flash 规格](flash-search/README.md)） |
 | `FlashBeam/FlashBeamSolver.cs` / `FlashBeam/Scoring/` | FlashBeam 搜索；从 `FlashBattle` 计算的状态评估（移植 `Snapshot` 与 `BeamRankScore`，逐内容数值表由 `Bridge/FlashScoreBridge` 在根上编译），Scoring 不引用原版模型类型 |
 

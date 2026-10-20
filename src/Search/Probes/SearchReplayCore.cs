@@ -1207,6 +1207,12 @@ internal sealed class SearchReplayCore(SearchReplayOptions options)
             {
                 if (taken != selections.Count)
                     throw new FlashChoiceMismatchException($"Flash 做了 {selections.Count} 次选择，旧引擎只请求了 {taken} 次。");
+                // The existing expansion freezes "this play ended the turn" on the card action
+                // (SearchExpansionShared.CreatePlannedCardChild). Flash actions carry no such flag, so
+                // the translator records it from the replayed turn. Without it a continuation stamp
+                // on a forced-turn-end card (for example VOID_FORM) is never captured.
+                if (action.Kind == PlanActionKind.PlayCard && child.Turn > parent.Turn)
+                    action = action with { EndsPlayerTurn = true };
                 return child;
             }
             SimulatedCombatState combat = (SimulatedCombatState)child.Simulator.State.CombatState;

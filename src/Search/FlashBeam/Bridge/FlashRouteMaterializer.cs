@@ -308,6 +308,7 @@ internal static class FlashRouteMaterializer
             InitialPlanPayoffCount = initialPlanPayoff,
             EarlyTurnScoutDepth = earlyTurnScoutDepth,
             InitialPlayerTurn = rootSnapshot.Turn,
+            InitialSearchTurn = battles[0].PlayerTurn,
             SecondRankBand = profile.SecondRankBand,
             SecondRankBandWidth = profile.BeamWidth,
             AggressivePowerCommitment = profile.AggressivePowerCommitment,
@@ -404,13 +405,15 @@ internal static class FlashRouteMaterializer
             SoftTimeBudgetMilliseconds = Math.Max(1, Math.Min(profile.SoftTimeBudgetMilliseconds, 2_000)),
         };
         SolverResult result;
+        SearchNode materializedSelectionNode;
         try
         {
             result = MaterializeFixedPlan(probe, root, displayNames, battleDamage, policy,
                 potionPolicyOverride, potionFreePolicyBaseline, maximumPotionUses, minimumPotionUses,
                 earliestPotionTurn, turnSetup ? selectedRoot.Choices : null,
                 turnSetup ? selectedRoot.Snapshot : null, plan, watch, cancellationToken,
-                workTotals, recordPrefixWork: !recordFlashWork, continuationPurpose, purpose);
+                workTotals, recordPrefixWork: !recordFlashWork, continuationPurpose, purpose,
+                out materializedSelectionNode);
         }
         catch (PotionPolicyUnsatisfiedException ex)
         {
@@ -426,7 +429,7 @@ internal static class FlashRouteMaterializer
         {
             int realized = commitment.Payoff.Kind == PlanPayoffEvidenceKind.RegisteredPowerBenefit
                 ? search.BestPayoffCount
-                : CountPlanPayoffs(plan, commitment);
+                : commitment.CountRealizedPayoffs(materializedSelectionNode);
             if (realized != search.BestPayoffCount)
             {
                 throw new FlashVerificationException(plan.Count,
@@ -526,7 +529,8 @@ internal static class FlashRouteMaterializer
         SearchRequestWorkTotals? workTotals,
         bool recordPrefixWork,
         ContinuationPurpose? continuationPurpose,
-        DirectSearchPurpose? purpose)
+        DirectSearchPurpose? purpose,
+        out SearchNode selectedNode)
     {
         using IDisposable isolation = SimulationNotificationIsolation.Enter();
         FlashPruningRequest pruning = FlashBridgeFacts.CapturePruningRequest(
@@ -573,6 +577,7 @@ internal static class FlashRouteMaterializer
             battleDamage);
         FinalPlanSelection selection = ordering.Select(
             [(node, node.Snapshot)], root.InitialPlayerHp, emitDiagnostics: true);
+        selectedNode = selection.Candidate.Node;
         bool onlyDeathRoutes = node.Snapshot.PlayerDead || node.Snapshot.ProjectedPlayerHp <= 0;
         SearchMaterializationMetrics metrics = new(probe.AccountingForBridge.Performance)
         {
@@ -659,34 +664,10 @@ internal static class FlashRouteMaterializer
             potionId);
     }
 
-    /// <summary>The existing <c>PlanCommitment.CountRealizedPayoffs</c> over materialized actions.</summary>
-    private static int CountPlanPayoffs(IReadOnlyList<PlanAction> actions, PlanCommitment plan)
-    {
-        int count = 0;
-        foreach (PlanAction action in actions)
-        {
-            if (action.Turn < plan.Payoff.EarliestTurn)
-                continue;
-            if (plan.Payoff.Kind == PlanPayoffEvidenceKind.CardPlayed
-                && action.Kind == PlanActionKind.PlayCard
-                && string.Equals(action.CardId, plan.Payoff.SourceId, StringComparison.Ordinal))
-            {
-                count++;
-            }
-            else if (plan.Payoff.Kind == PlanPayoffEvidenceKind.FreePotionUsed
-                && action.Kind == PlanActionKind.UsePotion
-                && string.Equals(action.PotionId, plan.Payoff.SourceId, StringComparison.Ordinal))
-            {
-                count++;
-            }
-        }
-        return count;
-    }
-
     /// <summary>
     /// Replays a Flash scout route through the existing engine from the request root and returns the
-    /// translator's <see cref="PlanAction"/>s plus the end state's fingerprint. The scout is admitted
-    /// only for an empty fixed prefix, so the route starts at the request root.
+    /// translator's <see cref="PlanAction"/>s plus the end state's fingerprint. The route starts at the
+    /// search root; a non-empty fixed prefix is replayed first.
     /// </summary>
     private static PlanAction[] TranslateScoutRoute(OpeningProbe probe, Player player,
         IReadOnlyList<PlanAction> prefix, IReadOnlyList<PlanCardChoice>? setupChoices,
