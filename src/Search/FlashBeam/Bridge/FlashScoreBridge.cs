@@ -28,7 +28,8 @@ internal static class FlashScoreBridge
         SimulationSnapshot searchRootSnapshot,
         Player player,
         FlashRules rules,
-        in FlashBattle flashRoot)
+        in FlashBattle flashRoot,
+        bool rootSetup = false)
     {
         RejectUnsupportedSettings(policy);
 
@@ -68,10 +69,13 @@ internal static class FlashScoreBridge
             IgnoreLongTermRewards = policy.IgnoreLongTermRewards,
             TheftPolicy = policy.TheftPolicy,
             InitialEnemyCount = root.Enemies.Count,
-            InitialPersistentBuffValue = rootSnapshot.PersistentBuffValue,
-            InitialEnemyStrengthSuppression = rootSnapshot.EnemyStrengthSuppression,
-            InitialEnemyWeakTurns = rootSnapshot.EnemyWeakTurns,
-            InitialRetainedAttackValue = rootSnapshot.RetainedAttackValue,
+            // The existing search zeroes these four baselines for a turn-setup root (the pre-setup
+            // state owns values the setup page is about to replace). Match it instead of freezing the
+            // pre-setup Start snapshot's transient values.
+            InitialPersistentBuffValue = rootSetup ? 0 : rootSnapshot.PersistentBuffValue,
+            InitialEnemyStrengthSuppression = rootSetup ? 0 : rootSnapshot.EnemyStrengthSuppression,
+            InitialEnemyWeakTurns = rootSetup ? 0 : rootSnapshot.EnemyWeakTurns,
+            InitialRetainedAttackValue = rootSetup ? 0 : rootSnapshot.RetainedAttackValue,
             RootPotions = rootPotions,
             RootPotionSlotCount = flashRoot.PotionSlotCount,
             InitialPotionUseCount = potionUsage.PotionUseCount,

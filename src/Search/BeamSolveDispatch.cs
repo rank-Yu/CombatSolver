@@ -63,11 +63,11 @@ internal static class BeamSolveDispatch
             or DirectSearchPurpose.NarrowOpeningIncumbent
             or DirectSearchPurpose.TurnBoundaryDiscovery;
         FlashSearchMode mode = auditable ? request.Policy.FlashMode : FlashSearchMode.Off;
-        if (mode == FlashSearchMode.On && TurnSetupBoundary(request) is { } turnSetup)
+        if (mode != FlashSearchMode.Off && RootPhaseBoundary(request) is { } rootPhase)
         {
-            // The turn-setup root protocol is not part of this batch; admit the root explicitly and
-            // keep the existing search rather than searching a phase Flash does not model.
-            return SolveExisting(request, turnSetup);
+            // Only the ordinary play-phase root and the captured player/Start turn-setup root are
+            // modeled. Other sides/phases keep the existing solver and say so with a stable reason.
+            return SolveExisting(request, $"root-phase:{rootPhase}");
         }
         if (mode != FlashSearchMode.Off
             && request.Purpose == DirectSearchPurpose.SmartPotionGradient
@@ -137,14 +137,14 @@ internal static class BeamSolveDispatch
     {
         bool potionAudit = request.Purpose == ContinuationPurpose.SmartOpeningPotionPosterior;
         SearchPolicySnapshot effectivePolicy = EffectivePolicy(request);
-        string? turnSetup = TurnSetupBoundary(request);
-        string? gate = turnSetup ?? (potionAudit ? null : TakeOverBoundary(request));
+        string? rootPhase = RootPhaseBoundary(request);
+        string? gate = rootPhase ?? (potionAudit ? null : TakeOverBoundary(request));
         FlashSearchMode mode = gate is null ? effectivePolicy.FlashMode : FlashSearchMode.Off;
         if (gate is not null && effectivePolicy.FlashMode == FlashSearchMode.On)
         {
             // On mode must account for every legacy search it runs; off/shadow comparison modes do not log.
             return SolveExistingContinuation(request,
-                turnSetup is not null ? turnSetup : $"can-take-over:{gate}");
+                rootPhase is not null ? $"root-phase:{rootPhase}" : $"can-take-over:{gate}");
         }
         if (potionAudit && mode != FlashSearchMode.Off
             && PotionAuditBoundary(request) is { } boundary)
@@ -369,30 +369,29 @@ internal static class BeamSolveDispatch
     }
 
     /// <summary>
-    /// The root protocol boundary. For now only ordinary play-phase roots are admitted; turn-setup
-    /// roots need a kernel/protocol port and are refused explicitly before Flash runs.
+    /// The root protocol boundary. Two root shapes are modeled: an ordinary player/Play root, and the
+    /// player/Start root captured before the native turn-setup page (the bridge enumerates the setup
+    /// choices through the existing engine before importing the play root). Every other side/phase is
+    /// refused explicitly instead of searching a state the kernel would misinterpret.
     /// </summary>
-    private static string? TurnSetupBoundary(BeamSolveRequest request)
-    {
-        if (request.Policy.IncludeTurnSetup
-            || request.Root.CurrentSide != CombatSide.Player
-            || request.Root.PlayerPhase != PlayerTurnPhase.Play)
-        {
-            return "turn-setup";
-        }
-        return null;
-    }
+    private static string? RootPhaseBoundary(BeamSolveRequest request)
+        => RootPhaseBoundary(request.Root, request.Policy);
 
-    private static string? TurnSetupBoundary(ContinuationSearchRequest request)
+    private static string? RootPhaseBoundary(ContinuationSearchRequest request)
+        => RootPhaseBoundary(request.Context.Root, EffectivePolicy(request));
+
+    private static string? RootPhaseBoundary(CombatRootSnapshot root, SearchPolicySnapshot policy)
     {
-        SearchPolicySnapshot policy = EffectivePolicy(request);
-        if (policy.IncludeTurnSetup
-            || request.Context.Root.CurrentSide != CombatSide.Player
-            || request.Context.Root.PlayerPhase != PlayerTurnPhase.Play)
+        if (policy.IncludeTurnSetup)
         {
-            return "turn-setup";
+            return root.CurrentSide == CombatSide.Player
+                && root.PlayerPhase == PlayerTurnPhase.Start
+                    ? null
+                    : $"include-turn-setup:{root.CurrentSide}:{root.PlayerPhase}";
         }
-        return null;
+        return root.CurrentSide == CombatSide.Player && root.PlayerPhase == PlayerTurnPhase.Play
+            ? null
+            : $"{root.CurrentSide}:{root.PlayerPhase}";
     }
 
     private static string StableConstraintReason(string detail)
@@ -419,7 +418,7 @@ internal static class BeamSolveDispatch
             return "flash-boundary";
         FlashRejection rejection = attempt.Outcome?.Rejection ?? FlashRejection.None;
         return rejection == FlashRejection.RootPhase
-            ? "turn-setup"
+            ? "root-phase"
             : $"flash-rejected:{rejection}";
     }
 

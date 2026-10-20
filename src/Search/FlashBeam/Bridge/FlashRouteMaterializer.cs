@@ -87,7 +87,21 @@ internal static class FlashRouteMaterializer
             fixedPrefixActions: prefix,
             minimumPotionUses: minimumPotionUses,
             earliestPotionTurn: earliestPotionTurn);
-        SimulationSnapshot rootSnapshot = replay.ReplayForFlash([], null);
+        bool turnSetup = policy.IncludeTurnSetup;
+        if (turnSetup
+            && (root.CurrentSide != MegaCrit.Sts2.Core.Combat.CombatSide.Player
+                || root.PlayerPhase != MegaCrit.Sts2.Core.Combat.PlayerTurnPhase.Start))
+        {
+            return new FlashSolveOutcome(null, FlashRejection.RootPhase,
+                $"IncludeTurnSetup 根不在玩家准备阶段：side={root.CurrentSide} phase={root.PlayerPhase}",
+                null, [], watch.Elapsed, TimeSpan.Zero, TimeSpan.Zero);
+        }
+        // The request root: the pre-setup Start state for a turn-setup request, otherwise the play root.
+        // It stays alive for the frozen scoring/bound tables even when the search starts after a setup
+        // choice or a fixed prefix.
+        SimulationSnapshot rootSnapshot = turnSetup
+            ? replay.CaptureRootSnapshotForFlash()
+            : replay.ReplayForFlash([], null);
         FlashPruningRequest pruning = replay.CapturePruningRequestForFlash();
         bool enforceForcedPotionDirectives = potionPolicyOverride == null;
         FlashForcedPotionDirectives forcedDirectives;
@@ -115,36 +129,84 @@ internal static class FlashRouteMaterializer
             || potionFreePolicyBaseline != null
             || pruning.EffectivePotionPolicy == SolverPotionPolicy.RequireAtLeastOne
             || forcedDirectives.Count > 0;
-        SimulationSnapshot searchRootSnapshot = rootSnapshot;
-        if (prefixLength > 0)
+        // The search roots: one ordinary root, or every enumerated turn-setup choice branch. A fixed
+        // prefix is applied per root so an incompatible setup choice is dropped exactly like the
+        // existing search's ApplyFixedPrefix and a compatible one keeps its choice vector.
+        List<TurnSetupRootCandidate> searchRoots = [];
+        if (!turnSetup)
         {
-            // ApplyFixedPrefix releases the snapshots it walks, so replay the prefix on a second root
-            // snapshot and keep rootSnapshot alive for the frozen tables.
-            SimulationSnapshot prefixRoot = replay.ReplayForFlash([], null);
-            SimulationSnapshot? prefixEnd;
+            SimulationSnapshot ordinaryRoot = rootSnapshot;
+            if (prefixLength > 0)
+            {
+                // ApplyFixedPrefix releases the snapshots it walks, so replay the prefix on a second root
+                // snapshot and keep rootSnapshot alive for the frozen tables.
+                SimulationSnapshot prefixRoot = replay.ReplayForFlash([], null);
+                SimulationSnapshot? prefixEnd;
+                try
+                {
+                    prefixEnd = replay.ReplayFixedPrefixForFlash(prefixRoot);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return new FlashSolveOutcome(null, FlashRejection.UnsupportedRequest,
+                        $"固定前缀无法回放：{ex.Message}", null, [], watch.Elapsed, TimeSpan.Zero, TimeSpan.Zero);
+                }
+                if (prefixEnd == null)
+                {
+                    return new FlashSolveOutcome(null, FlashRejection.UnsupportedRequest,
+                        "固定前缀无法回放", null, [], watch.Elapsed, TimeSpan.Zero, TimeSpan.Zero);
+                }
+                ordinaryRoot = prefixEnd;
+            }
+            searchRoots.Add(new TurnSetupRootCandidate([], ordinaryRoot));
+        }
+        else
+        {
+            IReadOnlyList<TurnSetupRootCandidate> setupRoots;
             try
             {
-                prefixEnd = replay.ReplayFixedPrefixForFlash(prefixRoot);
+                setupRoots = replay.CaptureTurnSetupRootsForFlash();
             }
-            catch (InvalidOperationException ex)
+            catch (InvalidPlannedChoiceBranchException ex)
             {
                 return new FlashSolveOutcome(null, FlashRejection.UnsupportedRequest,
-                    $"固定前缀无法回放：{ex.Message}", null, [], watch.Elapsed, TimeSpan.Zero, TimeSpan.Zero);
+                    $"回合准备根无法枚举：{ex.Message}", null, [], watch.Elapsed, TimeSpan.Zero, TimeSpan.Zero);
             }
-            if (prefixEnd == null)
+            foreach (TurnSetupRootCandidate candidate in setupRoots)
+            {
+                if (prefixLength == 0)
+                {
+                    searchRoots.Add(candidate);
+                    continue;
+                }
+                SimulationSnapshot? prefixEnd;
+                try
+                {
+                    prefixEnd = replay.ReplayFixedPrefixForFlash(candidate.Snapshot);
+                }
+                catch (InvalidOperationException)
+                {
+                    continue;
+                }
+                if (prefixEnd == null)
+                    continue;
+                searchRoots.Add(candidate with { Snapshot = prefixEnd });
+            }
+            if (searchRoots.Count == 0)
             {
                 return new FlashSolveOutcome(null, FlashRejection.UnsupportedRequest,
-                    "固定前缀无法回放", null, [], watch.Elapsed, TimeSpan.Zero, TimeSpan.Zero);
+                    "固定前缀与全部回合准备根都不相容", null, [],
+                    watch.Elapsed, TimeSpan.Zero, TimeSpan.Zero);
             }
-            searchRootSnapshot = prefixEnd;
         }
+        SimulationSnapshot searchRootSnapshot = searchRoots[0].Snapshot;
         FlashPotionUsageForBridge potionUsage =
             CombatBeamSolver.CapturePotionUsageForFlash(searchRootSnapshot);
         int initialAutomaticPotionUses = potionUsage.PotionUseCount - potionUsage.ExplicitPotionUseCount;
         FlashPlanCommitment? flashPlanCommitment = null;
         int initialPlanPayoff = 0;
         FlashRules rules;
-        FlashBattle battle;
+        FlashBattle[] battles = new FlashBattle[searchRoots.Count];
         FlashScorer scorer;
         FlashBoundFeatures bound;
         try
@@ -154,12 +216,22 @@ internal static class FlashRouteMaterializer
                 flashPlanCommitment = ToFlashPlanCommitment(pendingPlan);
                 initialPlanPayoff = CountPlanPayoffs(prefix, pendingPlan);
             }
-            rules = FlashRulesCompiler.Compile(searchRootSnapshot.Simulator, player, rootSnapshot.Simulator);
-            battle = FlashStateImporter.Import(searchRootSnapshot, player, rules,
-                potionUsage.PotionUseCount, requirePlayPhase: true);
+            // A turn-setup search imports every enumerated post-setup root. The rules are compiled from
+            // the request root's content (so a card a setup choice moved out of the first root is still
+            // representable in its siblings) while the root-derived values come from the first search
+            // root, matching the existing search's request-root baseline for frozen powers.
+            rules = turnSetup
+                ? FlashRulesCompiler.Compile(searchRootSnapshot.Simulator, player, rootSnapshot.Simulator,
+                    contentSimulator: rootSnapshot.Simulator, lostHpSimulator: rootSnapshot.Simulator)
+                : FlashRulesCompiler.Compile(searchRootSnapshot.Simulator, player, rootSnapshot.Simulator);
+            for (int index = 0; index < searchRoots.Count; index++)
+            {
+                battles[index] = FlashStateImporter.Import(searchRoots[index].Snapshot, player, rules,
+                    potionUsage.PotionUseCount, requirePlayPhase: true);
+            }
             scorer = FlashScoreBridge.Create(root, policy, profile, rootSnapshot, searchRootSnapshot,
-                player, rules, battle);
-            bound = FlashBoundBridge.Create(root, policy, rootSnapshot, player, rules, battle, pruning,
+                player, rules, battles[0], rootSetup: turnSetup);
+            bound = FlashBoundBridge.Create(root, policy, rootSnapshot, player, rules, battles[0], pruning,
                 potionUsage.ExplicitPotionUseCount, initialAutomaticPotionUses);
         }
         catch (FlashImportException ex)
@@ -184,7 +256,7 @@ internal static class FlashRouteMaterializer
 
         // Incumbent and potion turns stay in request-root units: the fixed prefix is already part of
         // the existing solver's request, so it must not shift the comparison base.
-        int rootPlayerTurn = prefixLength == 0 ? battle.PlayerTurn : rootSnapshot.Turn;
+        int rootPlayerTurn = prefixLength == 0 ? battles[0].PlayerTurn : rootSnapshot.Turn;
         PrimarySearchIncumbent? incumbent = primaryIncumbent is { } seed
             ? seed with { CombatEndedTurn = seed.CombatEndedTurn - rootSnapshot.Turn + rootPlayerTurn }
             : null;
@@ -234,7 +306,7 @@ internal static class FlashRouteMaterializer
                     ? 0.25d
                     : 0d,
         };
-        FlashBeamResult search = new FlashBeamSolver(rules, options).Solve(battle, cancellationToken);
+        FlashBeamResult search = new FlashBeamSolver(rules, options).Solve(battles, cancellationToken);
         if (!search.PotionPolicySatisfied)
         {
             return new FlashSolveOutcome(null, FlashRejection.None,
@@ -243,14 +315,18 @@ internal static class FlashRouteMaterializer
                 ConstraintFailure = "flash-potion-policy-no-route",
             };
         }
+        if (search.BestRootIndex < 0 || search.BestRootIndex >= searchRoots.Count)
+            throw new InvalidOperationException(
+                $"Flash 路线根下标 {search.BestRootIndex} 超出回合准备根数 {searchRoots.Count}。");
+        TurnSetupRootCandidate selectedRoot = searchRoots[search.BestRootIndex];
 
         watch.Restart();
         // The verified route is the fixed prefix plus the Flash route; the existing solver replays the
         // whole plan from the request root and packages it.
         List<PlanAction> plan = new(prefixLength + search.BestRoute.Length);
         plan.AddRange(prefix);
-        SimulationSnapshot snapshot = searchRootSnapshot;
-        FlashBattle state = battle;
+        SimulationSnapshot snapshot = selectedRoot.Snapshot;
+        FlashBattle state = battles[search.BestRootIndex];
         for (int step = 0; step < search.BestRoute.Length; step++)
         {
             FlashAction action = search.BestRoute[step];
@@ -303,7 +379,8 @@ internal static class FlashRouteMaterializer
                 primaryIncumbent: continuationPurpose == null ? null : primaryIncumbent,
                 earliestPotionTurn: earliestPotionTurn,
                 attributionPurpose: continuationPurpose,
-                directSearchPurpose: purpose).Solve();
+                directSearchPurpose: purpose,
+                rootTurnSetupChoices: turnSetup ? selectedRoot.Choices : null).Solve();
         }
         catch (PotionPolicyUnsatisfiedException ex)
         {
@@ -323,6 +400,11 @@ internal static class FlashRouteMaterializer
                 throw new FlashVerificationException(plan.Count,
                     [$"plan payoff old={realized} flash={search.BestPayoffCount}"]);
             }
+        }
+        if (turnSetup && !CombatBeamSolver.SameTurnSetupChoices(result.TurnSetupChoices, selectedRoot.Choices))
+        {
+            throw new FlashVerificationException(plan.Count,
+                [$"turn-setup choices old={result.TurnSetupChoices.Count} flash={selectedRoot.Choices.Count}"]);
         }
         bool verifyPotion = auditPotionPolicy
             || minimumPotionUses != null
@@ -353,8 +435,10 @@ internal static class FlashRouteMaterializer
                 List<EarlyTurnFrontierCandidate> candidates = new(layer.Candidates.Count);
                 foreach (FlashScoutCandidate candidate in layer.Candidates)
                 {
+                    IReadOnlyList<PlanCardChoice>? scoutSetupChoices = turnSetup
+                        ? searchRoots[candidate.RootIndex].Choices : null;
                     PlanAction[] actions = TranslateScoutRoute(
-                        replay, player, prefix, candidate.Actions, out StateFingerprint stateKey);
+                        replay, player, prefix, scoutSetupChoices, candidate.Actions, out StateFingerprint stateKey);
                     candidates.Add(new EarlyTurnFrontierCandidate(
                         layer.Turns, actions, stateKey, candidate.Score));
                 }
@@ -417,9 +501,24 @@ internal static class FlashRouteMaterializer
     /// only for an empty fixed prefix, so the route starts at the request root.
     /// </summary>
     private static PlanAction[] TranslateScoutRoute(CombatBeamSolver replay, Player player,
-        IReadOnlyList<PlanAction> prefix, FlashAction[] route, out StateFingerprint stateKey)
+        IReadOnlyList<PlanAction> prefix, IReadOnlyList<PlanCardChoice>? setupChoices,
+        FlashAction[] route, out StateFingerprint stateKey)
     {
-        SimulationSnapshot snapshot = replay.ReplayForFlash(prefix, null);
+        SimulationSnapshot snapshot;
+        if (setupChoices is null)
+        {
+            snapshot = replay.ReplayForFlash(prefix, null);
+        }
+        else
+        {
+            snapshot = replay.ReplayTurnSetupForFlash(setupChoices);
+            if (prefix.Count > 0)
+            {
+                SimulationSnapshot? prefixEnd = replay.ReplayFixedPrefixForFlash(snapshot);
+                snapshot = prefixEnd
+                    ?? throw new FlashVerificationException(0, ["侦察路线的前缀无法在回合准备根上回放"]);
+            }
+        }
         List<PlanAction> actions = new(prefix.Count + route.Length);
         actions.AddRange(prefix);
         try

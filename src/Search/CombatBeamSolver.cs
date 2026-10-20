@@ -44,7 +44,8 @@ internal sealed partial class CombatBeamSolver(
     Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null,
     PlanCommitment? planCommitment = null,
     ContinuationPurpose? attributionPurpose = null,
-    DirectSearchPurpose? directSearchPurpose = null)
+    DirectSearchPurpose? directSearchPurpose = null,
+    IReadOnlyList<PlanCardChoice>? rootTurnSetupChoices = null)
 {
     private CancellationToken? _routeMaterializationCancellationToken;
     private CancellationToken ReplayCancellationToken => _routeMaterializationCancellationToken ?? cancellationToken;
@@ -67,6 +68,11 @@ internal sealed partial class CombatBeamSolver(
         policy.MeasurePhasePerformance,
         policy.FramePressureSignal);
     private readonly bool _includeTurnSetup = policy.IncludeTurnSetup;
+    /// <summary>
+    /// The turn-setup choices the caller already selected (the Flash materializer). Null keeps the
+    /// existing behavior: every enumerated setup root is a search candidate.
+    /// </summary>
+    private readonly IReadOnlyList<PlanCardChoice>? _rootTurnSetupChoices = rootTurnSetupChoices;
     private readonly Player _player = root.PlayerIdentity;
     private readonly IntentForecast _forecast = root.Forecast;
     private readonly int _startTurnNumber = root.StartTurnNumber;

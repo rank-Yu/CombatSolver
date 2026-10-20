@@ -391,17 +391,21 @@ internal static class ModRuntime
         CombatState state,
         HarnessOptions options,
         MainLoopContext loop,
-        UnattendedTestRunner.OfflineScenarioSession? session)
+        UnattendedTestRunner.OfflineScenarioSession? session,
+        CapturedTurnSetupRoot? turnSetupRoot = null)
     {
         if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_PROBE_ROOT") == "1")
             ProbeRootCapture(state);
         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
-        CombatRootSnapshot root = CombatRootSnapshot.Capture(state);
+        // A turn-setup request searches the pre-setup player/Start root captured before the native
+        // setup page. Everything frozen on the request root (damage, display names, policy) must come
+        // from the same instant; the live combat has already advanced to Play.
+        CombatRootSnapshot root = turnSetupRoot?.Root ?? CombatRootSnapshot.Capture(state);
         HarnessLog.Trace("root_captured");
-        SolverDisplayNames names = SolverDisplayNames.Capture(state);
-        BattleDamageSnapshot damage = BattleDamageTracker.Observe(state);
-        SolverSettingsSnapshot settings = SolverSettings.Capture();
-        SearchPolicySnapshot policy = SolverController.CaptureSearchPolicy(
+        SolverDisplayNames names = turnSetupRoot?.Names ?? SolverDisplayNames.Capture(state);
+        BattleDamageSnapshot damage = turnSetupRoot?.Damage ?? BattleDamageTracker.Observe(state);
+        SolverSettingsSnapshot settings = turnSetupRoot?.Settings ?? SolverSettings.Capture();
+        SearchPolicySnapshot policy = turnSetupRoot?.Policy ?? SolverController.CaptureSearchPolicy(
             settings, state, includeTurnSetup: false, theftPolicy: SolverController.ResolveTheftPolicy(state));
         policy = policy with { DisableSharedPrimaryIncumbentsForTesting = options.DisableSharedIncumbents,
             Profile = policy.Profile with

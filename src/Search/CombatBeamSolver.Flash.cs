@@ -298,6 +298,18 @@ internal sealed partial class CombatBeamSolver
         _run.InitialRetainedAttackValue = rootSnapshot.RetainedAttackValue;
     }
 
+    /// <summary>
+    /// The turn-setup solve freezes these four baselines at zero (the pre-setup Start snapshot's
+    /// values are about to be replaced by the setup page). The differential probe uses the same.
+    /// </summary>
+    internal void SetFlashRankBaselineForTurnSetup()
+    {
+        _run.InitialPersistentBuffValue = 0;
+        _run.InitialEnemyStrengthSuppression = 0;
+        _run.InitialEnemyWeakTurns = 0;
+        _run.InitialRetainedAttackValue = 0;
+    }
+
     internal double ContextualAdjustmentForFlash(SimulationSnapshot snapshot, bool terminal)
     {
         PlanAction action = new(PlanActionKind.EndTurn, snapshot.Turn, EndsPlayerTurn: true);

@@ -950,6 +950,7 @@ expected_beam_files=(
     CombatBeamSolver.ExecutionChoiceContinuation.cs
     CombatBeamSolver.ExecutionChoiceContinuation.Testing.cs
     CombatBeamSolver.TurnExecutionContinuation.cs
+    CombatBeamSolver.TurnSetup.cs
     CombatBeamSolver.BeamRetentionPolicy.cs
     CombatBeamSolver.BeamRetentionPolicy.OrderedMutation.cs
     CombatBeamSolver.BeamRetentionPolicy.OrderedMutationScheduling.cs
@@ -1043,6 +1044,7 @@ CombatBeamSolver.AdmittedExpansion.cs	_completedActions != Actions!.Count
 CombatBeamSolver.AdmittedExpansion.cs	_completedPotions != Potions!.Count
 CombatBeamSolver.EndTurnChoiceReplay.cs	private PreparedEndTurnEvaluation EvaluatePreparedEndTurn(
 CombatBeamSolver.TurnExecutionContinuation.cs	private static SearchBoundaryReason ContinuePlayerStart(
+CombatBeamSolver.TurnSetup.cs	internal IReadOnlyList<TurnSetupRootCandidate> CaptureTurnSetupRootsForFlash()
 CombatBeamSolver.RoundTransition.cs	private sealed class RoundReplayCheckpoint(
 CombatBeamSolver.RoundTransition.cs	combat.EndActionChoices();
 CombatBeamSolver.RoundTransition.cs	combat.BeginActionChoices(cursor);

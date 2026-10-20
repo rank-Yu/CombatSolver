@@ -1054,6 +1054,25 @@ internal sealed partial class CombatBeamSolver
             _includeTurnSetup
                 ? BuildTurnSetupRoots()
                 : [([], Replay([]))];
+        if (_rootTurnSetupChoices is { } pinnedChoices)
+        {
+            // The Flash materializer already searched these setup choices; replay only that root so
+            // the result carries the same choice vector the Flash route was verified against.
+            List<(IReadOnlyList<PlanCardChoice> Choices, SimulationSnapshot Snapshot)> pinned = [];
+            foreach ((IReadOnlyList<PlanCardChoice> choices, SimulationSnapshot snapshot) in rootCandidates)
+            {
+                if (SameTurnSetupChoices(choices, pinnedChoices))
+                    pinned.Add((choices, snapshot));
+                else
+                    snapshot.ReleaseSimulator();
+            }
+            rootCandidates = pinned;
+            if (rootCandidates.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "请求的回合准备选择无法从根重新枚举；Flash 路线与物化根不一致。");
+            }
+        }
         if (rootCandidates.Count == 0)
             throw new InvalidOperationException("回合准备阶段没有生成可搜索状态。");
         _run.InitialPersistentBuffValue = _includeTurnSetup

@@ -39,9 +39,20 @@ internal static class FlashRulesCompiler
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal));
 
     public static FlashRules Compile(CombatPredictionSimulator simulator, Player player,
-        CombatPredictionSimulator? baselineSimulator = null)
+        CombatPredictionSimulator? baselineSimulator = null,
+        CombatPredictionSimulator? contentSimulator = null,
+        CombatPredictionSimulator? lostHpSimulator = null)
     {
         SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
+        // A turn-setup search enumerates one post-setup root per native choice. Card rules must cover
+        // every starting card (a choice can exhaust/discard/move one out of the first root), while the
+        // root-derived values below stay tied to the search root that the Flash state starts from.
+        SimulatedCombatState contentCombat = contentSimulator is null
+            ? combat
+            : (SimulatedCombatState)contentSimulator.State.CombatState;
+        SimulatedCombatState lostHpCombat = lostHpSimulator is null
+            ? combat
+            : (SimulatedCombatState)lostHpSimulator.State.CombatState;
         // _rootPowerAmounts is captured on the request root and copied into every fork, so a fixed
         // prefix must not move the baseline used by AdjustMonsterMoveDamage. The caller passes the
         // request-root simulator when the search starts after a prefix; null means "this is the root".
@@ -49,7 +60,7 @@ internal static class FlashRulesCompiler
             ? null
             : (SimulatedCombatState)baselineSimulator.State.CombatState;
         ushort lampId = ushort.MaxValue;
-        foreach (RelicModel relic in combat.RelicsOf(player))
+        foreach (RelicModel relic in contentCombat.RelicsOf(player))
         {
             if (FlashRegistry.TryRelic(relic.Id.Entry, out ushort relicId)
                 && FlashRegistry.Relic(relicId).IsUnsettlingLamp)
@@ -67,7 +78,7 @@ internal static class FlashRulesCompiler
                 player.Creature),
             UnsettlingLampRelicId = lampId,
         };
-        SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(player);
+        SimPlayerCombatState playerState = (contentSimulator ?? simulator).State.GetPlayerCombatState(player);
         bool hasIdentityContent = builder.RootSwordSageAmount != 0
             || player.Character is MegaCrit.Sts2.Core.Models.Characters.Regent
                 or MegaCrit.Sts2.Core.Models.Characters.Necrobinder
@@ -95,7 +106,7 @@ internal static class FlashRulesCompiler
         }
         builder.HasShuffleOrderEnchantment = hasShuffleOrderEnchantment;
         builder.HasBeforeFlushEnchantment = hasBeforeFlushEnchantment;
-        foreach (PowerModel power in combat.EffectivePowers())
+        foreach (PowerModel power in contentCombat.EffectivePowers())
         {
             if (FlashRegistry.TryPower(power.Id.Entry, out ushort powerId))
             {
@@ -104,7 +115,7 @@ internal static class FlashRulesCompiler
         }
         bool hasPaelsLegion = false;
         bool furCoatSpawnHpOne = false;
-        foreach (RelicModel relic in combat.RelicsOf(player))
+        foreach (RelicModel relic in contentCombat.RelicsOf(player))
         {
             if (FlashRegistry.TryRelic(relic.Id.Entry, out ushort relicId))
                 hasIdentityContent |= FlashRegistry.Relic(relicId).MayGenerateIdentityContent
@@ -119,7 +130,7 @@ internal static class FlashRulesCompiler
             // MonsterSpawnSupport.ApplyCreatureAddedRelics: FurCoat marks the current map coordinate
             // outside combat; the marked-coordinate check is root data, so freeze its result.
             if (relic is FurCoat furCoat
-                && combat.CurrentMapCoord is { } mapCoord
+                && contentCombat.CurrentMapCoord is { } mapCoord
                 && furCoat.GetMarkedCoords()?.Contains(mapCoord) == true)
             {
                 furCoatSpawnHpOne = true;
@@ -128,7 +139,7 @@ internal static class FlashRulesCompiler
         builder.HasIdentityContent = hasIdentityContent;
         builder.HasPaelsLegion = hasPaelsLegion;
         builder.FurCoatSpawnHpOne = furCoatSpawnHpOne;
-        builder.HasTheftContent = HasTheftContent(combat);
+        builder.HasTheftContent = HasTheftContent(contentCombat);
         foreach (string nativeId in PowerIdsWithVars())
             AddPowerVars(builder, nativeId);
         for (ushort id = 0; id < FlashRegistry.PotionCount; id++)
@@ -141,19 +152,20 @@ internal static class FlashRulesCompiler
         // AdvancePlayerTurn drops the prediction cache; HasLostHpThisTurn then falls back to the
         // immutable root history. Freeze the root answer per owner for extra-turn restoration.
         ushort rootLostHpMask = 0;
-        if (combat.HasLostHpThisTurn(player.Creature))
+        if (lostHpCombat.HasLostHpThisTurn(player.Creature))
             rootLostHpMask |= 1 << FlashLimits.PlayerOwner;
-        if (combat.GetOsty(player) is { } osty && combat.HasLostHpThisTurn(osty))
+        if (lostHpCombat.GetOsty(player) is { } osty && lostHpCombat.HasLostHpThisTurn(osty))
             rootLostHpMask |= 1 << FlashLimits.OstyOwner;
         for (int index = 0; index < known.Count && index < FlashLimits.Enemies; index++)
         {
-            if (combat.HasLostHpThisTurn(known[index]))
+            if (lostHpCombat.HasLostHpThisTurn(known[index]))
                 rootLostHpMask |= (ushort)(1 << FlashKernel.EnemyOwner(index));
         }
         builder.RootLostHpMask = rootLostHpMask;
         List<ushort> spawnClosure = SpawnClosure(known);
         builder.HasInfiniteHpDisplayMonster = HasInfiniteHpDisplayMonster(known, spawnClosure);
-        AddGeneratedCardClosure(builder, simulator, combat, player, spawnClosure);
+        AddGeneratedCardClosure(builder, contentSimulator ?? simulator, contentCombat, combat,
+            player, spawnClosure);
         builder.RootEnemyCount = known.Count;
         builder.HasEncounter = combat.Encounter != null;
         builder.EncounterSlots = combat.EncounterSlotsForFlash.ToArray();
@@ -362,8 +374,9 @@ internal static class FlashRulesCompiler
     /// Adds canonical stats for every card that supported content declares it can generate, following
     /// the declarations transitively. Undefined generated cards reject the root (UnsupportedClosure).
     /// </summary>
-    private static void AddGeneratedCardClosure(FlashRulesBuilder builder, CombatPredictionSimulator simulator,
-        SimulatedCombatState combat, Player player, IReadOnlyList<ushort> spawnClosure)
+    private static void AddGeneratedCardClosure(FlashRulesBuilder builder,
+        CombatPredictionSimulator contentSimulator, SimulatedCombatState contentCombat,
+        SimulatedCombatState rootCombat, Player player, IReadOnlyList<ushort> spawnClosure)
     {
         Queue<(string CardId, int Upgrade)> pendingCards = new();
         Queue<string> pendingPools = new();
@@ -395,9 +408,11 @@ internal static class FlashRulesCompiler
             foreach (string power in def.AppliedPowers)
                 pendingPowers.Enqueue(power);
         }
-        // The closure starts from the root's reachable content, as admission's reachability rule
-        // requires: a pool only has to be representable for a root that can actually use it.
-        SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(player);
+        // The closure starts from the content root's reachable content, as admission's reachability
+        // rule requires: a pool only has to be representable for a root that can actually use it.
+        // A turn-setup search passes the pre-setup request root here so cards a setup choice moves out
+        // of the first post-setup root still have rules in every sibling root.
+        SimPlayerCombatState playerState = contentSimulator.State.GetPlayerCombatState(player);
         foreach (SimCardPile pile in new[] { playerState.Hand, playerState.DrawPile, playerState.DiscardPile,
                      playerState.ExhaustPile, playerState.PlayPile })
         {
@@ -407,31 +422,33 @@ internal static class FlashRulesCompiler
                     Declare(FlashRegistry.Card(id));
             }
         }
-        foreach (PowerModel power in combat.EffectivePowers())
+        foreach (PowerModel power in contentCombat.EffectivePowers())
         {
             if (FlashRegistry.TryPower(power.Id.Entry, out ushort id))
                 Declare(FlashRegistry.Power(id));
         }
-        foreach (RelicModel relic in combat.RelicsOf(player))
+        foreach (RelicModel relic in contentCombat.RelicsOf(player))
         {
             if (FlashRegistry.TryRelic(relic.Id.Entry, out ushort id))
                 Declare(FlashRegistry.Relic(id));
         }
-        for (int slot = 0; slot < combat.PotionSlotCountForFlash(player); slot++)
+        for (int slot = 0; slot < contentCombat.PotionSlotCountForFlash(player); slot++)
         {
-            if (combat.GetPotionAtSlot(player, slot) is { } potion
+            if (contentCombat.GetPotionAtSlot(player, slot) is { } potion
                 && FlashRegistry.TryPotion(potion.Id.Entry, out ushort id))
                 Declare(FlashRegistry.Potion(id));
         }
-        for (int slot = 0; slot < combat.PotionSlotCountForFlash(player); slot++)
+        // Root potions identify "this slot still holds the potion the search started with": that is a
+        // search-root property (a fixed prefix may already have drunk it), so it reads the real root.
+        for (int slot = 0; slot < rootCombat.PotionSlotCountForFlash(player); slot++)
         {
-            if (combat.GetPotionAtSlot(player, slot) is { } rootPotion
+            if (rootCombat.GetPotionAtSlot(player, slot) is { } rootPotion
                 && FlashRegistry.TryPotion(rootPotion.Id.Entry, out ushort rootPotionId))
             {
                 builder.SetRootPotion(slot, rootPotionId);
             }
         }
-        foreach (Creature enemy in combat.KnownEnemies)
+        foreach (Creature enemy in contentCombat.KnownEnemies)
         {
             if (enemy.Monster is { } monster && FlashRegistry.TryMonster(monster.Id.Entry, out ushort id))
                 Declare(FlashRegistry.Monster(id));

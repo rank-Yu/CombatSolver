@@ -91,6 +91,14 @@ internal sealed class UnattendedTestRequest
     /// </summary>
     public string[] FlashPrefixActions { get; init; } = [];
 
+    /// <summary>
+    /// Offline Flash differential probe only: capture the player/Start root before the native turn-setup
+    /// page runs, and run the K1/K2/coordinator checks from it with <c>IncludeTurnSetup</c>. The test
+    /// scenario must carry a turn-setup choice source (for example the TOASTY_MITTENS or CHOICES_PARADOX
+    /// relic) so the captured root actually reaches a setup choice.
+    /// </summary>
+    public bool FlashTurnSetupRootForTest { get; init; }
+
     public double TimeoutSeconds { get; init; } = 120;
     public int? ExpectedFinishedTurn { get; init; }
     public int? ExpectedFinishedTurnAtMost { get; init; }

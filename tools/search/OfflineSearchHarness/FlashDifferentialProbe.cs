@@ -25,18 +25,18 @@ internal static class FlashDifferentialProbe
     private const int OneStepChoiceCap = 64;
 
     public static Dictionary<string, object?> Run(CombatState combat, HarnessOptions options, string outputDirectory,
-        IReadOnlyList<string>? prefixActions = null)
+        IReadOnlyList<string>? prefixActions = null, CapturedTurnSetupRoot? turnSetupRoot = null)
     {
         int walks = ReadInt("OFFLINE_HARNESS_FLASH_DIFF_WALKS", 16);
         int steps = ReadInt("OFFLINE_HARNESS_FLASH_DIFF_STEPS", 60);
         List<string> report = [];
         Dictionary<string, object?> summary = new() { ["walks"] = walks, ["steps"] = steps };
 
-        CombatRootSnapshot root = CombatRootSnapshot.Capture(combat);
-        SolverDisplayNames names = SolverDisplayNames.Capture(combat);
-        BattleDamageSnapshot damage = BattleDamageTracker.Observe(combat);
-        SolverSettingsSnapshot settings = SolverSettings.Capture();
-        SearchPolicySnapshot policy = SolverController.CaptureSearchPolicy(
+        CombatRootSnapshot root = turnSetupRoot?.Root ?? CombatRootSnapshot.Capture(combat);
+        SolverDisplayNames names = turnSetupRoot?.Names ?? SolverDisplayNames.Capture(combat);
+        BattleDamageSnapshot damage = turnSetupRoot?.Damage ?? BattleDamageTracker.Observe(combat);
+        SolverSettingsSnapshot settings = turnSetupRoot?.Settings ?? SolverSettings.Capture();
+        SearchPolicySnapshot policy = turnSetupRoot?.Policy ?? SolverController.CaptureSearchPolicy(
             settings, combat, includeTurnSetup: false, theftPolicy: SolverController.ResolveTheftPolicy(combat));
         policy = policy with
         {
@@ -59,6 +59,15 @@ internal static class FlashDifferentialProbe
                 prefixPlan.Add(new PlanAction(PlanActionKind.EndTurn, Turn: 1));
             }
         }
+        if (policy.IncludeTurnSetup && prefixPlan.Count > 0)
+        {
+            summary["admitted"] = false;
+            summary["rejection"] = FlashRejection.UnsupportedRequest.ToString();
+            summary["detail"] = "回合准备根暂不支持固定前缀差分。";
+            report.Add("REJECTED UnsupportedRequest: 回合准备根暂不支持固定前缀差分。");
+            File.WriteAllLines(Path.Combine(outputDirectory, "flash-diff.txt"), report);
+            return summary;
+        }
         CombatBeamSolver prefixSolver = new(root, names, damage, policy, searchProfile: policy.Profile,
             fixedPrefixActions: prefixPlan);
         CombatBeamSolver solver = prefixPlan.Count == 0
@@ -67,23 +76,56 @@ internal static class FlashDifferentialProbe
         Player player = root.PlayerIdentity;
         // The request root stays the baseline for values the existing engine freezes on it
         // (SimulatedCombatState._rootPowerAmounts), exactly as FlashRouteMaterializer compiles rules.
-        SimulationSnapshot baselineSnapshot = solver.ReplayForFlash([], null);
-        SimulationSnapshot rootSnapshot = baselineSnapshot;
-        if (prefixPlan.Count > 0)
+        SimulationSnapshot requestRootSnapshot;
+        List<TurnSetupRootCandidate> searchRoots = [];
+        if (policy.IncludeTurnSetup)
         {
-            SimulationSnapshot prefixRoot = prefixSolver.ReplayForFlash([], null);
-            rootSnapshot = prefixSolver.ReplayFixedPrefixForFlash(prefixRoot)
-                ?? throw new InvalidOperationException("FlashPrefixActions 无法在旧引擎回放。");
-            summary["prefixActions"] = prefixActions;
+            requestRootSnapshot = solver.CaptureRootSnapshotForFlash();
+            IReadOnlyList<TurnSetupRootCandidate> candidates = solver.CaptureTurnSetupRootsForFlash();
+            searchRoots.AddRange(candidates);
+            solver.SetFlashRankBaselineForTurnSetup();
         }
-        solver.SetFlashRankBaseline(rootSnapshot);
+        else
+        {
+            requestRootSnapshot = solver.ReplayForFlash([], null);
+            SimulationSnapshot searchRootSnapshot = requestRootSnapshot;
+            if (prefixPlan.Count > 0)
+            {
+                SimulationSnapshot prefixRoot = prefixSolver.ReplayForFlash([], null);
+                searchRootSnapshot = prefixSolver.ReplayFixedPrefixForFlash(prefixRoot)
+                    ?? throw new InvalidOperationException("FlashPrefixActions 无法在旧引擎回放。");
+                summary["prefixActions"] = prefixActions;
+            }
+            searchRoots.Add(new TurnSetupRootCandidate([], searchRootSnapshot));
+            solver.SetFlashRankBaseline(searchRootSnapshot);
+        }
+        if (searchRoots.Count == 0)
+        {
+            summary["admitted"] = false;
+            summary["rejection"] = FlashRejection.RootPhase.ToString();
+            summary["detail"] = "回合准备阶段没有生成可搜索根。";
+            report.Add("REJECTED RootPhase: 回合准备阶段没有生成可搜索根。");
+            File.WriteAllLines(Path.Combine(outputDirectory, "flash-diff.txt"), report);
+            return summary;
+        }
+        summary["turnSetupRoots"] = searchRoots.Count;
 
         FlashRules rules;
-        FlashBattle flashRoot;
+        FlashBattle[] flashRoots = new FlashBattle[searchRoots.Count];
         try
         {
-            rules = FlashRulesCompiler.Compile(rootSnapshot.Simulator, player, baselineSnapshot.Simulator);
-            flashRoot = FlashStateImporter.Import(rootSnapshot, player, rules, rootSnapshot.PotionUseCount);
+            rules = policy.IncludeTurnSetup
+                ? FlashRulesCompiler.Compile(searchRoots[0].Snapshot.Simulator, player,
+                    requestRootSnapshot.Simulator,
+                    contentSimulator: requestRootSnapshot.Simulator,
+                    lostHpSimulator: requestRootSnapshot.Simulator)
+                : FlashRulesCompiler.Compile(searchRoots[0].Snapshot.Simulator, player,
+                    requestRootSnapshot.Simulator);
+            for (int index = 0; index < searchRoots.Count; index++)
+            {
+                flashRoots[index] = FlashStateImporter.Import(searchRoots[index].Snapshot, player, rules,
+                    searchRoots[index].Snapshot.PotionUseCount);
+            }
         }
         catch (FlashImportException ex)
         {
@@ -91,18 +133,20 @@ internal static class FlashDifferentialProbe
             summary["rejection"] = ex.Reason.ToString();
             summary["detail"] = ex.Detail;
             report.Add($"REJECTED {ex.Reason}: {ex.Detail}");
-            report.Add(MissingContent(rootSnapshot.Simulator, player));
+            report.Add(MissingContent(requestRootSnapshot.Simulator, player));
             File.WriteAllLines(Path.Combine(outputDirectory, "flash-diff.txt"), report);
             return summary;
         }
         summary["admitted"] = true;
-        report.Add("ROOT");
-        report.AddRange(FlashBattleDump.Lines(flashRoot).Select(line => "  " + line));
+        report.Add(policy.IncludeTurnSetup
+            ? $"ROOT turn-setup choices={searchRoots.Count}"
+            : "ROOT");
+        report.AddRange(FlashBattleDump.Lines(flashRoots[0]).Select(line => "  " + line));
         FlashScorer? scorer = null;
         try
         {
-            scorer = FlashScoreBridge.Create(root, policy, policy.Profile, baselineSnapshot, rootSnapshot,
-                player, rules, flashRoot);
+            scorer = FlashScoreBridge.Create(root, policy, policy.Profile, requestRootSnapshot,
+                searchRoots[0].Snapshot, player, rules, flashRoots[0], rootSetup: policy.IncludeTurnSetup);
         }
         catch (FlashImportException ex)
         {
@@ -110,109 +154,124 @@ internal static class FlashDifferentialProbe
         }
         FlashBoundFeatures? bound = null;
         if (scorer != null)
-            bound = FlashBoundBridge.Create(root, policy, baselineSnapshot, player, rules, flashRoot,
+            bound = FlashBoundBridge.Create(root, policy, requestRootSnapshot, player, rules, flashRoots[0],
                 solver.CapturePruningRequestForFlash());
         bool checkRank = policy.Profile.ContinuousThreatRanking || policy.Profile.ContextualRanking != null;
         ScoreCheck scores = new(scorer, bound, solver, report, checkRank);
-        scores.Check(rootSnapshot, flashRoot, prefixPlan.Count, "ROOT");
 
         FlashAction[] actions = new FlashAction[FlashKernel.MaxLegalActions];
         int oneStepChecked = 0, oneStepFailed = 0, choiceActions = 0, choiceCapped = 0, choiceDeadEnds = 0, unsupported = 0;
-        int count = FlashKernel.LegalActions(flashRoot, rules, actions);
-        for (int index = 0; index < count; index++)
-        {
-            List<Completion> completions = [];
-            try
-            {
-                if (Complete(rules, flashRoot, actions[index], [], completions))
-                    choiceCapped++;
-            }
-            catch (Exception ex) when (ex is FlashUnsupportedException or FlashCapacityException)
-            {
-                // A Flash boundary, not a divergence: production falls back to the existing solver.
-                if (unsupported++ == 0)
-                    report.Add($"UNSUPPORTED K1 {actions[index]}: {ex.Message}");
-                continue;
-            }
-            foreach (Completion completion in completions)
-            {
-                if (completion.DeadEnd)
-                {
-                    choiceDeadEnds++;
-                    continue;
-                }
-                if (completion.Requests.Count > 0)
-                    choiceActions++;
-                Outcome outcome = Compare(solver, player, rules, rootSnapshot, rootSnapshot.PotionUseCount, completion);
-                oneStepChecked++;
-                if (outcome.Diff.Count > 0)
-                {
-                    oneStepFailed++;
-                    report.Add($"K1 MISMATCH {completion.Action} choices={Selections(completion.Action)}");
-                    report.AddRange(outcome.Diff.Select(line => "  " + line));
-                }
-                else
-                {
-                    scores.Check(outcome.OldChild!, outcome.FlashChild, 1, $"K1 {completion.Action} choices={Selections(completion.Action)}");
-                }
-            }
-        }
-
         int walkTransitions = 0, walkFailed = 0, terminals = 0;
         Dictionary<string, int> endings = new(StringComparer.Ordinal);
-        for (int seed = 1; seed <= walks; seed++)
+        for (int rootIndex = 0; rootIndex < searchRoots.Count; rootIndex++)
         {
-            Random random = new(seed);
-            SimulationSnapshot snapshot = rootSnapshot;
-            FlashBattle battle = flashRoot;
-            List<string> path = [];
-            for (int step = 0; step < steps; step++)
+            SimulationSnapshot rootSnapshot = searchRoots[rootIndex].Snapshot;
+            FlashBattle flashRoot = flashRoots[rootIndex];
+            string rootLabel = policy.IncludeTurnSetup
+                ? $"root[{rootIndex}]{DescribeChoices(rootIndex, searchRoots)}"
+                : "root";
+            scores.Check(rootSnapshot, flashRoot, prefixPlan.Count, rootLabel);
+            if (policy.IncludeTurnSetup)
+                report.Add($"ROOT[{rootIndex}] choices={DescribeChoiceVector(searchRoots[rootIndex].Choices)}");
+
+            int count = FlashKernel.LegalActions(flashRoot, rules, actions);
+            for (int index = 0; index < count; index++)
             {
-                if (!FlashKernel.IsInProgress(battle) || snapshot.BoundaryReason != SearchBoundaryReason.None)
-                {
-                    terminals++;
-                    endings[$"{battle.Outcome}/{snapshot.BoundaryReason}"] = endings.GetValueOrDefault($"{battle.Outcome}/{snapshot.BoundaryReason}") + 1;
-                    break;
-                }
-                count = FlashKernel.LegalActions(battle, rules, actions);
-                // Favour card plays so walks reach deeper hands, deaths and shuffles.
-                FlashAction action = count > 1 && random.Next(4) != 0 ? actions[random.Next(count - 1)] : actions[random.Next(count)];
-                Completion completion;
+                List<Completion> completions = [];
                 try
                 {
-                    completion = CompleteRandomly(rules, battle, action, random);
+                    if (Complete(rules, flashRoot, actions[index], [], completions))
+                        choiceCapped++;
                 }
                 catch (Exception ex) when (ex is FlashUnsupportedException or FlashCapacityException)
                 {
+                    // A Flash boundary, not a divergence: production falls back to the existing solver.
                     if (unsupported++ == 0)
-                        report.Add($"UNSUPPORTED K2 seed={seed} step={step}: {ex.Message}");
-                    break;
+                        report.Add($"UNSUPPORTED K1 {rootLabel} {actions[index]}: {ex.Message}");
+                    continue;
                 }
-                path.Add($"{completion.Action}{(completion.Requests.Count > 0 ? " " + Selections(completion.Action) : "")}");
-                if (completion.DeadEnd)
+                foreach (Completion completion in completions)
                 {
-                    choiceDeadEnds++;
-                    break;
-                }
-                if (completion.Requests.Count > 0)
-                    choiceActions++;
-                Outcome outcome = Compare(solver, player, rules, snapshot, rootSnapshot.PotionUseCount, completion);
-                walkTransitions++;
-                if (outcome.Diff.Count > 0)
-                {
-                    walkFailed++;
-                    report.Add($"K2 MISMATCH seed={seed} step={step} path={string.Join(" > ", path)}");
-                    report.AddRange(outcome.Diff.Select(line => "  " + line));
-                    if (walkFailed <= 3)
+                    if (completion.DeadEnd)
                     {
-                        report.Add("  parent (flash):");
-                        report.AddRange(FlashBattleDump.Lines(battle).Select(line => "    " + line));
+                        choiceDeadEnds++;
+                        continue;
                     }
-                    break;
+                    if (completion.Requests.Count > 0)
+                        choiceActions++;
+                    Outcome outcome = Compare(solver, player, rules, rootSnapshot,
+                        rootSnapshot.PotionUseCount, completion);
+                    oneStepChecked++;
+                    if (outcome.Diff.Count > 0)
+                    {
+                        oneStepFailed++;
+                        report.Add($"K1 MISMATCH {rootLabel} {completion.Action} choices={Selections(completion.Action)}");
+                        report.AddRange(outcome.Diff.Select(line => "  " + line));
+                    }
+                    else
+                    {
+                        scores.Check(outcome.OldChild!, outcome.FlashChild, 1,
+                            $"K1 {rootLabel} {completion.Action} choices={Selections(completion.Action)}");
+                    }
                 }
-                scores.Check(outcome.OldChild!, outcome.FlashChild, 1, $"K2 seed={seed} step={step} path={string.Join(" > ", path)}");
-                snapshot = outcome.OldChild!;
-                battle = outcome.FlashChild;
+            }
+
+            for (int seed = 1; seed <= walks; seed++)
+            {
+                Random random = new(seed);
+                SimulationSnapshot snapshot = rootSnapshot;
+                FlashBattle battle = flashRoot;
+                List<string> path = [];
+                for (int step = 0; step < steps; step++)
+                {
+                    if (!FlashKernel.IsInProgress(battle) || snapshot.BoundaryReason != SearchBoundaryReason.None)
+                    {
+                        terminals++;
+                        endings[$"{battle.Outcome}/{snapshot.BoundaryReason}"] = endings.GetValueOrDefault($"{battle.Outcome}/{snapshot.BoundaryReason}") + 1;
+                        break;
+                    }
+                    count = FlashKernel.LegalActions(battle, rules, actions);
+                    // Favour card plays so walks reach deeper hands, deaths and shuffles.
+                    FlashAction action = count > 1 && random.Next(4) != 0 ? actions[random.Next(count - 1)] : actions[random.Next(count)];
+                    Completion completion;
+                    try
+                    {
+                        completion = CompleteRandomly(rules, battle, action, random);
+                    }
+                    catch (Exception ex) when (ex is FlashUnsupportedException or FlashCapacityException)
+                    {
+                        if (unsupported++ == 0)
+                            report.Add($"UNSUPPORTED K2 {rootLabel} seed={seed} step={step}: {ex.Message}");
+                        break;
+                    }
+                    path.Add($"{completion.Action}{(completion.Requests.Count > 0 ? " " + Selections(completion.Action) : "")}");
+                    if (completion.DeadEnd)
+                    {
+                        choiceDeadEnds++;
+                        break;
+                    }
+                    if (completion.Requests.Count > 0)
+                        choiceActions++;
+                    Outcome outcome = Compare(solver, player, rules, snapshot,
+                        rootSnapshot.PotionUseCount, completion);
+                    walkTransitions++;
+                    if (outcome.Diff.Count > 0)
+                    {
+                        walkFailed++;
+                        report.Add($"K2 MISMATCH {rootLabel} seed={seed} step={step} path={string.Join(" > ", path)}");
+                        report.AddRange(outcome.Diff.Select(line => "  " + line));
+                        if (walkFailed <= 3)
+                        {
+                            report.Add("  parent (flash):");
+                            report.AddRange(FlashBattleDump.Lines(battle).Select(line => "    " + line));
+                        }
+                        break;
+                    }
+                    scores.Check(outcome.OldChild!, outcome.FlashChild, 1,
+                        $"K2 {rootLabel} seed={seed} step={step} path={string.Join(" > ", path)}");
+                    snapshot = outcome.OldChild!;
+                    battle = outcome.FlashChild;
+                }
             }
         }
 
@@ -245,6 +304,7 @@ internal static class FlashDifferentialProbe
                 ? $"bound=checked boundChecked={scores.BoundChecked} boundFailed={scores.BoundFailed}"
                 : $"bound=disabled({scores.BoundStatus})")
             + (scores.RankChecked == 0 ? "" : $" rankChecked={scores.RankChecked} rankFailed={scores.RankFailed}")
+            + (policy.IncludeTurnSetup ? $" turnSetupRoots={searchRoots.Count}" : "")
             + $" unsupported={unsupported}");
         if (scores.FailedFields.Count > 0)
             report.Insert(1, "K4 FIELDS " + string.Join(",", scores.FailedFields
@@ -255,6 +315,18 @@ internal static class FlashDifferentialProbe
         File.WriteAllLines(Path.Combine(outputDirectory, "flash-diff.txt"), report);
         return summary;
     }
+
+    private static string DescribeChoiceVector(IReadOnlyList<PlanCardChoice> choices)
+    {
+        if (choices.Count == 0)
+            return "-";
+        return string.Join(";", choices.Select(choice =>
+            $"{choice.SourceId}/{choice.Effect}/{choice.SourcePile}/"
+            + string.Join(",", choice.Cards.Select(card => $"{card.CardId}+{card.UpgradeLevel}"))));
+    }
+
+    private static string DescribeChoices(int rootIndex, IReadOnlyList<TurnSetupRootCandidate> roots)
+        => roots[rootIndex].Choices.Count == 0 ? "" : $" {DescribeChoiceVector(roots[rootIndex].Choices)}";
 
     private sealed record Outcome(SimulationSnapshot? OldChild, FlashBattle FlashChild, List<string> Diff);
 

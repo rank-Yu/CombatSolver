@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CombatSolver;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Commands;
 
 namespace OfflineSearchHarness;
 
@@ -102,6 +103,16 @@ internal static class Program
                 payload["resolvedScenario"] = generated!.Resolved?.Options;
                 payload["catalogFingerprint"] = generated.Resolved?.CatalogFingerprint;
 
+                IDisposable? turnSetupChoiceScope = null;
+                if (generated.Request.FlashTurnSetupRootForTest)
+                {
+                    TurnSetupRootCapture.Install();
+                    TurnSetupRootCapture.Enabled = true;
+                    // The native setup page must be answered so the live game reaches Play; the captured
+                    // pre-setup root is independent of that answer.
+                    turnSetupChoiceScope = CardSelectCmd.PushSelector(
+                        new UnattendedCardSelector(["__FIRST__"]), localOnly: true);
+                }
                 Step(steps, "G1.2 建跑局、注入装备、进遭遇战房间", () =>
                 {
                     Task<IDisposable?> enter = generated!.EnterCombatRoomAsync();
@@ -112,6 +123,8 @@ internal static class Program
                 Step(steps, "G1.3 推进到玩家第一回合", () =>
                 {
                     combat = OfflineCombat.WaitForPlayableCombat(loop);
+                    turnSetupChoiceScope?.Dispose();
+                    turnSetupChoiceScope = null;
                     generated!.CaptureOpening(combat);
                     if (!generated.Request.PreserveNativeCombatStateForTest)
                         loop.RunUntilCompleted(generated.Session.InjectInitialStateAsync(
@@ -120,6 +133,16 @@ internal static class Program
                     return OfflineCombat.DescribeRoot(combat);
                 });
                 payload["setupChoices"] = generated.SetupChoices;
+                if (TurnSetupRootCapture.Captured is { } capturedRoot)
+                {
+                    payload["turnSetupRoot"] = new
+                    {
+                        turn = capturedRoot.Root.StartTurnNumber,
+                        phase = capturedRoot.Root.PlayerPhase.ToString(),
+                        side = capturedRoot.Root.CurrentSide.ToString(),
+                        includeTurnSetup = capturedRoot.Policy.IncludeTurnSetup,
+                    };
+                }
             }
             else
             {
@@ -152,7 +175,8 @@ internal static class Program
                 InfusedCoreChecks.Run(combat!, options.OutputDirectory);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_DIFF") == "1")
                 payload["flashDiff"] = FlashDifferentialProbe.Run(
-                    combat!, options, options.OutputDirectory, generated?.Request.FlashPrefixActions);
+                    combat!, options, options.OutputDirectory, generated?.Request.FlashPrefixActions,
+                    TurnSetupRootCapture.Captured);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_SOLVE") == "1")
                 payload["flashSolve"] = FlashSolveProbe.Run(combat!, options, loop);
             payload["budget"] = DescribeBudget(options);
@@ -181,13 +205,15 @@ internal static class Program
                 {
                     List<double> warmupWallSeconds = [];
                     for (int warmup = 0; warmup < warmups; warmup++)
-                        warmupWallSeconds.Add(ModRuntime.RunSearchDetailed(combat!, options, loop, session: null).WallSeconds);
+                        warmupWallSeconds.Add(ModRuntime.RunSearchDetailed(
+                            combat!, options, loop, session: null, TurnSetupRootCapture.Captured).WallSeconds);
                     payload["warmupWallSeconds"] = warmupWallSeconds;
                 }
                 using MemorySampler memory = new(TimeSpan.FromMilliseconds(100));
                 Step(steps, $"M2.1 跑一次固定预算搜索（{options.SearchMode}）", () =>
                 {
-                    outcome = ModRuntime.RunSearchDetailed(combat!, options, loop, session);
+                    outcome = ModRuntime.RunSearchDetailed(
+                        combat!, options, loop, session, TurnSetupRootCapture.Captured);
                     var solver = outcome.LegacyMetrics;
                     return $"boundary={solver["boundary"]} total_expanded={solver["totalExpanded"]} "
                         + $"total_transitions={solver["totalTransitions"]} score={solver["score"]} "

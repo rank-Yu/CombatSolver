@@ -34,9 +34,9 @@ internal static class FlashStateImporter
         if (combat.Players.Count != 1)
             throw new FlashImportException(FlashRejection.MultiPlayer, $"玩家数 {combat.Players.Count}");
         SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(player);
-        // Only an ordinary play-phase root has the protocol Flash searches. A turn-setup root keeps a
-        // Start-phase choice context that Flash does not model, and searching it as a play root would
-        // silently drop that choice.
+        // FlashBattle only represents a stable play-phase state. A turn-setup request is admitted by
+        // the bridge, which replays the native setup page through the existing engine and imports each
+        // resulting play root, so reaching this guard with Start/other phases is a protocol error.
         if (requirePlayPhase
             && (combat.CurrentSide != CombatSide.Player || playerState.Phase != PlayerTurnPhase.Play))
         {
