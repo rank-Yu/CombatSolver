@@ -267,7 +267,8 @@ internal static class FlashRouteMaterializer
             TimeSpan.FromMilliseconds(profile.SoftTimeBudgetMilliseconds),
             root.InitialPlayerMaxHp)) with
         {
-            Potions = PotionPolicy(replay, rootSnapshot, rootPlayerTurn),
+            Potions = PotionPolicy(replay, rootSnapshot, rootPlayerTurn, policy.PotionStrategy,
+                pruning.EffectivePotionPolicy, potionPolicyOverride == SolverPotionPolicy.Disabled),
             Scorer = scorer,
             Ordering = new FlashRouteOrdering(root.InitialPlayerHp, root.InitialPlayerMaxHp, root.BossHpRelief,
                 root.PostCombatRelicHeal),
@@ -283,7 +284,6 @@ internal static class FlashRouteMaterializer
             InitialActionCount = prefixLength,
             InitialExplicitPotionUses = potionUsage.ExplicitPotionUseCount,
             InitialAutomaticPotionUses = initialAutomaticPotionUses,
-            InitialExplicitPotionStrategicCost = potionUsage.ExplicitPotionStrategicCost,
             PotionFreeBaseline = potionFreePolicyBaseline,
             PotionReplacementHpCredit = root.PotionRewardOutlook.ReplacementHpCredit,
             SmartPotionEligibilityHpCeiling = smartCeiling,
@@ -583,19 +583,16 @@ internal static class FlashRouteMaterializer
     }
 
     private static FlashPotionPolicy PotionPolicy(CombatBeamSolver replay, SimulationSnapshot rootSnapshot,
-        int rootPlayerTurn)
+        int rootPlayerTurn, PotionStrategySnapshot strategy, SolverPotionPolicy effectivePolicy,
+        bool forceAllDisabled)
     {
-        (bool[] allowed, int[] costs, int? earliestTurn, int? maximumUses) = replay.CapturePotionPolicyForFlash(rootSnapshot);
-        byte mask = 0;
-        int[] slotCosts = new int[FlashLimits.PotionSlots];
-        for (int slot = 0; slot < allowed.Length && slot < FlashLimits.PotionSlots; slot++)
-        {
-            if (allowed[slot])
-                mask |= (byte)(1 << slot);
-            slotCosts[slot] = costs[slot];
-        }
+        (bool[] _, int[] _, int? earliestTurn, int? maximumUses) =
+            replay.CapturePotionPolicyForFlash(rootSnapshot);
         // The earliest turn is in request-root units; a fixed prefix must not shift it.
         int earliest = earliestTurn is { } turn ? turn - rootSnapshot.Turn + rootPlayerTurn : int.MinValue;
-        return new FlashPotionPolicy(mask, earliest, maximumUses, slotCosts);
+        // The acceptance gate is the same (slot, potion identity) strategy check the existing search
+        // runs on the potion currently in the slot, so a generated potion is offered without widening
+        // a disabled identity.
+        return new FlashPotionPolicy(earliest, maximumUses, strategy, effectivePolicy, forceAllDisabled);
     }
 }

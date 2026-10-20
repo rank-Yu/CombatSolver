@@ -27,6 +27,7 @@ internal static class FlashPotionBridge
             .ToArray();
         int[] slots = new int[forced.Length];
         ushort[] potionIds = new ushort[forced.Length];
+        int[] strategicHpCosts = new int[forced.Length];
         int alreadyUsedMask = 0;
         int alreadyUsedStrategicHpCost = 0;
         for (int index = 0; index < forced.Length; index++)
@@ -39,6 +40,8 @@ internal static class FlashPotionBridge
             }
             slots[index] = directive.Slot;
             potionIds[index] = potionId;
+            strategicHpCosts[index] = PotionUsePolicy.StrategicHpCost(
+                directive.PotionId, renewablePotionShapedRock);
             foreach (PlanAction action in prefix)
             {
                 if (action.Kind != PlanActionKind.UsePotion
@@ -48,12 +51,11 @@ internal static class FlashPotionBridge
                     continue;
                 }
                 alreadyUsedMask |= 1 << index;
-                alreadyUsedStrategicHpCost += PotionUsePolicy.StrategicHpCost(
-                    directive.PotionId, renewablePotionShapedRock);
+                alreadyUsedStrategicHpCost += strategicHpCosts[index];
                 break;
             }
         }
-        return new FlashForcedPotionDirectives(slots, potionIds, alreadyUsedMask,
+        return new FlashForcedPotionDirectives(slots, potionIds, strategicHpCosts, alreadyUsedMask,
             alreadyUsedStrategicHpCost);
     }
 
