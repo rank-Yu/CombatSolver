@@ -47,6 +47,11 @@ internal sealed partial class CombatPredictionSimulator
         {
             completionHistoryStart = History.Entries.Count;
             History.CardPlayFinished(card, play, card.HasKeyword(State, CardKeyword.Ethereal));
+            // Vanilla records CardPlayFinished before Hook.AfterCardPlayed. Effects triggered from
+            // AfterCardPlayed (CalamityPower generating a card, Stomp.AfterCardEnteredCombat) count
+            // this play as finished; keep the branch counters on the same boundary.
+            if (State.CombatState is ICombatPredictionCardExecutionSink finishedSink)
+                finishedSink.RecordCardPlayFinished(card);
             HookMirrors.AfterCardPlayed(this, card, play);
             if (HasPendingChoice) return Suspend(CardPlayTailStage.AfterPlayed);
             stage = CardPlayTailStage.AfterPlayed;

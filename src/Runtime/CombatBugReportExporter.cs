@@ -351,7 +351,7 @@ internal static class CombatBugReportExporter
         return completion;
     }
 
-    public static Task<string> ExportCurrentAsync(string? outputDirectory = null, string? playerDescription = null, string? submissionId = null)
+    public static async Task<string> ExportCurrentAsync(string? outputDirectory = null, string? playerDescription = null, string? submissionId = null)
     {
         if (!NGame.IsMainThread())
             throw new InvalidOperationException("问题包只能从游戏主线程导出。");
@@ -361,6 +361,12 @@ internal static class CombatBugReportExporter
             : null;
         SolverResult? result = SolverController.CurrentResultForBugReport;
         string replanAudit = SolverController.ReplanAuditForBugReport;
+        // A death can end the combat without going through SolverController.ResetCore. Exporting a
+        // finished fight while _currentSession is still set would archive it under replay/current
+        // and leave replay/recent without session.json. Complete it first so an export after combat
+        // always lands in the "recent" slot, exactly like a combat ended by victory.
+        if (_currentSession != null && !CombatManager.Instance.IsInProgress)
+            await CompleteCombat("export_after_combat", result, replanAudit);
         if (state != null)
             RecordCheckpoint(state, "export_clicked", result, replanAudit);
 
@@ -415,7 +421,7 @@ internal static class CombatBugReportExporter
         string executableDirectory = Path.GetDirectoryName(OS.GetExecutablePath())
             ?? throw new DirectoryNotFoundException("无法定位游戏目录。");
 
-        return Task.Run(async () =>
+        return await Task.Run(async () =>
         {
             ForensicArchiveBundle forensics = await forensicsTask.ConfigureAwait(false);
             return WriteArchive(

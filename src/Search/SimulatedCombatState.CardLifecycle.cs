@@ -200,6 +200,9 @@ internal sealed partial class SimulatedCombatState
     IDisposable ICombatPredictionCardExecutionSink.BeginCardExecutionScope()
         => BeginCardExecutionScope();
 
+    void ICombatPredictionCardExecutionSink.RecordCardPlayFinished(PredictedCard card)
+        => RecordCardPlayFinished(card);
+
     void ICombatPredictionCardExecutionSink.RecordCardPlayStarted(PredictedCard card, CardPlay cardPlay)
     {
         Creature owner = card.Preview.Owner.Creature;

@@ -14,16 +14,19 @@ internal sealed partial class SimulatedCombatState
     public void RecordPoweredCardBlockGained(Creature owner)
         => (_blockCardsPlayedThisTurn ??= [])[owner] = GetBlockCardsPlayedThisTurn(owner) + 1;
 
+    public void RecordCardPlayFinished(PredictedCard card)
+    {
+        Creature owner = card.Preview.Owner.Creature;
+        if (card.Preview.Type != CardType.Attack)
+            return;
+        (_attacksPlayedThisTurn ??= [])[owner] = GetAttacksPlayedThisTurn(owner) + 1;
+        if (card.Preview.Tags.Contains(CardTag.Shiv))
+            (_shivsPlayedThisTurn ??= [])[owner] = GetShivsPlayedThisTurn(owner) + 1;
+    }
+
     public void RecordCardPlayed(PredictedCard card)
     {
         RecordHistoryCourseAttack(card);
-        Creature owner = card.Preview.Owner.Creature;
-        if (card.Preview.Type == CardType.Attack)
-        {
-            (_attacksPlayedThisTurn ??= [])[owner] = GetAttacksPlayedThisTurn(owner) + 1;
-            if (card.Preview.Tags.Contains(CardTag.Shiv))
-                (_shivsPlayedThisTurn ??= [])[owner] = GetShivsPlayedThisTurn(owner) + 1;
-        }
         foreach (Creature creature in Creatures)
         {
             SlowPower? slow = GetPower<SlowPower>(creature);
@@ -65,7 +68,7 @@ internal sealed partial class SimulatedCombatState
     {
         if (_attacksPlayedThisTurn?.TryGetValue(owner, out int value) == true)
             return value;
-        value = _rootHistory.CardPlaysStarted.Count(entry =>
+        value = _rootHistory.CardPlaysFinished.Count(entry =>
             entry.HappenedThisTurn(this)
             && entry.CardPlay.Card.Type == CardType.Attack
             && entry.CardPlay.Player.Creature == owner);

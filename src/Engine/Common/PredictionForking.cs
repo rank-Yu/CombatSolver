@@ -178,6 +178,8 @@ internal interface ICombatPredictionCardExecutionSink
         CombatSolver.Engine.Common.PredictedCard card,
         MegaCrit.Sts2.Core.Entities.Cards.CardPlay cardPlay);
 
+    void RecordCardPlayFinished(CombatSolver.Engine.Common.PredictedCard card);
+
     void ApplyCardPlayEffects(
         CombatSolver.Engine.InCombat.Simulation.CombatPredictionSimulator simulator,
         CombatSolver.Engine.Common.PredictedCard card,

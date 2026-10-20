@@ -17,6 +17,8 @@ internal sealed partial class UnattendedTestRunner
     private sealed class Executor(UnattendedTestRunner runner)
     {
         private SolverSettingsData? _settingsBeforeTest;
+        private FastModeType? _fastModeBeforeDeployment;
+        private bool _settingsOverridesApplied;
 
         public void RestoreSettings()
         {
@@ -1990,8 +1992,18 @@ internal sealed partial class UnattendedTestRunner
                     initialSearchHeld);
         }
 
+        /// <summary>
+        /// Applies the <c>--*-for-test</c> SolverSettings overrides. The first call is made before the
+        /// scenario enters combat: <c>PlayerTurnSetupPatches</c> captures its root from
+        /// <c>SolverSettings.Capture()</c> as soon as the first player turn starts, so applying them in
+        /// <c>full_auto</c> would leave the turn-setup search on the persisted settings.
+        /// </summary>
+        internal FastModeType? ApplySettingsOverridesEarly() => ApplySettingsOverrides();
+
         private FastModeType? ApplySettingsOverrides()
         {
+            if (_settingsOverridesApplied)
+                return _fastModeBeforeDeployment;
             UnattendedTestRequest request = runner._request;
             if (runner._checkpointImport == null
                 && !request.PerformancePresetForTest.HasValue
@@ -2007,6 +2019,7 @@ internal sealed partial class UnattendedTestRunner
                 && !request.DeploymentInterActionDelaySecondsForTest.HasValue
                 && !request.EnableDetailedDiagnosticLogsForTest.HasValue)
             {
+                _settingsOverridesApplied = true;
                 return null;
             }
 
@@ -2126,7 +2139,9 @@ internal sealed partial class UnattendedTestRunner
                         $"No-GC 预算为 {snapshot.NoGcRegionBudgetBytes}，预期 {expectedNoGcBytes}。");
                 }
             }
-            return fastModeBeforeDeployment;
+            _fastModeBeforeDeployment = fastModeBeforeDeployment;
+            _settingsOverridesApplied = true;
+            return _fastModeBeforeDeployment;
         }
     }
 }

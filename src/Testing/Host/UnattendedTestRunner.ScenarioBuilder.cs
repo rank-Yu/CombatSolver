@@ -70,6 +70,10 @@ internal sealed partial class UnattendedTestRunner
             await runner._host.GameStartupComplete;
             runner.RecordCheckpointModDifferencesAfterStartup();
             runner.ApplyHeadlessFastModeOverride();
+            // PlayerTurnSetupPatches captures the first search root from SolverSettings.Capture()
+            // before wait_player_turn. Apply the --*-for-test SolverSettings overrides before any
+            // combat/search capture so that root also sees the test settings.
+            _ = runner._executor.ApplySettingsOverridesEarly();
             runner.EnsureWithinDeadline();
             if (RunManager.Instance.IsInProgress)
                 throw new InvalidOperationException("无人测试要求从无进行中跑局的独立游戏进程启动。");
