@@ -1339,6 +1339,17 @@ internal sealed partial class UnattendedTestRunner
                     expectedPlayerPowerObserved, InitialSearchHeld: false);
             }
 
+            if (request.ScenarioId.Equals(DoomFatalTimingScenarioId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (scenario.OrbChecks.Count > 0 || scenario.PotionChecks.Count > 0
+                    || scenario.MonsterMoveChecks.Count > 0 || request.VerifyIncrementalSearch)
+                    throw new InvalidOperationException("Doom 致命计数夹具不能混入其他差分或正式搜索请求。");
+                runner.SetStage("doom_fatal_timing_differential");
+                int finishedTurn = await runner.RunDoomFatalTimingDifferentialAsync(combatState, player);
+                return new ExecutionOutcome(false, finishedTurn, expectedCardPlayed, expectedPotionUsed,
+                    expectedPlayerPowerObserved, InitialSearchHeld: false);
+            }
+
             if (request.ScenarioId.Equals(ForcedTurnTerminalScenarioId, StringComparison.OrdinalIgnoreCase)
                 || request.ScenarioId.Equals(PotionForcedTurnTerminalScenarioId, StringComparison.OrdinalIgnoreCase))
             {

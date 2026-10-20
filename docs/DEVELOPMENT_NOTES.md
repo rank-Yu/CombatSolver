@@ -16,6 +16,10 @@
 
 后台搜索判定 The Hunt、Feed、贪婪之手的击杀奖励与书本修复刀的治疗时，原经原版 `ReattachPower` 读取实机上千足虫节段的生命：搜索分支里其他节段已被击杀、实机上仍存活时，判为不致命并漏算奖励。现在由 `SimulatedCombatState.ShouldOwnerDeathTriggerFatal` 按分支状态计算；同时把 Surrounded/BackAttack 与 FrostOrb/Hibernate 的 Power 存在性读取改为分支查询。验证：The Hunt 与书本修复刀的 actual/simulated 严格差分修正前不一致、修正后完整快照一致；默认 79 根关闭模式只有 SILENT-C-13 改变（正确计入 The Hunt 奖励）；Flash 全量差分零差异。
 
+### Doom 击杀的致命计数时机
+
+后台搜索结算 Doom 击杀时，原先在击杀前统计书本修复刀的致命击杀数；原版是逐个击杀、每次完成死亡效果后，在全部击杀后才统计。同批被 Doom 击杀的多个千足虫节段因此被判为不致命、漏算治疗。现在按原版时序结算，搜索与 Flash 内核一致。验证：新增 `DOOM-FATAL-TIMING-V0111` actual/simulated 严格差分（修正前模拟治疗 0、实机 9，修正后完整快照一致）；默认 79 根关闭模式逐根不变。
+
 ### Q015 路线保留（PR #227）
 
 在既有 Beam 名额内，按用药数量保留已降低敌方格挡、仍有合法攻击且敌方剩余生命不超过可执行手牌估值的收尾续路；合法攻击数沿现有手牌遍历冻结。该估值用于保路资格，实际攻击由模拟器结算。Discard／DiscardAndDraw 上下文优先保留预计安全的进攻续路。Control 在原有结束回合探测名额中保留一个可能由延迟伤害获胜的代表，再由实际试算决定。旧敌退出且新敌入场的 AliveEnemyMask 变化进入 RevivalWindow 通道。状态等价、终局政策、预算和战斗语义沿用原实现。
