@@ -1,6 +1,7 @@
 using CombatSolver.Engine.InCombat.Flash;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using CombatSolver.FlashBeam;
 using MegaCrit.Sts2.Core.Combat;
 
@@ -602,7 +603,25 @@ internal static class BeamSolveDispatch
             + $"verify_ms={outcome.VerificationTime.TotalMilliseconds:0} materialize_ms={outcome.MaterializationTime.TotalMilliseconds:0} "
             + $"flash_expanded={search.ExpandedNodes} flash_transitions={search.Transitions} "
             + $"flash_pruned={search.PrunedIncumbents} flash_smart_pruned={search.SmartPotionPruned} "
-            + $"flash_capacity_pruned={search.CapacityPruned}");
+            + $"flash_capacity_pruned={search.CapacityPruned} "
+            + $"flash_capacity_dropped={DescribeCapacityDrops(search.CapacityDroppedChildren)} "
+            + $"flash_ended_compactions={search.EndedCompactions} "
+            + $"flash_ended_dropped={search.EndedCompressedStates}");
+    }
+
+    /// <summary>The per-region child capacity drops, e.g. <c>Cards:2,Powers:1</c>; <c>-</c> when none.</summary>
+    private static string DescribeCapacityDrops(IReadOnlyDictionary<string, int> drops)
+    {
+        if (drops.Count == 0)
+            return "-";
+        StringBuilder builder = new();
+        foreach ((string region, int count) in drops)
+        {
+            if (builder.Length > 0)
+                builder.Append(',');
+            builder.Append(region).Append(':').Append(count);
+        }
+        return builder.ToString();
     }
 
     private static string IncumbentText(PrimarySearchIncumbent? incumbent)
@@ -629,9 +648,11 @@ internal static class BeamSolveDispatch
 
     /// <summary>
     /// One Flash attempt. <paramref name="Boundary"/> is set when the Flash search itself reached a state
-    /// the derived kernel does not model (<see cref="FlashUnsupportedException"/>) or a capacity limit
-    /// (<see cref="FlashCapacityException"/>): like an admission rejection, the request falls back to the
-    /// existing solver, which is the authoritative implementation.
+    /// the derived kernel does not model (<see cref="FlashUnsupportedException"/>), or a capacity limit
+    /// raised before the expansion loop (root import/root scoring; <see cref="FlashCapacityException"/>):
+    /// like an admission rejection, the request falls back to the existing solver, which is the
+    /// authoritative implementation. A child-level capacity overflow inside the expansion loop is a
+    /// search boundary handled by <see cref="FlashBeamSolver"/> and does not reach this fallback.
     /// </summary>
     private sealed record FlashAttempt(FlashSolveOutcome? Outcome, FlashVerificationException? Mismatch,
         string? Boundary = null);
