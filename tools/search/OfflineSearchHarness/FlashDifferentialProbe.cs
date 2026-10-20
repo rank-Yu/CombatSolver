@@ -313,6 +313,7 @@ internal static class FlashDifferentialProbe
         summary["unsupported"] = unsupported;
         summary["boundFailedFields"] = scores.BoundFailedFields;
         summary["rankChecked"] = scores.RankChecked;
+        summary["noveltyFailed"] = scores.NoveltyFailed;
         summary["rankFailed"] = scores.RankFailed;
         report.Insert(0, $"SUMMARY oneStep={oneStepChecked} failed={oneStepFailed} walkTransitions={walkTransitions} "
             + $"walkFailed={walkFailed} terminals={terminals} choiceActions={choiceActions} choiceCapped={choiceCapped} "
@@ -323,6 +324,7 @@ internal static class FlashDifferentialProbe
                 ? $"bound=checked boundChecked={scores.BoundChecked} boundFailed={scores.BoundFailed}"
                 : $"bound=disabled({scores.BoundStatus})")
             + (scores.RankChecked == 0 ? "" : $" rankChecked={scores.RankChecked} rankFailed={scores.RankFailed}")
+            + (scores.NoveltyFailed == 0 ? "" : $" noveltyFailed={scores.NoveltyFailed}")
             + (policy.IncludeTurnSetup ? $" turnSetupRoots={searchRoots.Count}" : "")
             + $" unsupported={unsupported}");
         if (scores.FailedFields.Count > 0)
@@ -411,6 +413,9 @@ internal static class FlashDifferentialProbe
 
         public Dictionary<string, int> BoundFailedFields { get; } = new(StringComparer.Ordinal);
 
+        /// <summary>Projected states whose novelty fact multiset differed.</summary>
+        public int NoveltyFailed { get; private set; }
+
         /// <summary>Intermediate Beam rank comparisons (only when the profile carries a rank modifier).</summary>
         public int RankChecked { get; private set; }
 
@@ -433,6 +438,31 @@ internal static class FlashDifferentialProbe
             CheckBound(old, flash, flashFeatures, label);
             if (checkRank && flashFeatures is { } features)
                 CheckRank(old, flash, features, actionCount, label);
+            if (flashFeatures is { } noveltyFeatures)
+                CheckNoveltyFacts(old, flash, noveltyFeatures, label);
+        }
+
+        /// <summary>
+        /// K4 novelty facts: the fact multiset read by the novelty search must be the same on both
+        /// sides, including the pile card identities, top draw cards and effective powers.
+        /// </summary>
+        private void CheckNoveltyFacts(SimulationSnapshot old, in FlashBattle flash,
+            in FlashScoreFeatures features, string label)
+        {
+            List<BfwsFact> oldFacts = solver.CaptureNoveltyFactsForFlash(old);
+            List<BfwsFact> flashFacts = [];
+            FlashNoveltyFacts.Capture(flash, features, flashFacts);
+            List<string> diff = FlashNoveltyFacts.Diff(oldFacts, flashFacts);
+            if (diff.Count == 0)
+                return;
+            NoveltyFailed++;
+            Failed++;
+            FailedFields["novelty-fact"] = FailedFields.GetValueOrDefault("novelty-fact") + 1;
+            if (NoveltyFailed <= ReportedMismatches)
+            {
+                report.Add($"K4 NOVELTY MISMATCH {label}");
+                report.AddRange(diff.Select(line => "  " + line));
+            }
         }
 
         private void CheckRank(SimulationSnapshot old, in FlashBattle flash,

@@ -39,6 +39,15 @@ internal sealed record BeamSolveRequest(
     internal int? MaximumPotionUses { get; init; }
 
     internal int? MinimumPotionUses { get; init; }
+
+    /// <summary>
+    /// <c>CombatBeamSolver.earlyTurnScoutDepth</c> for the coordinator's direct early-turn scout.
+    /// Zero for every other member.
+    /// </summary>
+    internal int EarlyTurnScoutDepth { get; init; }
+
+    /// <summary>The direct early-turn scout's per-layer observer; null for every other member.</summary>
+    internal Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? EarlyTurnScoutObserver { get; init; }
 }
 
 /// <summary>
@@ -61,7 +70,10 @@ internal static class BeamSolveDispatch
             or DirectSearchPurpose.PotionFreeAudit
             or DirectSearchPurpose.RequiredPotionAudit
             or DirectSearchPurpose.NarrowOpeningIncumbent
-            or DirectSearchPurpose.TurnBoundaryDiscovery;
+            or DirectSearchPurpose.TurnBoundaryDiscovery
+            or DirectSearchPurpose.EarlyTurnScout
+            or DirectSearchPurpose.NoveltyExploration
+            or DirectSearchPurpose.AdaptiveNoveltyRefinement;
         FlashSearchMode mode = auditable ? request.Policy.FlashMode : FlashSearchMode.Off;
         if (mode != FlashSearchMode.Off && RootPhaseBoundary(request) is { } rootPhase)
         {
@@ -101,6 +113,9 @@ internal static class BeamSolveDispatch
                 {
                     Policy = Isolated(request.Policy),
                     ProgressCallback = null,
+                    // The existing solve already reported to the observer; publishing the isolated
+                    // Flash frontier too would report every candidate twice.
+                    EarlyTurnScoutObserver = null,
                 });
                 request.Policy.Diagnostics.Info(
                     $"[CombatSolver/Flash] FLASH_SHADOW purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
@@ -305,16 +320,15 @@ internal static class BeamSolveDispatch
     }
 
     /// <summary>
-    /// The deferred-power plan's depth-one scout. Only the plan pass's own scout
-    /// (<c>RunDeferredPowerPlanSearchPass</c>, empty prefix, depth one) is offered to Flash; the other
-    /// early-turn exploration requests stay with the existing solver. The bridge translates the reported
-    /// Flash routes back to <see cref="EarlyTurnFrontierCandidate"/>s.
+    /// The deferred-power plan's own scout (<c>RunDeferredPowerPlanSearchPass</c>, empty prefix) at any
+    /// searched depth. Other early-turn exploration requests keep their own direct member. The bridge
+    /// translates the reported Flash routes back to <see cref="EarlyTurnFrontierCandidate"/>s.
     /// </summary>
     private static bool CanTakeOverPlanScout(ContinuationSearchRequest request)
     {
         if (request.Purpose != ContinuationPurpose.PlanCommitment
             || request.Commitment != null
-            || request.EarlyTurnScoutDepth != 1
+            || request.EarlyTurnScoutDepth <= 0
             || request.EarlyTurnScoutObserver == null
             || request.Prefix.Length != 0
             || request.PotionFreePolicyBaseline != null
@@ -428,6 +442,8 @@ internal static class BeamSolveDispatch
                 maximumPotionUses: request.MaximumPotionUses,
                 minimumPotionUses: request.MinimumPotionUses,
                 primaryIncumbent: request.PrimaryIncumbent,
+                earlyTurnScoutDepth: request.EarlyTurnScoutDepth,
+                earlyTurnScoutObserver: request.EarlyTurnScoutObserver,
                 directSearchPurpose: request.Purpose).Solve();
         return legacyReason is null
             ? Solve()
@@ -489,10 +505,9 @@ internal static class BeamSolveDispatch
                 maximumPotionUses: request.MaximumPotionUses,
                 minimumPotionUses: request.MinimumPotionUses,
                 potionFreePolicyBaseline: request.PotionFreePolicyBaseline,
-                // The narrow opening incumbent deliberately searches a 1/16-width pilot. Keep that
-                // intent instead of applying Flash's usual 4x profile scale to it.
-                profileScale: request.Purpose == DirectSearchPurpose.NarrowOpeningIncumbent
-                    ? 1 : FlashRouteMaterializer.ProfileWidthScale);
+                profileScale: ProfileScale(request.Purpose),
+                earlyTurnScoutDepth: request.EarlyTurnScoutDepth,
+                earlyTurnScoutObserver: request.EarlyTurnScoutObserver);
             return new FlashAttempt(outcome, null, outcome.ConstraintFailure);
         }
         catch (FlashVerificationException ex)
@@ -508,6 +523,19 @@ internal static class BeamSolveDispatch
             return new FlashAttempt(null, null, $"capacity {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// The Flash profile scale of one direct member. The narrow opening incumbent deliberately
+    /// searches a 1/16-width pilot; the coordinator already built the scout's wide profile and the
+    /// novelty budget is the request's own node/time bound, so those three keep scale one.
+    /// </summary>
+    private static int ProfileScale(DirectSearchPurpose purpose)
+        => purpose is DirectSearchPurpose.NarrowOpeningIncumbent
+            or DirectSearchPurpose.EarlyTurnScout
+            or DirectSearchPurpose.NoveltyExploration
+            or DirectSearchPurpose.AdaptiveNoveltyRefinement
+                ? 1
+                : FlashRouteMaterializer.ProfileWidthScale;
 
     private static FlashAttempt SolveFlashContinuation(ContinuationSearchRequest request)
     {

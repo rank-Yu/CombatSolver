@@ -35,14 +35,26 @@ internal static partial class CombatSearchCoordinator
         long expandedBefore = totals.Snapshot().ExpandedNodes;
         // Missing mandatory potion routes are a defined search boundary. Beam still gets
         // the remainder; simulation errors and caller cancellation propagate normally.
-        SolverResult? exploration = SolveOptionalPotionPosterior(new CombatBeamSolver(root, names, damage,
-            policy with { NoveltySearch = policy.NoveltySearch ?? new() }, cancellation,
-            progress, explorationProfile, potionPolicyOverride: potionOverride,
-            directSearchPurpose: DirectSearchPurpose.NoveltyExploration), policy, "novelty_exploration",
-            "NoveltyExploration", "direct:novelty-exploration");
+        SolverResult? exploration = SolveOptionalPotionPosterior(
+            () => BeamSolveDispatch.Solve(new BeamSolveRequest(root, names, damage,
+                policy with { NoveltySearch = policy.NoveltySearch ?? new() }, cancellation,
+                progress, explorationProfile, potionOverride, null,
+                DirectSearchPurpose.NoveltyExploration)),
+            policy, "novelty_exploration");
         long explorationExpanded = totals.Snapshot().ExpandedNodes - expandedBefore;
         long explorationElapsed = clock.ElapsedMilliseconds;
         if (exploration != null && IsCompleteVictory(exploration)) publish?.Invoke(exploration);
+        if (exploration != null && IsCompleteVictory(exploration)
+            && policy.Interaction?.CurrentTakeoverRequest?.Kind == SearchTakeoverKind.ApplyCurrentTurn)
+        {
+            // The existing novelty loop stops before the next parent when the displayed current turn
+            // is requested. FlashBeam has already published the same preview from its selected route.
+            exploration.ResultScope = SolverResultScope.CurrentTurnAdoption;
+            exploration.NoveltyPortfolio = new("adopted", explorationExpanded, explorationElapsed,
+                exploration.NoveltySearch, false, "adopted", exploration.ProjectedBattleHpLost,
+                true, null, false, 0, 0);
+            return exploration;
+        }
         if (exploration != null && ResolveTakeoverResult(exploration, policy.Interaction) is { } adopted)
         {
             adopted.NoveltyPortfolio = new("adopted", explorationExpanded, explorationElapsed,
@@ -122,12 +134,12 @@ internal static partial class CombatSearchCoordinator
             $"[CombatSolver/Test] ADAPTIVE_NOVELTY_START baseline_expanded={baselineExpanded} " +
             $"baseline_ms={baselineMilliseconds} nodes={refinement.MaxExpandedNodes} " +
             $"time_ms={refinement.SoftTimeBudgetMilliseconds}");
-        SolverResult? exploration = SolveOptionalPotionPosterior(new CombatBeamSolver(
-            root, names, damage, policy with { NoveltySearch = policy.NoveltySearch ?? new() },
-            cancellation, progress, refinement, potionPolicyOverride: potionOverride,
-            directSearchPurpose: DirectSearchPurpose.AdaptiveNoveltyRefinement),
-            policy, "adaptive_novelty_refinement",
-            "AdaptiveNoveltyRefinement", "direct:adaptive-novelty-refinement");
+        SolverResult? exploration = SolveOptionalPotionPosterior(
+            () => BeamSolveDispatch.Solve(new BeamSolveRequest(root, names, damage,
+                policy with { NoveltySearch = policy.NoveltySearch ?? new() },
+                cancellation, progress, refinement, potionOverride, null,
+                DirectSearchPurpose.AdaptiveNoveltyRefinement)),
+            policy, "adaptive_novelty_refinement");
         SearchRequestWorkSnapshot scoutAfter = totals.Snapshot();
         long expanded = scoutAfter.ExpandedNodes - scoutBefore.ExpandedNodes;
         long transitions = scoutAfter.TransitionCount - scoutBefore.TransitionCount;

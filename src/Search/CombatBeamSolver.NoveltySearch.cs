@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Numerics;
 using CombatSolver.Engine.InCombat.Simulation;
+using MegaCrit.Sts2.Core.Entities.Players;
 
 namespace CombatSolver;
 
@@ -205,7 +206,23 @@ internal sealed partial class CombatBeamSolver
     {
         List<BfwsFact> facts = _novelty.Facts;
         facts.Clear();
-        var s = node.Snapshot;
+        CaptureNoveltyFacts(node.Snapshot, _player, facts);
+        return facts;
+    }
+
+    /// <summary>
+    /// The novelty fact list of one projected state, for the K4 probe. It runs the same capture the
+    /// novelty search uses, so a Flash fact list can be compared field by field with the existing one.
+    /// </summary>
+    internal List<BfwsFact> CaptureNoveltyFactsForFlash(SimulationSnapshot snapshot)
+    {
+        List<BfwsFact> facts = [];
+        CaptureNoveltyFacts(snapshot, _player, facts);
+        return facts;
+    }
+
+    private static void CaptureNoveltyFacts(SimulationSnapshot s, Player player, List<BfwsFact> facts)
+    {
         ReadOnlySpan<int> values = [s.Energy, s.Stars, s.HandCount, s.ZeroCostPlayableCount,
             s.ReachableHandValue, s.PersistentBuffValue, s.LatentSetupValue, s.FutureResourceValue,
             s.RetainedAttackValue, s.ReplayPotentialValue, s.DelayedDamageValue, s.ReactiveDamageValue,
@@ -219,27 +236,27 @@ internal sealed partial class CombatBeamSolver
         facts.Add(new(BfwsFactKind.Block, Value: s.PlayerBlock / 5));
         facts.Add(new(BfwsFactKind.Hp, Value: s.PlayerHp / 5));
         var simulator = (CombatPredictionSimulator)s.Simulator;
-        var playerState = simulator.State.GetPlayerCombatState(_player);
+        var playerState = simulator.State.GetPlayerCombatState(player);
         for (int zone = 0; zone < 4; zone++)
         {
             var cards = zone switch { 0 => playerState.Hand.Cards, 1 => playerState.DrawPile.Cards,
                 2 => playerState.DiscardPile.Cards, _ => playerState.ExhaustPile.Cards };
-            _novelty.ZoneCounts.Clear(); _novelty.ZoneOrder.Clear();
+            Dictionary<(string Id, int Upgrade), int> counts = [];
+            List<(string Id, int Upgrade)> order = [];
             foreach (var card in cards)
             {
                 var key = (card.Preview.Id.Entry, card.Preview.CurrentUpgradeLevel);
-                if (_novelty.ZoneCounts.TryGetValue(key, out int count)) _novelty.ZoneCounts[key] = count + 1;
-                else { _novelty.ZoneCounts.Add(key, 1); _novelty.ZoneOrder.Add(key); }
+                if (counts.TryGetValue(key, out int count)) counts[key] = count + 1;
+                else { counts.Add(key, 1); order.Add(key); }
             }
-            foreach (var key in _novelty.ZoneOrder)
-                facts.Add(new(BfwsFactKind.Zone, zone, key.Id, key.Upgrade, Math.Min(3, _novelty.ZoneCounts[key])));
+            foreach (var key in order)
+                facts.Add(new(BfwsFactKind.Zone, zone, key.Id, key.Upgrade, Math.Min(3, counts[key])));
         }
         for (int i = 0; i < Math.Min(3, playerState.DrawPile.Cards.Count); i++)
             facts.Add(new(BfwsFactKind.Draw, i, playerState.DrawPile.Cards[i].Preview.Id.Entry));
         var combat = (SimulatedCombatState)simulator.State.CombatState;
         foreach (var power in combat.EffectivePowers())
-            facts.Add(new(BfwsFactKind.Power, ReferenceEquals(power.Owner, _player.Creature) ? 0 : 1, power.Id.Entry, power.Amount));
-        return facts;
+            facts.Add(new(BfwsFactKind.Power, ReferenceEquals(power.Owner, player.Creature) ? 0 : 1, power.Id.Entry, power.Amount));
     }
 
 }

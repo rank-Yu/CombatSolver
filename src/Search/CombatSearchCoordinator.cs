@@ -945,17 +945,13 @@ internal static partial class CombatSearchCoordinator
     }
 
     private static SolverResult? SolveOptionalPotionPosterior(
-        CombatBeamSolver solver,
+        Func<SolverResult> solve,
         SearchPolicySnapshot policy,
-        string diagnostic,
-        string? legacyPurpose = null,
-        string? legacyReason = null)
+        string diagnostic)
     {
         try
         {
-            return legacyReason is null
-                ? solver.Solve()
-                : FlashLegacyLog.Run(policy, legacyPurpose!, legacyReason, solver.Solve);
+            return solve();
         }
         catch (PotionPolicyUnsatisfiedException)
         {

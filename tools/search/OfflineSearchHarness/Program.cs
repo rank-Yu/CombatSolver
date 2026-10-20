@@ -463,6 +463,7 @@ internal sealed record HarnessOptions
           --base-score-tactical-ties  实验：基础分成员的单进展值同分截线使用既有战术顺序
           --reallocated-refinement / --disable-reallocated-refinement  显式覆盖默认组合再分配
           --adaptive-novelty  实验：原Beam组合完成后，以实际工作量的至多1/8追加结构探索
+          --novelty-portfolio  实验：先跑新颖度探索，再把剩余预算交给 Beam
           --observe-portfolio    导出追加搜索的特征与实际政策标签
           --portfolio-model <p>  加载可选选择器 JSON；不匹配的版本回退原组合
           --milestone <M1|M2>    跑到哪个里程碑（默认 M2）
@@ -524,6 +525,7 @@ internal sealed record HarnessOptions
     public bool ContinuousThreatRanking { get; init; }
     public bool BaseScoreTacticalTies { get; init; }
     public bool AdaptiveNoveltyRefinement { get; init; }
+    public bool NoveltyPortfolio { get; init; }
     public bool? ReallocatedRefinementPortfolio { get; init; }
     public BeamWeightPerturbation? BeamWeightPerturbation { get; init; }
     public bool OffensiveRefinementPortfolio { get; init; }
@@ -557,6 +559,7 @@ internal sealed record HarnessOptions
         bool continuousThreatRanking = false;
         bool baseScoreTacticalTies = false;
         bool adaptiveNoveltyRefinement = false;
+        bool noveltyPortfolio = false;
         bool? reallocatedRefinementPortfolio = null;
         BeamWeightPerturbation? beamWeightPerturbation = null;
         bool offensiveRefinementPortfolio = false;
@@ -638,6 +641,7 @@ internal sealed record HarnessOptions
                 case "--reallocated-refinement": reallocatedRefinementPortfolio = true; break;
                 case "--disable-reallocated-refinement": reallocatedRefinementPortfolio = false; break;
                 case "--adaptive-novelty": adaptiveNoveltyRefinement = true; break;
+                case "--novelty-portfolio": noveltyPortfolio = true; break;
                 case "--stop-portfolio-at-hp-target": stopPortfolioAtHpTarget = true; break;
                 case "--disable-portfolio-hp-target-stop": stopPortfolioAtHpTarget = false; break;
                 case "--observe-portfolio": observePortfolio = true; break;
@@ -675,6 +679,8 @@ internal sealed record HarnessOptions
             throw new ArgumentException("--reallocated-refinement 不能叠加显式成员列表消融或精炼实验。");
         if (adaptiveNoveltyRefinement && (searchMode != "Coordinator" || !usePortfolio))
             throw new ArgumentException("--adaptive-novelty 需要 Coordinator --use-portfolio。");
+        if (noveltyPortfolio && (searchMode != "Coordinator" || !usePortfolio))
+            throw new ArgumentException("--novelty-portfolio 需要 Coordinator --use-portfolio。");
         if (beamWeightPerturbation != null && (continuousThreatRanking || rankingModelPath != null || ordering != "baseline"))
             throw new ArgumentException("--beam-weight 必须单独测量，不叠加其他排序实验。");
         if (offensiveRefinementPortfolio && (!usePortfolio || searchMode != "Coordinator"
@@ -765,6 +771,7 @@ internal sealed record HarnessOptions
             ContinuousThreatRanking = continuousThreatRanking,
             BaseScoreTacticalTies = baseScoreTacticalTies,
             AdaptiveNoveltyRefinement = adaptiveNoveltyRefinement,
+            NoveltyPortfolio = noveltyPortfolio,
             ReallocatedRefinementPortfolio = reallocatedRefinementPortfolio,
             BeamWeightPerturbation = beamWeightPerturbation,
             OffensiveRefinementPortfolio = offensiveRefinementPortfolio,

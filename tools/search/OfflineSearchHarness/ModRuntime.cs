@@ -133,7 +133,7 @@ internal static class ModRuntime
             EnableNoGcRegion = options.EnableNoGcRegion,
             NoGcRegionBudgetGigabytes = options.NoGcRegionBudgetGigabytes,
             UseBeamWidthPortfolio = options.UsePortfolio,
-            UseNoveltyPortfolio = options.AdaptiveNoveltyRefinement,
+            UseNoveltyPortfolio = options.NoveltyPortfolio || options.AdaptiveNoveltyRefinement,
             StopAtAcceptableBattleHpLoss = options.StopAtZeroLoss,
             OnlineStatisticsEnabled = false,
             SearchCompletionNotificationsEnabled = false,

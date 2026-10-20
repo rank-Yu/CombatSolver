@@ -78,6 +78,14 @@ internal static class FlashRouteMaterializer
         Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null)
     {
         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+        SearchRequestWorkTotals? workTotals = policy.RequestWorkTotals;
+        bool recordFlashWork = workTotals != null
+            && (policy.UseNoveltyPortfolio || purpose == DirectSearchPurpose.EarlyTurnScout);
+        long allocatedAtStart = GC.GetAllocatedBytesForCurrentThread();
+        int gen0AtStart = GC.CollectionCount(0);
+        int gen1AtStart = GC.CollectionCount(1);
+        int gen2AtStart = GC.CollectionCount(2);
+        TimeSpan gcPauseAtStart = GC.GetTotalPauseDuration();
         Player player = root.PlayerIdentity;
         IReadOnlyList<PlanAction> prefix = fixedPrefixActions ?? [];
         int prefixLength = prefix.Count;
@@ -120,7 +128,9 @@ internal static class FlashRouteMaterializer
         // The existing final ordering's potion filter is the target for every request that carries a
         // potion bound, baseline, forced directive or an at-least-one policy. Requests without one keep
         // the prior route key so the adoption decisions they already passed do not move.
-        bool auditPotionPolicy = purpose == DirectSearchPurpose.SmartPotionGradient
+        bool noveltyRequest = policy.NoveltySearch != null;
+        bool auditPotionPolicy = noveltyRequest
+            || purpose == DirectSearchPurpose.SmartPotionGradient
             || continuationPurpose == ContinuationPurpose.SmartOpeningPotionPosterior
             || (continuationPurpose != null
                 && (potionPolicyOverride ?? pruning.EffectivePotionPolicy) == SolverPotionPolicy.Smart)
@@ -302,6 +312,7 @@ internal static class FlashRouteMaterializer
             AggressivePowerCommitment = profile.AggressivePowerCommitment,
             PreserveReplayAllocatorOpening = root.HasUnusedCardReplayAllocator,
             PowerCommitments = powerCommitments,
+            Novelty = policy.NoveltySearch is { } novelty ? FlashNoveltyOptions.From(novelty) : null,
         };
         // The offensive-reserved lane is a Flash-specific diversity seat (the existing RankBest has
         // no such lane). Short searches rely on it to keep aggressive lines; the production Medium
@@ -314,6 +325,25 @@ internal static class FlashRouteMaterializer
                     : 0d,
         };
         FlashBeamResult search = new FlashBeamSolver(rules, options).Solve(battles, cancellationToken);
+        if (progressCallback != null && noveltyRequest)
+        {
+            // The novelty search reports one progress checkpoint before materialization. The
+            // coordinator's enriched callback needs a prior checkpoint to publish its route seed and
+            // current-turn preview after the complete-victory interim result arrives.
+            progressCallback(new SolverProgress(
+                root.StartTurnNumber,
+                root.StartTurnNumber + search.TurnsSearched,
+                search.TurnsSearched,
+                0,
+                search.ExpandedNodes,
+                search.Transitions,
+                profile.MaxExpandedNodes,
+                0,
+                0,
+                (long)search.Elapsed.TotalMilliseconds,
+                "Flash novelty",
+                RequestBudgetMilliseconds: profile.SoftTimeBudgetMilliseconds));
+        }
         if (!search.PotionPolicySatisfied)
         {
             return new FlashSolveOutcome(null, FlashRejection.None,
@@ -373,9 +403,16 @@ internal static class FlashRouteMaterializer
             SoftTimeBudgetMilliseconds = Math.Max(1, Math.Min(profile.SoftTimeBudgetMilliseconds, 2_000)),
         };
         SolverResult result;
+        // The novelty policy is the Flash search's own scheduler. The materializer must not run it a
+        // second time on the fixed-prefix plan: it only replays and packages the selected route.
+        SearchPolicySnapshot materializePolicy = policy;
+        if (noveltyRequest)
+            materializePolicy = materializePolicy with { NoveltySearch = null };
+        if (recordFlashWork)
+            materializePolicy = materializePolicy with { RequestWorkTotals = null };
         try
         {
-            result = new CombatBeamSolver(root, displayNames, battleDamage, policy, cancellationToken,
+            result = new CombatBeamSolver(root, displayNames, battleDamage, materializePolicy, cancellationToken,
                 progressCallback, materializeProfile, potionPolicyOverride: potionPolicyOverride,
                 potionFreePolicyBaseline: potionFreePolicyBaseline,
                 maximumPotionUses: maximumPotionUses,
@@ -421,6 +458,8 @@ internal static class FlashRouteMaterializer
             || potionPolicyOverride != null
             || earliestPotionTurn != null
             || enforceForcedPotionDirectives && policy.PotionStrategy.HasForcedDirectives;
+        if (search.NoveltyTelemetry is { } noveltyTelemetry)
+            result.NoveltySearch = noveltyTelemetry;
         if (verifyPotion
             && FlashPotionBridge.VerifyRoute(result, policy, enforceForcedPotionDirectives,
                 root.HasRenewablePotionShapedRock, minimumPotionUses, maximumPotionUses,
@@ -431,6 +470,21 @@ internal static class FlashRouteMaterializer
             {
                 ConstraintFailure = failure,
             };
+        }
+        if (recordFlashWork)
+        {
+            workTotals!.Record(new SearchSolverWorkContribution(
+                search.ExpandedNodes,
+                search.Transitions,
+                0,
+                search.Elapsed,
+                Math.Max(0, GC.GetAllocatedBytesForCurrentThread() - allocatedAtStart),
+                Math.Max(0, GC.CollectionCount(0) - gen0AtStart),
+                Math.Max(0, GC.CollectionCount(1) - gen1AtStart),
+                Math.Max(0, GC.CollectionCount(2) - gen2AtStart),
+                MaxZero(GC.GetTotalPauseDuration() - gcPauseAtStart),
+                TimeSpan.Zero),
+                directSearchPurpose: purpose);
         }
         // Publish the scout frontier only after the whole Flash attempt, including materialization,
         // succeeded. A later failure falls back to the existing solver, whose observer must be the only
@@ -576,6 +630,8 @@ internal static class FlashRouteMaterializer
             snapshot.ReleaseSimulator();
         }
     }
+
+    private static TimeSpan MaxZero(TimeSpan value) => value < TimeSpan.Zero ? TimeSpan.Zero : value;
 
     private static int CountAmbergrisUses(IReadOnlyList<PlanAction> prefix)
     {
