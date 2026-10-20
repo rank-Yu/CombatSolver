@@ -28,6 +28,19 @@ internal sealed partial class CombatBeamSolver
     }
 
     /// <summary>
+    /// The existing <c>PlanCommitment.CountRealizedPayoffs</c> over the solver's fixed prefix, for the
+    /// Flash plan-payoff initial count. The prefix nodes carry actions and snapshots but no power
+    /// commitments, exactly as in the existing search's fixed-prefix path.
+    /// </summary>
+    internal int ReplayFixedPrefixPlanPayoffForFlash(PlanCommitment plan)
+    {
+        SimulationSnapshot rootSnapshot = Replay([]);
+        SearchNode seed = CreateOpeningSearchSeed(rootSnapshot);
+        SearchNode? node = ApplyFixedPrefix(seed);
+        return node == null ? 0 : plan.CountRealizedPayoffs(node);
+    }
+
+    /// <summary>
     /// The existing search's potion constraints at <paramref name="root"/>, as plain values for the Flash
     /// search: per slot whether an explicit use is offered (<see cref="PotionOnUseSupport.CanSearch"/> and
     /// <see cref="AllowsPotionUse"/>) and its strategic HP cost, the earliest search turn

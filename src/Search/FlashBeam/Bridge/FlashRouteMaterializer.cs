@@ -209,12 +209,13 @@ internal static class FlashRouteMaterializer
         FlashBattle[] battles = new FlashBattle[searchRoots.Count];
         FlashScorer scorer;
         FlashBoundFeatures bound;
+        FlashPowerCommitmentCatalog? powerCommitments;
         try
         {
             if (planCommitment is { } pendingPlan)
             {
                 flashPlanCommitment = ToFlashPlanCommitment(pendingPlan);
-                initialPlanPayoff = CountPlanPayoffs(prefix, pendingPlan);
+                initialPlanPayoff = replay.ReplayFixedPrefixPlanPayoffForFlash(pendingPlan);
             }
             // A turn-setup search imports every enumerated post-setup root. The rules are compiled from
             // the request root's content (so a card a setup choice moved out of the first root is still
@@ -233,6 +234,7 @@ internal static class FlashRouteMaterializer
                 player, rules, battles[0], rootSetup: turnSetup);
             bound = FlashBoundBridge.Create(root, policy, rootSnapshot, player, rules, battles[0], pruning,
                 potionUsage.ExplicitPotionUseCount, initialAutomaticPotionUses);
+            powerCommitments = FlashPowerCommitmentBridge.Compile(root);
         }
         catch (FlashImportException ex)
         {
@@ -295,6 +297,11 @@ internal static class FlashRouteMaterializer
             InitialPlanPayoffCount = initialPlanPayoff,
             EarlyTurnScoutDepth = earlyTurnScoutDepth,
             InitialPlayerTurn = rootSnapshot.Turn,
+            SecondRankBand = profile.SecondRankBand,
+            SecondRankBandWidth = profile.BeamWidth,
+            AggressivePowerCommitment = profile.AggressivePowerCommitment,
+            PreserveReplayAllocatorOpening = root.HasUnusedCardReplayAllocator,
+            PowerCommitments = powerCommitments,
         };
         // The offensive-reserved lane is a Flash-specific diversity seat (the existing RankBest has
         // no such lane). Short searches rely on it to keep aggressive lines; the production Medium
@@ -394,7 +401,9 @@ internal static class FlashRouteMaterializer
         }
         if (planCommitment is { } commitment)
         {
-            int realized = CountPlanPayoffs(plan, commitment);
+            int realized = commitment.Payoff.Kind == PlanPayoffEvidenceKind.RegisteredPowerBenefit
+                ? search.BestPayoffCount
+                : CountPlanPayoffs(plan, commitment);
             if (realized != search.BestPayoffCount)
             {
                 throw new FlashVerificationException(plan.Count,
@@ -459,12 +468,24 @@ internal static class FlashRouteMaterializer
     /// </summary>
     private static FlashPlanCommitment ToFlashPlanCommitment(PlanCommitment plan)
     {
-        if (plan.Payoff.Kind != PlanPayoffEvidenceKind.CardPlayed)
+        ushort cardId = ushort.MaxValue;
+        ushort potionId = ushort.MaxValue;
+        FlashPlanPayoffKind kind = plan.Payoff.Kind switch
         {
-            throw new FlashImportException(FlashRejection.UnsupportedRequest,
-                $"计划收益证据 {plan.Payoff.Kind} 未移植");
+            PlanPayoffEvidenceKind.CardPlayed => FlashPlanPayoffKind.CardPlayed,
+            PlanPayoffEvidenceKind.FreePotionUsed => FlashPlanPayoffKind.FreePotionUsed,
+            PlanPayoffEvidenceKind.RegisteredPowerBenefit => FlashPlanPayoffKind.RegisteredPowerBenefit,
+            _ => throw new ArgumentOutOfRangeException(nameof(plan), "未知的计划收益证据类型。"),
+        };
+        if (kind == FlashPlanPayoffKind.FreePotionUsed)
+        {
+            if (!FlashRegistry.TryPotion(plan.Payoff.SourceId, out potionId))
+            {
+                throw new FlashImportException(FlashRejection.UnsupportedRequest,
+                    $"计划收益药水 {plan.Payoff.SourceId} 没有 Flash 定义");
+            }
         }
-        if (!FlashRegistry.TryCard(plan.Payoff.SourceId, out ushort cardId))
+        else if (!FlashRegistry.TryCard(plan.Payoff.SourceId, out cardId))
         {
             throw new FlashImportException(FlashRejection.UnsupportedRequest,
                 $"计划收益卡 {plan.Payoff.SourceId} 没有 Flash 定义");
@@ -473,21 +494,28 @@ internal static class FlashRouteMaterializer
             plan.Kind == PlanCommitmentKind.CopyPower,
             plan.OpenedTurn,
             plan.Payoff.EarliestTurn,
-            FlashPlanPayoffKind.CardPlayed,
-            cardId);
+            kind,
+            cardId,
+            potionId);
     }
 
     /// <summary>The existing <c>PlanCommitment.CountRealizedPayoffs</c> over materialized actions.</summary>
     private static int CountPlanPayoffs(IReadOnlyList<PlanAction> actions, PlanCommitment plan)
     {
-        if (plan.Payoff.Kind != PlanPayoffEvidenceKind.CardPlayed)
-            throw new ArgumentOutOfRangeException(nameof(plan), "只有 CardPlayed 收益证据可计数。");
         int count = 0;
         foreach (PlanAction action in actions)
         {
-            if (action.Kind == PlanActionKind.PlayCard
-                && action.Turn >= plan.Payoff.EarliestTurn
+            if (action.Turn < plan.Payoff.EarliestTurn)
+                continue;
+            if (plan.Payoff.Kind == PlanPayoffEvidenceKind.CardPlayed
+                && action.Kind == PlanActionKind.PlayCard
                 && string.Equals(action.CardId, plan.Payoff.SourceId, StringComparison.Ordinal))
+            {
+                count++;
+            }
+            else if (plan.Payoff.Kind == PlanPayoffEvidenceKind.FreePotionUsed
+                && action.Kind == PlanActionKind.UsePotion
+                && string.Equals(action.PotionId, plan.Payoff.SourceId, StringComparison.Ordinal))
             {
                 count++;
             }

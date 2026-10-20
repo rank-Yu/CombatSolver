@@ -103,31 +103,15 @@ internal static partial class CombatSearchCoordinator
                     BaseScoreOnly = variant == 2,
                     AggressivePowerCommitment = variant == 0,
                 };
-                SolverResult discovery;
-                if (variant == 2)
+                // All three retention variants are ported: the band layout, the base-score
+                // intermediate rank and the aggressive power-commitment lane.
+                SolverResult discovery = BeamSolveDispatch.Solve(new BeamSolveRequest(root,
+                    displayNames, battleDamage, policy, cancellationToken, progressCallback,
+                    discoveryProfile, SolverPotionPolicy.Disabled, PrimaryIncumbent: null,
+                    DirectSearchPurpose.TurnBoundaryDiscovery)
                 {
-                    // BaseScoreOnly is ported by Flash; the other two variants need the existing
-                    // retention structures and stay on the legacy search with an explicit reason.
-                    discovery = BeamSolveDispatch.Solve(new BeamSolveRequest(root, displayNames,
-                        battleDamage, policy, cancellationToken, progressCallback,
-                        discoveryProfile, SolverPotionPolicy.Disabled, PrimaryIncumbent: null,
-                        DirectSearchPurpose.TurnBoundaryDiscovery)
-                    {
-                        MaximumPotionUses = 0,
-                    });
-                }
-                else
-                {
-                    string unsupported = variant == 0
-                        ? "aggressive-power-commitment" : "second-rank-band";
-                    discovery = FlashLegacyLog.Run(policy, "TurnBoundaryDiscovery",
-                        $"direct:turn-boundary-discovery:{unsupported}",
-                        () => new CombatBeamSolver(root, displayNames, battleDamage, policy,
-                            cancellationToken, progressCallback, discoveryProfile,
-                            potionPolicyOverride: SolverPotionPolicy.Disabled,
-                            maximumPotionUses: 0,
-                            directSearchPurpose: DirectSearchPurpose.TurnBoundaryDiscovery).Solve());
-                }
+                    MaximumPotionUses = 0,
+                });
                 PlanAction[] opening = discovery.BestNode.Actions
                     .TakeWhile(action => action.Turn == root.StartTurnNumber)
                     .ToArray();

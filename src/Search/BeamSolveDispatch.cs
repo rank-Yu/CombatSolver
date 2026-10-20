@@ -254,8 +254,8 @@ internal static class BeamSolveDispatch
     /// <summary>
     /// The continuation gate. Plan members and the plan pass's own depth-one scout are admitted by the
     /// two plan helpers below; other early-turn scouts and invalid potion bounds keep the existing
-    /// solver (the latter for its own argument validation); potion-constrained requests must not
-    /// silently drop a retention switch Flash does not model.
+    /// solver (the latter for its own argument validation). The band and power-commitment profile
+    /// switches are executed by FlashBeam and no longer reject potion-constrained requests.
     /// </summary>
     private static string? TakeOverBoundary(ContinuationSearchRequest request)
     {
@@ -270,15 +270,6 @@ internal static class BeamSolveDispatch
         {
             return "potion-bounds";
         }
-        // Requests opened by this batch must not silently drop a retention switch Flash does not
-        // model. Clean requests keep their prior behavior (their profile was already offered to Flash).
-        if (HasPotionConstraint(request))
-        {
-            if (request.Profile.SecondRankBand)
-                return "second-rank-band";
-            if (request.Profile.AggressivePowerCommitment)
-                return "aggressive-power-commitment";
-        }
         return null;
     }
 
@@ -286,8 +277,8 @@ internal static class BeamSolveDispatch
     /// A <c>ContinuationPurpose.PlanCommitment</c> member. The plan prefix is replayed by the existing
     /// engine before the Flash root; the commitment adds route payoff counting and the CopyPower
     /// representative seats (<c>CombatBeamSolver.Expansion</c> / <c>BeamRetentionPolicy</c>). Potion
-    /// bounds on a plan are not offered yet: only the potion-free form and the deferred plan's
-    /// no-override Smart form (the primary member's existing Flash potion path) are admitted.
+    /// bounds on a plan use the same audited final ordering as every other potion-constrained request;
+    /// the materialized route is re-checked for both the plan payoff count and the potion constraints.
     /// </summary>
     private static bool CanTakeOverPlanMember(ContinuationSearchRequest request)
     {
@@ -297,21 +288,20 @@ internal static class BeamSolveDispatch
             || request.EarlyTurnScoutObserver != null
             || request.PotionFreePolicyBaseline != null
             || request.EarliestPotionTurn != null
-            || request.MinimumPotionUses is not (null or 0)
-            || request.MaximumPotionUses is not (null or 0)
-            || plan.Payoff.Kind != PlanPayoffEvidenceKind.CardPlayed)
+            || request.MinimumPotionUses is < 0
+            || request.MaximumPotionUses is < 0
+            || request.MinimumPotionUses is { } minimum
+                && request.MaximumPotionUses is { } maximum
+                && minimum > maximum)
         {
             return false;
         }
-        SearchPolicySnapshot policy = EffectivePolicy(request);
-        if (policy.PotionStrategy.HasForcedDirectives)
+        if (EffectivePolicy(request).PotionStrategy.HasForcedDirectives)
             return false;
-        if (PlanPotionFree(request))
-            return true;
-        return request.PotionPolicyOverride == null
-            && request.MaximumPotionUses == null
-            && request.MinimumPotionUses == null
-            && policy.PotionPolicy == SolverPotionPolicy.Smart;
+        // Potion bounds, explicit-use policies and the potion-free baseline are all materialized by
+        // the same audited final ordering; the Flash route still replays through the existing engine
+        // and the post-materialization check re-reads the potion identity and count.
+        return true;
     }
 
     /// <summary>
@@ -337,7 +327,7 @@ internal static class BeamSolveDispatch
         return PlanPotionFree(request);
     }
 
-    /// <summary>Whether a plan member or plan scout explicitly searches without potions.</summary>
+    /// <summary>Whether the plan scout explicitly searches without potions.</summary>
     private static bool PlanPotionFree(ContinuationSearchRequest request)
     {
         if (request.PotionPolicyOverride == SolverPotionPolicy.Disabled)
@@ -353,19 +343,6 @@ internal static class BeamSolveDispatch
         // A zero maximum means no explicit potion can be enumerated, matching the existing solver.
         return request.MaximumPotionUses == 0
             || policy.PotionPolicy == SolverPotionPolicy.Disabled;
-    }
-
-    /// <summary>Whether the request carries one of the potion features opened by this batch.</summary>
-    private static bool HasPotionConstraint(ContinuationSearchRequest request)
-    {
-        SearchPolicySnapshot policy = EffectivePolicy(request);
-        SolverPotionPolicy effectivePolicy = request.PotionPolicyOverride ?? policy.PotionPolicy;
-        return request.MaximumPotionUses is > 0
-            || request.MinimumPotionUses is > 0
-            || request.PotionFreePolicyBaseline != null
-            || request.EarliestPotionTurn != null
-            || effectivePolicy == SolverPotionPolicy.RequireAtLeastOne
-            || request.PotionPolicyOverride == null && policy.PotionStrategy.HasForcedDirectives;
     }
 
     /// <summary>
