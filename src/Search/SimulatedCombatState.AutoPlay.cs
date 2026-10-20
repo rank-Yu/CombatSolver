@@ -142,6 +142,14 @@ internal sealed partial class SimulatedCombatState
         return !HasPendingChoice;
     }
 
+    /// <summary>
+    /// The live last attack completed this player turn (<c>_lastAttackThisTurn</c>), or null. The
+    /// previous-turn dictionary is not exposed: every stable search root is after AutoPrePlay, where the
+    /// registry no longer reads that value (it is replaced by CommitHistoryCourseTurn at turn end).
+    /// </summary>
+    public PredictedCard? LastAttackThisTurnForFlash(Player player)
+        => _lastAttackThisTurn?.GetValueOrDefault(player);
+
     private PredictedCard? GetPreviousTurnAttack(CombatPredictionSimulator simulator, Player player)
     {
         if (_rootMaterialized)

@@ -25,7 +25,8 @@ internal static class FlashDifferentialProbe
     private const int OneStepChoiceCap = 64;
 
     public static Dictionary<string, object?> Run(CombatState combat, HarnessOptions options, string outputDirectory,
-        IReadOnlyList<string>? prefixActions = null, CapturedTurnSetupRoot? turnSetupRoot = null)
+        IReadOnlyList<string>? prefixActions = null, CapturedTurnSetupRoot? turnSetupRoot = null,
+        IReadOnlyList<PlanAction>? prefixPlanOverride = null)
     {
         int walks = ReadInt("OFFLINE_HARNESS_FLASH_DIFF_WALKS", 16);
         int steps = ReadInt("OFFLINE_HARNESS_FLASH_DIFF_STEPS", 60);
@@ -49,14 +50,32 @@ internal static class FlashDifferentialProbe
                 BeamWeightPerturbation = options.BeamWeightPerturbation,
             },
         };
-        List<PlanAction> prefixPlan = [];
-        if (prefixActions is { Count: > 0 })
+        List<PlanAction> prefixPlan = prefixPlanOverride is { Count: > 0 }
+            ? [.. prefixPlanOverride]
+            : [];
+        if (prefixPlan.Count > 0)
         {
+            prefixActions = prefixPlan.Select(static action =>
+                $"{action.Kind}:{action.CardId}:turn{action.Turn}").ToArray();
+        }
+        else if (prefixActions is { Count: > 0 })
+        {
+            int prefixTurn = 1;
             foreach (string action in prefixActions)
             {
-                if (action != "EndTurn")
-                    throw new InvalidOperationException($"FlashPrefixActions 只支持 EndTurn，收到 {action}。");
-                prefixPlan.Add(new PlanAction(PlanActionKind.EndTurn, Turn: 1));
+                if (action == "EndTurn")
+                {
+                    prefixPlan.Add(new PlanAction(PlanActionKind.EndTurn, Turn: prefixTurn));
+                    prefixTurn++;
+                    continue;
+                }
+                // PlayCard:<cardId>:<occurrence>[:<targetCombatId>] on the current prefix turn.
+                string[] parts = action.Split(':');
+                if (parts.Length is < 3 or > 4 || parts[0] != "PlayCard")
+                    throw new InvalidOperationException($"FlashPrefixActions 不支持 {action}。");
+                uint? target = parts.Length == 4 ? uint.Parse(parts[3]) : null;
+                prefixPlan.Add(new PlanAction(PlanActionKind.PlayCard, Turn: prefixTurn, CardId: parts[1],
+                    CardOccurrence: int.Parse(parts[2]), TargetCombatId: target));
             }
         }
         if (policy.IncludeTurnSetup && prefixPlan.Count > 0)
@@ -401,7 +420,10 @@ internal static class FlashDifferentialProbe
 
         public void Check(SimulationSnapshot old, in FlashBattle flash, int actionCount, string label)
         {
-            if (old.BoundaryReason != SearchBoundaryReason.None)
+            // EventDefeat is a compared terminal state: the existing evaluation still produces its
+            // threat projection as (current HP, no death saves), and the Flash scorer mirrors that.
+            // Other boundaries keep the pre-existing skip (their snapshots also skip projections).
+            if (old.BoundaryReason is not (SearchBoundaryReason.None or SearchBoundaryReason.EventDefeat))
             {
                 SkippedBoundary++;
                 return;

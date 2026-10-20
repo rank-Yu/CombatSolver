@@ -341,8 +341,10 @@ internal sealed partial class SimulatedCombatState
         // (FlashStateProjections.ProjectPower). An entry can outlive the power when the owner dies and
         // its powers are cleared, but no reader calls GetTenderCardsPlayed without a positive
         // TenderPower, so a retired entry is inert.
-        if (_battlewornDummyTimedOut)
-            return nameof(_battlewornDummyTimedOut);
+        // _battlewornDummyTimedOut is projected as FlashOutcome.EventDefeat by the importer: the
+        // existing engine sets it immediately before returning SearchBoundaryReason.EventDefeat, so a
+        // state carrying the flag is exactly that boundary. The importer rejects a flag without the
+        // EventDefeat boundary explicitly (a protocol error): see FlashStateImporter.Import.
         return null;
     }
 

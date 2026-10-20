@@ -21,11 +21,11 @@ internal static class FlashStateImporter
     public static FlashBattle Import(SimulationSnapshot snapshot, Player player, FlashRules rules,
         int skippedPotionUses, bool requirePlayPhase = false)
         => Import(snapshot.Simulator, player, rules, snapshot.ShufflesCrossed, snapshot.ProcessedEnemyDeaths,
-            snapshot.HasRisk, skippedPotionUses, requirePlayPhase);
+            snapshot.HasRisk, skippedPotionUses, requirePlayPhase, snapshot.BoundaryReason);
 
     public static FlashBattle Import(CombatPredictionSimulator simulator, Player player, FlashRules rules,
         int shufflesCrossed, IReadOnlySet<uint> processedDeaths, bool hasRisk, int skippedPotionUses,
-        bool requirePlayPhase = false)
+        bool requirePlayPhase = false, SearchBoundaryReason boundary = SearchBoundaryReason.None)
     {
         // The existing engine's per-turn counter getters fill their caches from root history on first
         // read. Reading a private fork keeps the caller's state, which other workers may fork, untouched.
@@ -47,6 +47,13 @@ internal static class FlashStateImporter
             throw new FlashImportException(FlashRejection.PendingChoice, "模拟器有待处理选择");
         if (combat.DescribeFlashUnrepresentableState() is { } unrepresentable)
             throw new FlashImportException(FlashRejection.UnrepresentableState, unrepresentable);
+        // The dummy timeout flag has exactly one represented value: the EventDefeat boundary. A flag
+        // with any other boundary means the caller lost the search boundary or the state is inconsistent.
+        if (combat.BattlewornDummyTimedOut && boundary != SearchBoundaryReason.EventDefeat)
+        {
+            throw new FlashImportException(FlashRejection.UnrepresentableState,
+                "战损假人已超时但导入边界不是 EventDefeat");
+        }
         FlashStateProjections projections = new(simulator.StateStore, simulator.State, combat);
 
         FlashBattle battle = default;
@@ -61,9 +68,13 @@ internal static class FlashStateImporter
         battle.Gold = combat.GetPlayerGold(player);
         battle.Side = (FlashSide)(byte)combat.CurrentSide;
         battle.Phase = (FlashPlayerPhase)(byte)playerState.Phase;
-        battle.Outcome = simulator.TerminalStamp is not { } stamp
-            ? FlashOutcome.None
-            : stamp.Outcome == CombatTerminalOutcome.Victory ? FlashOutcome.Victory : FlashOutcome.Defeat;
+        // EventDefeat is not a TerminalStamp in the existing engine: it is a search boundary recorded
+        // after the dummy's time limit expires while the combat is still in progress.
+        battle.Outcome = boundary == SearchBoundaryReason.EventDefeat
+            ? FlashOutcome.EventDefeat
+            : simulator.TerminalStamp is not { } stamp
+                ? FlashOutcome.None
+                : stamp.Outcome == CombatTerminalOutcome.Victory ? FlashOutcome.Victory : FlashOutcome.Defeat;
         if (simulator.IsAboutToLose)
             battle.Flags |= FlashBattleFlags.PendingLoss;
         if (playerState.HooksActive)
@@ -97,6 +108,7 @@ internal static class FlashStateImporter
         IReadOnlyList<Creature> known = combat.KnownEnemies;
         ImportEnemies(ref battle, simulator, combat, player, known, rules, processedDeaths, projections);
         ImportPowers(ref battle, combat, player, known, osty, projections, rules);
+        ImportHistoryCourse(ref battle, combat, player, rules);
         ImportCards(ref battle, combat, playerState, rules);
         RejectRunListenerDeckCards(player);
         ImportRelics(ref battle, combat, player, projections);
@@ -533,6 +545,53 @@ internal static class FlashStateImporter
             if ((def.Hooks & FlashHookMask.RunListenerHooks) != 0 && !def.DeckCopyOutsideCombatIsInert)
                 throw new FlashImportException(FlashRejection.UnsupportedCard, $"牌组卡 {card.Id.Entry} 带有局外监听 Hook");
         }
+    }
+
+    /// <summary>
+    /// The HistoryCourse cross-turn slot: <c>SimulatedCombatState._lastAttackThisTurn</c> projected as
+    /// one full card value. The retired previous-turn dictionary is deliberately not read: AutoPrePlay
+    /// consumes it before every supported root (Play phase or the post-setup Play root), and the kernel
+    /// clears it when it consumes the slot. Called before <see cref="ImportCards"/> so the decimal-var
+    /// canonicalization order is detached cards, this slot, then the card storage order.
+    /// </summary>
+    private static void ImportHistoryCourse(ref FlashBattle battle, SimulatedCombatState combat,
+        Player player, FlashRules rules)
+    {
+        if (!rules.HasHistoryCourse)
+            return;
+        if (combat.LastAttackThisTurnForFlash(player) is not { } last)
+            return;
+        if (last.Preview.IsDupe)
+        {
+            throw new FlashImportException(FlashRejection.UnrepresentableState,
+                $"HistoryCourse 的上一张攻击是复制品 {last.Preview.Id.Entry}");
+        }
+        int dampenLevel = -1;
+        foreach ((PredictedCard card, int level) in combat.DampenOriginalUpgradesForFlash())
+        {
+            if (!ReferenceEquals(card, last))
+                continue;
+            dampenLevel = level;
+            break;
+        }
+        FlashCard value = Card(ref battle, last, rules, combat.IsRootCardForFlash(last),
+            dampenLevel);
+        if (last.Preview is MegaCrit.Sts2.Core.Models.Cards.SovereignBlade)
+        {
+            int? applied = combat.SwordSageAppliedForFlash(last);
+            if (applied == null)
+                throw new FlashImportException(FlashRejection.UnrepresentableState,
+                    $"SwordSage 账本缺少 HistoryCourse 的 {last.Preview.Id.Entry}");
+            value.Private = checked((short)applied.Value);
+        }
+        else if (combat.FetchPlayedThisTurnForFlash(last))
+        {
+            value.Private |= FlashKernel.FetchPlayedBit;
+        }
+        if (combat.PendingReturningCards.Any(card => ReferenceEquals(card, last)))
+            value.ReturnToHandNextTurn = true;
+        battle.HistoryCourseCard = value;
+        battle.Flags |= FlashBattleFlags.HistoryCourseCardPresent;
     }
 
     private static void ImportCards(ref FlashBattle battle, SimulatedCombatState combat,

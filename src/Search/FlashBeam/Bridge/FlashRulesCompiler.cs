@@ -115,13 +115,23 @@ internal static class FlashRulesCompiler
         }
         bool hasPaelsLegion = false;
         bool furCoatSpawnHpOne = false;
+        bool hasHistoryCourse = false;
+        sbyte penNibRelicIndex = -1;
+        int relicIndex = 0;
         foreach (RelicModel relic in contentCombat.RelicsOf(player))
         {
+            // ImportRelics writes every row in this same order, including melted relics; the Pen Nib
+            // index must therefore count them too.
+            int currentRelicIndex = relicIndex++;
             if (FlashRegistry.TryRelic(relic.Id.Entry, out ushort relicId))
                 hasIdentityContent |= FlashRegistry.Relic(relicId).MayGenerateIdentityContent
                     || FlashRegistry.Relic(relicId).IsIdentityContent;
             if (relic.IsMelted)
                 continue;
+            if (relic is HistoryCourse)
+                hasHistoryCourse = true;
+            if (relic is PenNib)
+                penNibRelicIndex = checked((sbyte)currentRelicIndex);
             if (FlashRegistry.TryRelic(relic.Id.Entry, out ushort relicRuleId)
                 && FlashRegistry.Relic(relicRuleId).IsPaelsLegion)
             {
@@ -139,6 +149,8 @@ internal static class FlashRulesCompiler
         builder.HasIdentityContent = hasIdentityContent;
         builder.HasPaelsLegion = hasPaelsLegion;
         builder.FurCoatSpawnHpOne = furCoatSpawnHpOne;
+        builder.HasHistoryCourse = hasHistoryCourse;
+        builder.PenNibRelicIndex = penNibRelicIndex;
         builder.HasTheftContent = HasTheftContent(contentCombat);
         foreach (string nativeId in PowerIdsWithVars())
             AddPowerVars(builder, nativeId);

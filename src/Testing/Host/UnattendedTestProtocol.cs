@@ -92,6 +92,13 @@ internal sealed class UnattendedTestRequest
     public string[] FlashPrefixActions { get; init; } = [];
 
     /// <summary>
+    /// Offline Flash differential probe only: a full plan prefix (the materialized route shape) that
+    /// the existing engine replays before K1/K2. Used to reach a deep root no random walk finds; each
+    /// action's choices must match the existing engine's replay exactly.
+    /// </summary>
+    public PlanAction[] FlashPrefixPlan { get; init; } = [];
+
+    /// <summary>
     /// Offline Flash differential probe only: capture the player/Start root before the native turn-setup
     /// page runs, and run the K1/K2/coordinator checks from it with <c>IncludeTurnSetup</c>. The test
     /// scenario must carry a turn-setup choice source (for example the TOASTY_MITTENS or CHOICES_PARADOX

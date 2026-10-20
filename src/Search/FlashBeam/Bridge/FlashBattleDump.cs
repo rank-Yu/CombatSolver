@@ -62,6 +62,8 @@ internal static class FlashBattleDump
             if (battle.DetachedCards[slot].Id != 0)
                 lines.Add($"Detached[{slot}]={Card(battle.DetachedCards[slot])}");
         }
+        if ((battle.Flags & FlashBattleFlags.HistoryCourseCardPresent) != 0)
+            lines.Add($"HistoryCourseCard={Card(battle.HistoryCourseCard)}");
         for (int index = 0; index < battle.RelicCount; index++)
             lines.Add($"Relic[{index}]={FlashRegistry.Relic(battle.Relics[index].Id).NativeId} flags={battle.Relics[index].Flags} counter={battle.Relics[index].Counter}");
         for (int slot = 0; slot < battle.PotionSlotCount; slot++)
