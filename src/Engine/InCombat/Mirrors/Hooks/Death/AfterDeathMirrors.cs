@@ -32,6 +32,14 @@ internal static class AfterDeathMirrors
         Registry.Invoke(listener, context);
     }
 
+    /// <summary>
+    /// Dispatch kind for one listener type. <c>Inferred</c> and <c>Unsupported</c> record a
+    /// prediction risk history entry on every death, even when the compensation path applies the
+    /// same state.
+    /// </summary>
+    internal static MirrorDispatchKind ResolveDispatchKind(AbstractModel listener)
+        => Registry.ResolveDispatchKind(listener);
+
     private static Registry CreateRegistry()
     {
         var registry = new Registry(AfterDeath);

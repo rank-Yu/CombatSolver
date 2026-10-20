@@ -1,5 +1,8 @@
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using CombatSolver.Engine.Common;
+using CombatSolver.Engine.Common.Mirrors;
+using CombatSolver.Engine.InCombat.Mirrors.Cards.OnPlay;
+using CombatSolver.Engine.InCombat.Mirrors.Hooks.Death;
 using CombatSolver.Engine.InCombat.Extensions;
 using CombatSolver.Engine.InCombat.Flash;
 using CombatSolver.Engine.InCombat.Simulation;
@@ -154,6 +157,18 @@ internal static class FlashRulesCompiler
         builder.HasTheftContent = HasTheftContent(contentCombat);
         foreach (string nativeId in PowerIdsWithVars())
             AddPowerVars(builder, nativeId);
+        // AfterDeath dispatch is per run hook listener; a power type whose dispatch is inferred or
+        // unsupported records a MethodNotMirrored history entry on every death while it is present.
+        // Freeze that fact per power id so the kernel's transient pure flag matches the existing
+        // engine's history entries.
+        for (ushort id = 0; id < FlashRegistry.PowerCount; id++)
+        {
+            string nativePower = FlashRegistry.Power(id).NativeId;
+            if (!CanonicalPowers.Value.TryGetValue(nativePower, out PowerModel? canonicalPower))
+                continue;
+            builder.SetPowerDeathHistoryRisk(id, AfterDeathMirrors.ResolveDispatchKind(canonicalPower)
+                is MirrorDispatchKind.Inferred or MirrorDispatchKind.Unsupported);
+        }
         for (ushort id = 0; id < FlashRegistry.PotionCount; id++)
             AddPotionStats(builder, id);
         for (ushort id = 0; id < FlashRegistry.RelicCount; id++)
@@ -379,6 +394,8 @@ internal static class FlashRulesCompiler
             IsSoul = copy.Id.Entry == "SOUL",
             IsColorless = copy.VisualCardPool.IsColorless,
             HasDynamicType = FlashRegistry.Card(CardId(canonical)).HasDynamicCardType,
+            PlaysRecordRisk = CardOnPlayMirrors.ResolveDispatchKind(copy)
+                is MirrorDispatchKind.Inferred or MirrorDispatchKind.Unsupported,
             Vars = vars,
         };
     }

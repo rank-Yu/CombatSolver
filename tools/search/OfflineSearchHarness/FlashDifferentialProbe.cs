@@ -231,7 +231,7 @@ internal static class FlashDifferentialProbe
                     else
                     {
                         traits.Check(rootSnapshot, outcome.OldChild!, flashRoot, outcome.FlashChild,
-                            completion.Action, $"K1 {rootLabel} {completion.Action}");
+                            completion.Action, $"K1 {rootLabel} {completion.Action}", completion.HistoryRisk);
                         scores.Check(outcome.OldChild!, outcome.FlashChild, 1,
                             $"K1 {rootLabel} {completion.Action} choices={Selections(completion.Action)}");
                     }
@@ -290,7 +290,7 @@ internal static class FlashDifferentialProbe
                         break;
                     }
                     traits.Check(snapshot, outcome.OldChild!, battle, outcome.FlashChild,
-                        completion.Action, $"K2 {rootLabel} seed={seed} step={step}");
+                        completion.Action, $"K2 {rootLabel} seed={seed} step={step}", completion.HistoryRisk);
                     scores.Check(outcome.OldChild!, outcome.FlashChild, 1,
                         $"K2 {rootLabel} seed={seed} step={step} path={string.Join(" > ", path)}");
                     snapshot = outcome.OldChild!;
@@ -339,6 +339,7 @@ internal static class FlashDifferentialProbe
             + $" traitChecked={traits.Checked} traitFailed={traits.Failed}"
             + $" pocketwatchChecked={traits.PocketwatchChecked} pocketwatchFailed={traits.PocketwatchFailed}"
             + $" declinedChecked={traits.DeclinedChecked} declinedFailed={traits.DeclinedFailed}"
+            + $" pureChecked={traits.PureChecked} pureRefMismatch={traits.PureReferenceMismatch}"
             + (policy.IncludeTurnSetup ? $" turnSetupRoots={searchRoots.Count}" : "")
             + $" unsupported={unsupported}");
         if (scores.FailedFields.Count > 0)
@@ -385,8 +386,12 @@ internal static class FlashDifferentialProbe
 
         public int DeclinedFailed { get; private set; }
 
+        public int PureChecked { get; private set; }
+
+        public int PureReferenceMismatch { get; private set; }
+
         public void Check(SimulationSnapshot before, SimulationSnapshot after, in FlashBattle beforeFlash,
-            in FlashBattle afterFlash, FlashAction action, string label)
+            in FlashBattle afterFlash, FlashAction action, string label, bool historyRisk = false)
         {
             if (after.BoundaryReason is not (SearchBoundaryReason.None or SearchBoundaryReason.EventDefeat)
                 || !before.HasSimulator)
@@ -408,19 +413,92 @@ internal static class FlashDifferentialProbe
             bool declinedExtraTurn = beforeCombat.RelicsOf(player)
                 .OfType<MegaCrit.Sts2.Core.Models.Relics.PaelsEye>()
                 .Any(relic => !relic.IsMelted && beforeCombat.IsPaelsEyeUnused(relic));
+            FlashScoreFeatures beforeFeatures = FlashScoreProjection.FromSnapshot(before);
+            FlashScoreFeatures afterFeatures = FlashScoreProjection.FromSnapshot(after);
+            bool flashPure = FlashBeamSolver.IsPureTransitionForTesting(
+                beforeFlash, afterFlash, action, rules, historyRisk);
             SearchRouteTraits reference = action.Kind switch
             {
+                // The history-derived `pure` includes state-dependent MethodNotMirrored risk that the
+                // Flash kernel only observes where its content annotates it; the classifier check uses
+                // the production pure input for both sides, and the raw difference is reported as a
+                // diagnostic (pureRefMismatch) instead of a field mismatch.
                 FlashActionKind.PlayCard => SearchProbeHelpers.ClassifyCardTraits(
-                    SearchRouteTraits.None, before, after, pure, declinedExtraTurn),
+                    SearchRouteTraits.None, before, after, flashPure, declinedExtraTurn),
                 FlashActionKind.UsePotion => SearchProbeHelpers.ClassifyPotionTraits(
                     SearchRouteTraits.None, before, after),
                 _ => SearchProbeHelpers.ClassifyRoundTransitionTraits(
                     SearchRouteTraits.None, before, after),
             };
-            FlashScoreFeatures beforeFeatures = FlashScoreProjection.FromSnapshot(before);
-            FlashScoreFeatures afterFeatures = FlashScoreProjection.FromSnapshot(after);
+            if (action.Kind == FlashActionKind.PlayCard)
+            {
+                PureChecked++;
+                if (flashPure != pure)
+                {
+                    PureReferenceMismatch++;
+                    if (PureReferenceMismatch <= 5)
+                    {
+                        string card = "-";
+                        if (before.HasSimulator)
+                        {
+                            SimPlayerCombatState handState =
+                                ((CombatPredictionSimulator)before.Simulator).State
+                                    .GetPlayerCombatState(player);
+                            if (action.HandIndex < handState.Hand.Cards.Count)
+                                card = handState.Hand.Cards[action.HandIndex].Preview.Id.Entry;
+                        }
+                        report.Add($"K4 PURE-REF DIFF {label} action={action} card={card} "
+                            + $"reference={pure} flash={flashPure}");
+                        if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_DEBUG") == "1")
+                        {
+                            List<string> nonPure = [];
+                            foreach (CombatPredictionHistoryEntry entry in
+                                     simulator.History.EntriesFrom(before.HistoryEntryCount))
+                            {
+                                if (SearchProbeHelpers.IsPureHistoryEntry(entry))
+                                    continue;
+                                string detail = entry.GetType().Name;
+                                if (entry is CombatPredictionRiskEntry risk)
+                                {
+                                    detail += ":" + risk.Reason;
+                                    if (risk.Trace != null)
+                                        detail += "#" + risk.Trace.Invocation.Method?.Name
+                                            + "@" + string.Join("/", risk.Trace.Ancestors()
+                                            .Select(frame => frame.Source.GetType().Name).Take(4));
+                                }
+                                nonPure.Add(detail);
+                            }
+                            report.Add("  NONPURE " + string.Join(",", nonPure));
+                            List<string> flashTags = [];
+                            if (action.HandIndex < beforeFlash.HandCount)
+                            {
+                                FlashCard playedCard = beforeFlash.Cards[action.HandIndex];
+                                if (rules.Card(playedCard.Id, playedCard.Upgrade).PlaysRecordRisk)
+                                    flashTags.Add("card-risk");
+                            }
+                            if (action.ChoiceCount > 0) flashTags.Add("choice");
+                            if (afterFlash.Counter(FlashCounter.CardsDrawn)
+                                != beforeFlash.Counter(FlashCounter.CardsDrawn)) flashTags.Add("drawn");
+                            if (afterFlash.Counter(FlashCounter.CardsGeneratedThisCombat)
+                                != beforeFlash.Counter(FlashCounter.CardsGeneratedThisCombat))
+                                flashTags.Add("generated-counter");
+                            if (afterFlash.CardCount > beforeFlash.CardCount) flashTags.Add("card-count");
+                            if (afterFlash.Counter(FlashCounter.OrbChannels)
+                                != beforeFlash.Counter(FlashCounter.OrbChannels)) flashTags.Add("orb");
+                            if (afterFlash.DrawCount < beforeFlash.DrawCount) flashTags.Add("draw-count");
+                            for (int i = 0; i < afterFlash.PotionSlotCount; i++)
+                            {
+                                if (afterFlash.Potions[i] != 0
+                                    && afterFlash.Potions[i] != beforeFlash.Potions[i])
+                                    flashTags.Add("potion");
+                            }
+                            report.Add("  FLASH TAGS " + string.Join(",", flashTags));
+                        }
+                    }
+                }
+            }
             SearchRouteTraits flash = FlashBeamSolver.ClassifyRouteTraitsForTesting(
-                beforeFeatures, afterFeatures, action, declinedExtraTurn, !pure);
+                beforeFeatures, afterFeatures, action, declinedExtraTurn, !flashPure);
             Checked++;
             if (reference != flash)
             {
@@ -678,23 +756,24 @@ internal static class FlashDifferentialProbe
 
     /// <summary>A fully specified action, the Flash requests it answered (with the partial battle at each request) and its result.</summary>
     private sealed record Completion(FlashAction Action, List<(FlashChoiceRequest Request, FlashBattle Partial)> Requests,
-        FlashBattle Child, bool DeadEnd);
+        FlashBattle Child, bool DeadEnd, bool HistoryRisk);
 
     /// <summary>Every choice completion of <paramref name="action"/>; returns true when the cap truncated it.</summary>
     private static bool Complete(FlashRules rules, in FlashBattle battle, FlashAction action,
         List<(FlashChoiceRequest Request, FlashBattle Partial)> requests, List<Completion> output)
     {
         FlashBattle child = battle;
-        if (FlashKernel.Step(ref child, action, rules, out FlashChoiceRequest request) == FlashStepResult.Completed)
+        if (FlashKernel.Step(ref child, action, rules, out FlashChoiceRequest request, out bool historyRisk)
+            == FlashStepResult.Completed)
         {
-            output.Add(new Completion(action, [.. requests], child, false));
+            output.Add(new Completion(action, [.. requests], child, false, historyRisk));
             return false;
         }
         Span<ulong> selections = stackalloc ulong[OneStepChoiceCap];
         int count = FlashChoiceEnumerator.Enumerate(request, selections);
         if (count == 0)
         {
-            output.Add(new Completion(action, [.. requests], default, true));
+            output.Add(new Completion(action, [.. requests], default, true, false));
             return false;
         }
         bool capped = FlashChoiceEnumerator.Count(request, OneStepChoiceCap + 1) > count;
@@ -712,11 +791,12 @@ internal static class FlashDifferentialProbe
         while (true)
         {
             FlashBattle child = battle;
-            if (FlashKernel.Step(ref child, action, rules, out FlashChoiceRequest request) == FlashStepResult.Completed)
-                return new Completion(action, requests, child, false);
+            if (FlashKernel.Step(ref child, action, rules, out FlashChoiceRequest request, out bool historyRisk)
+                == FlashStepResult.Completed)
+                return new Completion(action, requests, child, false, historyRisk);
             int count = FlashChoiceEnumerator.Enumerate(request, selections);
             if (count == 0)
-                return new Completion(action, requests, default, true);
+                return new Completion(action, requests, default, true, false);
             requests.Add((request, child));
             action = action.WithChoice(selections[random.Next(count)]);
         }

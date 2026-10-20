@@ -95,5 +95,15 @@ internal static class FlashScoreProjection
         AutomaticPotionUseCount = snapshot.AutomaticPotionUseCount,
         ExplicitPotionStrategicCost = snapshot.ExplicitPotionStrategicCost,
         ExplicitPotionUseCount = snapshot.PotionUseCount - snapshot.AutomaticPotionUseCount,
+        ProjectedShuffleOrderValue = snapshot.ProjectedShuffleOrderValue,
+        ProjectedShuffleOrderKeyFirst = snapshot.ProjectedShuffleOrderKey.First,
+        ProjectedShuffleOrderKeySecond = snapshot.ProjectedShuffleOrderKey.Second,
+        CanTriggerArtOfWarNextTurn = snapshot.CanTriggerArtOfWarNextTurn,
+        EnemyCombatDistributionFirst = snapshot.EnemyCombatDistributionKey.First,
+        EnemyCombatDistributionSecond = snapshot.EnemyCombatDistributionKey.Second,
+        EnemyControlDistributionFirst = snapshot.EnemyControlDistributionKey.First,
+        EnemyControlDistributionSecond = snapshot.EnemyControlDistributionKey.Second,
+        UnorderedPileKeyFirst = snapshot.UnorderedPileKey.First,
+        UnorderedPileKeySecond = snapshot.UnorderedPileKey.Second,
     };
 }

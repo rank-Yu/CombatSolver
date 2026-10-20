@@ -428,6 +428,28 @@ internal static class ModRuntime
         // OFFLINE_HARNESS_FLASH_MODE=Off|Shadow|On 覆盖设置里的 Flash 档位（主搜索分发点，见 BeamSolveDispatch）。
         if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_MODE") is { Length: > 0 } flashMode)
             policy = policy with { FlashMode = Enum.Parse<FlashSearchMode>(flashMode, ignoreCase: true) };
+        // SR2 强制用药矩阵的复跑入口：Forced 把根上的每瓶可搜索药水标为 Force，Req 打开
+        // RequireAtLeastOne。生产策略不受影响，只供离线矩阵对照。
+        switch (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_POTION_PRESET"))
+        {
+            case "Req":
+                policy = policy with
+                {
+                    PotionPolicy = SolverPotionPolicy.RequireAtLeastOne,
+                    PotionStrategy = new PotionStrategySnapshot(
+                        SolverPotionPolicy.RequireAtLeastOne, []),
+                };
+                break;
+            case "Forced":
+                policy = policy with
+                {
+                    PotionStrategy = new PotionStrategySnapshot(
+                        policy.PotionStrategy.DefaultPolicy,
+                        root.SearchablePotions.Select(potion => new PotionSlotDirective(
+                            potion.Slot, potion.PotionId, SolverPotionDirective.Force))),
+                };
+                break;
+        }
         using OrderingObservations? orderingObservations = options.OrderingObservationLimit > 0
             ? new OrderingObservations(options.OutputDirectory, options.OrderingObservationLimit,
                 options.OrderingWatchedStatesPath) : null;

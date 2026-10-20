@@ -33,6 +33,14 @@ internal static partial class CardOnPlayMirrors
         return Registry.HasRegisteredHandler(card);
     }
 
+    /// <summary>
+    /// The dispatch kind the OnPlay registry resolves for this card. <c>Inferred</c> and
+    /// <c>Unsupported</c> dispatches record a prediction risk entry when the play runs, so a play of
+    /// such a card contributes a non-pure history entry (the routing trait's <c>pure</c> input).
+    /// </summary>
+    internal static MirrorDispatchKind ResolveDispatchKind(CardModel card)
+        => Registry.ResolveDispatchKind(card);
+
     public static bool IsOnPlayInvocation(PredictionInvocation invocation)
     {
         return ReferenceEquals(invocation.Method, OnPlay.BaseMethod);
