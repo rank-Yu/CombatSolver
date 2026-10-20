@@ -63,6 +63,7 @@ internal static class FlashScoreProjection
         Turn = snapshot.Turn,
         ReachableHandValue = snapshot.ReachableHandValue,
         ZeroCostPlayableCount = snapshot.ZeroCostPlayableCount,
+        PlayableAttackCount = snapshot.PlayableAttackCount,
         PersistentBuffValue = snapshot.PersistentBuffValue,
         StrategicRetentionValue = snapshot.StrategicEffects.RetentionValue,
         StrategicDamagePotential = snapshot.StrategicEffects.DamagePotential,

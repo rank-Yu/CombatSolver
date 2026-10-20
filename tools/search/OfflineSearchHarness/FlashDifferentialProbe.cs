@@ -177,6 +177,7 @@ internal static class FlashDifferentialProbe
                 solver.CapturePruningRequestForFlash());
         bool checkRank = policy.Profile.ContinuousThreatRanking || policy.Profile.ContextualRanking != null;
         ScoreCheck scores = new(scorer, bound, solver, report, checkRank);
+        TraitCheck traits = new(player, rules, report);
 
         FlashAction[] actions = new FlashAction[FlashKernel.MaxLegalActions];
         int oneStepChecked = 0, oneStepFailed = 0, choiceActions = 0, choiceCapped = 0, choiceDeadEnds = 0, unsupported = 0;
@@ -229,6 +230,8 @@ internal static class FlashDifferentialProbe
                     }
                     else
                     {
+                        traits.Check(rootSnapshot, outcome.OldChild!, flashRoot, outcome.FlashChild,
+                            completion.Action, $"K1 {rootLabel} {completion.Action}");
                         scores.Check(outcome.OldChild!, outcome.FlashChild, 1,
                             $"K1 {rootLabel} {completion.Action} choices={Selections(completion.Action)}");
                     }
@@ -286,6 +289,8 @@ internal static class FlashDifferentialProbe
                         }
                         break;
                     }
+                    traits.Check(snapshot, outcome.OldChild!, battle, outcome.FlashChild,
+                        completion.Action, $"K2 {rootLabel} seed={seed} step={step}");
                     scores.Check(outcome.OldChild!, outcome.FlashChild, 1,
                         $"K2 {rootLabel} seed={seed} step={step} path={string.Join(" > ", path)}");
                     snapshot = outcome.OldChild!;
@@ -315,6 +320,12 @@ internal static class FlashDifferentialProbe
         summary["rankChecked"] = scores.RankChecked;
         summary["noveltyFailed"] = scores.NoveltyFailed;
         summary["rankFailed"] = scores.RankFailed;
+        summary["traitChecked"] = traits.Checked;
+        summary["traitFailed"] = traits.Failed;
+        summary["pocketwatchChecked"] = traits.PocketwatchChecked;
+        summary["pocketwatchFailed"] = traits.PocketwatchFailed;
+        summary["declinedChecked"] = traits.DeclinedChecked;
+        summary["declinedFailed"] = traits.DeclinedFailed;
         report.Insert(0, $"SUMMARY oneStep={oneStepChecked} failed={oneStepFailed} walkTransitions={walkTransitions} "
             + $"walkFailed={walkFailed} terminals={terminals} choiceActions={choiceActions} choiceCapped={choiceCapped} "
             + $"choiceDeadEnds={choiceDeadEnds} endings={string.Join(",", endings.Select(item => $"{item.Key}:{item.Value}"))} "
@@ -325,6 +336,9 @@ internal static class FlashDifferentialProbe
                 : $"bound=disabled({scores.BoundStatus})")
             + (scores.RankChecked == 0 ? "" : $" rankChecked={scores.RankChecked} rankFailed={scores.RankFailed}")
             + (scores.NoveltyFailed == 0 ? "" : $" noveltyFailed={scores.NoveltyFailed}")
+            + $" traitChecked={traits.Checked} traitFailed={traits.Failed}"
+            + $" pocketwatchChecked={traits.PocketwatchChecked} pocketwatchFailed={traits.PocketwatchFailed}"
+            + $" declinedChecked={traits.DeclinedChecked} declinedFailed={traits.DeclinedFailed}"
             + (policy.IncludeTurnSetup ? $" turnSetupRoots={searchRoots.Count}" : "")
             + $" unsupported={unsupported}");
         if (scores.FailedFields.Count > 0)
@@ -348,6 +362,108 @@ internal static class FlashDifferentialProbe
 
     private static string DescribeChoices(int rootIndex, IReadOnlyList<TurnSetupRootCandidate> roots)
         => roots[rootIndex].Choices.Count == 0 ? "" : $" {DescribeChoiceVector(roots[rootIndex].Choices)}";
+
+    /// <summary>
+    /// K4 route-trait extension: the cumulative <see cref="SearchRouteTraits"/> delta of one transition
+    /// must equal the existing engine's <c>Classify*Traits</c> for the same before/after snapshots. The
+    /// The probe feeds the reference history-derived <c>pure</c> to both sides, so the classifier's
+    /// feature terms are compared exactly. Production approximates the input from the card type (a
+    /// non-attack card play is treated as not pure); that approximation is the residual not covered by
+    /// this check.
+    /// </summary>
+    private sealed class TraitCheck(Player player, FlashRules rules, List<string> report)
+    {
+        public int Checked { get; private set; }
+
+        public int Failed { get; private set; }
+
+        public int PocketwatchChecked { get; private set; }
+
+        public int PocketwatchFailed { get; private set; }
+
+        public int DeclinedChecked { get; private set; }
+
+        public int DeclinedFailed { get; private set; }
+
+        public void Check(SimulationSnapshot before, SimulationSnapshot after, in FlashBattle beforeFlash,
+            in FlashBattle afterFlash, FlashAction action, string label)
+        {
+            if (after.BoundaryReason is not (SearchBoundaryReason.None or SearchBoundaryReason.EventDefeat)
+                || !before.HasSimulator)
+            {
+                return;
+            }
+            CombatPredictionSimulator simulator = (CombatPredictionSimulator)after.Simulator;
+            bool pure = true;
+            foreach (CombatPredictionHistoryEntry entry in
+                     simulator.History.EntriesFrom(before.HistoryEntryCount))
+            {
+                if (SearchProbeHelpers.IsPureHistoryEntry(entry))
+                    continue;
+                pure = false;
+                break;
+            }
+            SimulatedCombatState beforeCombat = (SimulatedCombatState)
+                ((CombatPredictionSimulator)before.Simulator).State.CombatState;
+            bool declinedExtraTurn = beforeCombat.RelicsOf(player)
+                .OfType<MegaCrit.Sts2.Core.Models.Relics.PaelsEye>()
+                .Any(relic => !relic.IsMelted && beforeCombat.IsPaelsEyeUnused(relic));
+            SearchRouteTraits reference = action.Kind switch
+            {
+                FlashActionKind.PlayCard => SearchProbeHelpers.ClassifyCardTraits(
+                    SearchRouteTraits.None, before, after, pure, declinedExtraTurn),
+                FlashActionKind.UsePotion => SearchProbeHelpers.ClassifyPotionTraits(
+                    SearchRouteTraits.None, before, after),
+                _ => SearchProbeHelpers.ClassifyRoundTransitionTraits(
+                    SearchRouteTraits.None, before, after),
+            };
+            FlashScoreFeatures beforeFeatures = FlashScoreProjection.FromSnapshot(before);
+            FlashScoreFeatures afterFeatures = FlashScoreProjection.FromSnapshot(after);
+            SearchRouteTraits flash = FlashBeamSolver.ClassifyRouteTraitsForTesting(
+                beforeFeatures, afterFeatures, action, declinedExtraTurn, !pure);
+            Checked++;
+            if (reference != flash)
+            {
+                Failed++;
+                if (Failed <= 5)
+                {
+                    report.Add($"K4 TRAIT MISMATCH {label} action={action}");
+                    report.Add($"  reference={reference} flash={flash} pure={pure} declined={declinedExtraTurn}");
+                }
+            }
+            // The route-trait inputs that are not part of the score snapshot: the K4 projection reads
+            // the existing snapshot's pocketwatch fields and the PaelsEye state, so the Flash route
+            // helper must produce the same values on the same state.
+            PocketwatchChecked++;
+            FlashBeamSolver.PocketwatchState(afterFlash, rules,
+                out int flashThreshold, out int flashPlayed);
+            if (flashThreshold != after.PocketwatchCardThreshold
+                || flashPlayed != after.PocketwatchCardsPlayedThisTurn)
+            {
+                PocketwatchFailed++;
+                if (PocketwatchFailed <= 5)
+                {
+                    report.Add($"K4 POCKETWATCH MISMATCH {label} action={action}");
+                    report.Add($"  old={after.PocketwatchCardThreshold}/{after.PocketwatchCardsPlayedThisTurn} "
+                        + $"flash={flashThreshold}/{flashPlayed}");
+                }
+            }
+            DeclinedChecked++;
+            bool oldDeclined = beforeCombat.RelicsOf(player)
+                .OfType<MegaCrit.Sts2.Core.Models.Relics.PaelsEye>()
+                .Any(relic => !relic.IsMelted && beforeCombat.IsPaelsEyeUnused(relic));
+            bool flashDeclined = FlashBeamSolver.DeclinedExtraTurn(beforeFlash);
+            if (oldDeclined != flashDeclined)
+            {
+                DeclinedFailed++;
+                if (DeclinedFailed <= 5)
+                {
+                    report.Add($"K4 DECLINED MISMATCH {label} action={action}");
+                    report.Add($"  old={oldDeclined} flash={flashDeclined}");
+                }
+            }
+        }
+    }
 
     private sealed record Outcome(SimulationSnapshot? OldChild, FlashBattle FlashChild, List<string> Diff);
 
