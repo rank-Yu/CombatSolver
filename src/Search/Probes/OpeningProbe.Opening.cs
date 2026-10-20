@@ -1,24 +1,19 @@
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
-using MegaCrit.Sts2.Core.Entities.Powers;
-using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Models;
-using MegaCrit.Sts2.Core.Models.Events;
 using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Models.Relics;
-using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
-using MegaCrit.Sts2.Core.ValueProps;
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
 
-internal sealed partial class CombatBeamSolver
+internal sealed partial class OpeningProbe
 {
     private IEnumerable<SearchNode> ExpandOpeningSeed(SearchNode seed)
         => seed.IsTerminal || seed.Snapshot.PlayerDead || seed.Snapshot.AllEnemiesDead
@@ -77,7 +72,7 @@ internal sealed partial class CombatBeamSolver
             children.AddRange(ExpandOpeningSeed(seed));
             return children
                 .Where(node => node.Snapshot.Turn == seed.Snapshot.Turn
-                    && HasPlayableFetchedPower(node)
+                    && HasPlayableFetchedPower(node, _player)
                     && node.Action!.Choice!.Cards.Any(card =>
                         PowerCardValuationModels.Registry.ContainsCardId(card.CardId)))
                 .OrderByDescending(node => node.Score)
@@ -224,32 +219,7 @@ internal sealed partial class CombatBeamSolver
     private SimulationSnapshot ReplayOpeningPowerProbe(
         SimulationSnapshot prefixSnapshot, IReadOnlyList<PlanAction> prefix, PlanAction action)
         => SearchTransitionGuard.Execute(action, prefixSnapshot.StateKey, prefix.Count, () =>
-        {
-            SimulationSnapshot incremental = Replay(
-                [action], prefixSnapshot, prefixSnapshot.Turn, prefix.Count);
-            try
-            {
-                if (policy.VerifyIncrementalSearch)
-                {
-                    PlanAction[] fullActions = [.. prefix, action];
-                    SimulationSnapshot replayed = Replay(fullActions, allowExecutionCapture: false);
-                    try
-                    {
-                        AssertIncrementalEquivalent(action, fullActions, incremental, replayed);
-                    }
-                    finally
-                    {
-                        replayed.ReleaseSimulator();
-                    }
-                }
-                return incremental;
-            }
-            catch
-            {
-                incremental.ReleaseSimulator();
-                throw;
-            }
-        });
+            Replay([action], prefixSnapshot, prefixSnapshot.Turn, prefix.Count));
 
     internal IReadOnlyList<PlanAction> BuildOpeningPotionActions()
         => BuildPotionActionsAfterPrefix([]);
@@ -499,7 +469,7 @@ internal sealed partial class CombatBeamSolver
         }
     }
 
-    private sealed record OpeningDiscardChoiceValues(
+    internal sealed record OpeningDiscardChoiceValues(
         PlanChoiceEffect Effect,
         PileType SourcePile,
         string SourceId,
@@ -507,7 +477,7 @@ internal sealed partial class CombatBeamSolver
         PlanChoiceTiming Timing,
         IReadOnlyList<(PlanCardToken Token, double Value)> Options);
 
-    private double OpeningDiscardChoiceCardValue(SearchNode seed, SearchNode node, PlanCardChoice choice,
+    internal double OpeningDiscardChoiceCardValue(SearchNode seed, SearchNode node, PlanCardChoice choice,
         Dictionary<string, OpeningDiscardChoiceValues> cache)
     {
         PlanAction action = node.Action
@@ -531,7 +501,7 @@ internal sealed partial class CombatBeamSolver
                 TurnStartChoiceRequest request = probe.BoundaryReason == SearchBoundaryReason.PendingChoice
                     && combat.PendingTurnStartChoice is { } pending ? pending
                     : throw new InvalidOperationException($"开局弃牌估值未到达选择边界：action={action.CardId}。");
-                CardChoiceSpec spec = BuildPrimaryCardChoiceSpec(probe)
+                CardChoiceSpec spec = BuildPrimaryCardChoiceSpec(_player, probe)
                     ?? throw new InvalidOperationException($"开局弃牌估值没有主选择：action={action.CardId}。");
                 List<(PlanCardToken Token, double Value)> options = [];
                 Dictionary<(string Id, int Upgrade), int> occurrences = [];
@@ -704,26 +674,6 @@ internal sealed partial class CombatBeamSolver
     internal IReadOnlyList<PlanAction> BuildPreferredOpeningPotionActions()
         => BuildPreferredPotionActionsAfterPrefix([]);
 
-    private static SearchNode CreateOpeningSearchSeed(SimulationSnapshot rootSnapshot)
-    {
-        return new(
-            null,
-            0,
-            rootSnapshot.PotionUseCount,
-            rootSnapshot.PotionStrategicCost,
-            rootSnapshot.Turn,
-            SearchRouteTraits.None,
-            0,
-            rootSnapshot.Score,
-            rootSnapshot.StateKey,
-            rootSnapshot.HasRisk,
-            rootSnapshot.BoundaryReason,
-            false,
-            null,
-            rootSnapshot,
-            CombatProgressState.Capture(rootSnapshot));
-    }
-
     internal IReadOnlyList<PlanAction> BuildOpeningResourceActions()
     {
         SimulationSnapshot rootSnapshot = Replay([]);
@@ -831,66 +781,6 @@ internal sealed partial class CombatBeamSolver
         {
             snapshot.ReleaseSimulator();
         }
-    }
-
-    private SearchNode CreateOpeningFollowUpSeed(IReadOnlyList<PlanAction> prefix, SearchRouteTraits traits = SearchRouteTraits.Scaling)
-        => TryCreateOpeningFollowUpSeed(prefix, traits)
-            ?? throw new InvalidOperationException("Opening follow-up prefix is no longer applicable.");
-
-    private SearchNode? TryCreateOpeningFollowUpSeed(IReadOnlyList<PlanAction> prefix, SearchRouteTraits traits = SearchRouteTraits.Scaling)
-    {
-        SimulationSnapshot snapshot = Replay([]);
-        SearchNode seed = new(null, 0, snapshot.PotionUseCount, snapshot.PotionStrategicCost,
-            snapshot.Turn, traits, 0, snapshot.Score, snapshot.StateKey,
-            snapshot.HasRisk, snapshot.BoundaryReason, false, null, snapshot, CombatProgressState.Capture(snapshot));
-        // Build the actual parent chain, so replay verification and descendant actions
-        // include the resource/potion/setup cards that produced this state.
-        return ApplyFixedPrefix(seed, prefix);
-    }
-
-    internal bool CanContinueAtPrefix(IReadOnlyList<PlanAction> prefix)
-    {
-        SearchNode? applied = TryCreateOpeningFollowUpSeed(prefix, SearchRouteTraits.None);
-        if (applied == null)
-            return false;
-        try
-        {
-            return applied.ActionCount == prefix.Count
-                && !applied.Snapshot.PlayerDead && !applied.Snapshot.AllEnemiesDead
-                && !applied.Snapshot.HasRisk
-                && applied.Snapshot.BoundaryReason == SearchBoundaryReason.None;
-        }
-        finally
-        {
-            applied.Snapshot.ReleaseSimulator();
-        }
-    }
-
-    internal bool CanReplayOpeningPrefix(IReadOnlyList<PlanAction> prefix)
-    {
-        if (prefix.Any(action => action.EndsPlayerTurn))
-            return false;
-        IReadOnlyList<SimulationSnapshot> roots = _includeTurnSetup
-            ? BuildTurnSetupRoots().Select(candidate => candidate.Snapshot).ToArray()
-            : [Replay([])];
-        bool applicable = false;
-        foreach (SimulationSnapshot snapshot in roots)
-        {
-            SearchNode? applied;
-            try
-            {
-                applied = ApplyFixedPrefix(CreateOpeningSearchSeed(snapshot), prefix);
-            }
-            catch (InvalidPlannedChoiceBranchException)
-            {
-                continue;
-            }
-            if (applied == null)
-                continue;
-            applicable = true;
-            applied.Snapshot.ReleaseSimulator();
-        }
-        return applicable;
     }
 
     internal IReadOnlyList<PlanAction> BuildOpeningOffensiveFollowUps(
@@ -1205,17 +1095,6 @@ internal sealed partial class CombatBeamSolver
             probeSnapshot?.ReleaseSimulator();
             rootSnapshot.ReleaseSimulator();
         }
-    }
-
-    private bool HasPlayableFetchedPower(SearchNode node)
-    {
-        if (node.Action?.Choice is not { Effect: PlanChoiceEffect.MoveToHand } choice)
-            return false;
-        var simulator = (CombatPredictionSimulator)node.Snapshot.Simulator;
-        var combat = (SimulatedCombatState)simulator.State.CombatState;
-        return simulator.State.GetPlayerCombatState(_player).Hand.Cards.Any(card =>
-            card.Preview.Type == CardType.Power && combat.CanPlayCard(simulator, card)
-            && choice.Cards.Any(token => CardChoiceSupport.MatchesToken(card, token)));
     }
 
 }

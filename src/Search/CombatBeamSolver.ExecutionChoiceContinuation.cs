@@ -4,6 +4,8 @@ using MegaCrit.Sts2.Core.Models.Powers;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal sealed partial class CombatBeamSolver
 {
     private ExecutionChoiceReplayCheckpoint? _executionChoiceReplayCheckpoint;
@@ -157,7 +159,7 @@ internal sealed partial class CombatBeamSolver
         {
             if (simulator.ShuffleEventCount != tail.ShuffleEventsBefore) shuffles++;
             simulator.CheckWinCondition(combat.GetPlayerTurnNumber(_player));
-            boundary = ResolveRequestedPlayerTurnEnd(simulator, combat, action!, tail.Deaths, ref turn, ref shuffles);
+            boundary = ResolveRequestedPlayerTurnEnd(RoundContext, simulator, combat, action!, tail.Deaths, ref turn, ref shuffles);
         }
         if (tail.PlayerStart != null && !tail.RootSetup) _ = combat.ConsumePlayerTurnEndRequest();
         // The cursor on a resumed child contains only the newly appended choices. Store

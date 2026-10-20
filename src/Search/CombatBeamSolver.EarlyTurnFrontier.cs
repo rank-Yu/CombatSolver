@@ -1,5 +1,7 @@
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal sealed record EarlyTurnFrontierCandidate(
     int CompletedTurns,
     PlanAction[] Actions,

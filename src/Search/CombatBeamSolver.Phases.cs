@@ -15,9 +15,15 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 
 internal sealed partial class CombatBeamSolver
 {
+    private Func<IReadOnlyList<PlanAction>, SimulationSnapshot?, int, int, SimulationSnapshot>? _fixedPrefixReplay;
+    private Func<IReadOnlyList<PlanAction>, SimulationSnapshot?, int, int, SimulationSnapshot> FixedPrefixReplay
+        => _fixedPrefixReplay ??= (actions, parent, turn, count) => Replay(actions, parent, turn, count);
+
     internal bool DisableSurvivableBoundaryFallbackForTesting { get; init; }
 
     public SolverResult Solve()
@@ -2004,7 +2010,7 @@ internal sealed partial class CombatBeamSolver
                     // Settle a fetched, payable power's next decision before ranking the
                     // intermediate selection. Expand all legal successors using the normal
                     // transposition and node accounting; ordinary alternatives remain legal.
-                    SearchNode[] commitments = nextPlays.Where(HasPlayableFetchedPower).ToArray();
+                    SearchNode[] commitments = nextPlays.Where(node => OpeningProbe.HasPlayableFetchedPower(node, _player)).ToArray();
                     foreach (SearchNode commitment in commitments)
                     {
                         if (_run.Expanded >= _profile.MaxExpandedNodes || acceptableBattleHpLossReached
@@ -2322,138 +2328,12 @@ internal sealed partial class CombatBeamSolver
         SearchNode seed,
         IReadOnlyList<PlanAction> prefix,
         bool resetSchedulingBaseline = false)
-    {
-        SearchNode node = seed;
-        try
-        {
-            foreach (PlanAction action in prefix)
-            {
-                if (action.Turn != node.Turn)
-                {
-                    throw new InvalidOperationException(
-                        $"固定搜索前缀动作无效：kind={action.Kind} actionTurn={action.Turn} " +
-                        $"nodeTurn={node.Turn} endsPlayerTurn={action.EndsPlayerTurn} " +
-                        $"card={(string.IsNullOrEmpty(action.CardId) ? "-" : action.CardId)} " +
-                        $"potion={(string.IsNullOrEmpty(action.PotionId) ? "-" : action.PotionId)}。");
-                }
-
-                if (!CanApplyFixedPrefixAction(node, action))
-                {
-                    node.Snapshot.ReleaseSimulator();
-                    return null;
-                }
-
-                SimulationSnapshot snapshot = Replay(
-                    [action],
-                    node.Snapshot,
-                    node.Turn,
-                    node.ActionCount);
-                bool terminal = snapshot.PlayerDead
-                    || snapshot.AllEnemiesDead
-                    || snapshot.BoundaryReason != SearchBoundaryReason.None;
-                // Routes freeze "this play ended the turn" on card actions. The prefix may
-                // contain such an action; it must still end the turn here, otherwise the
-                // prefix was built from a different state than this root.
-                if (action.Kind == PlanActionKind.PlayCard
-                    && action.EndsPlayerTurn
-                    && snapshot.Turn <= node.Turn
-                    && !snapshot.PlayerDead
-                    && !snapshot.AllEnemiesDead)
-                {
-                    snapshot.ReleaseSimulator();
-                    throw new InvalidOperationException(
-                        $"固定搜索前缀动作无效：kind={action.Kind} actionTurn={action.Turn} " +
-                        $"nodeTurn={node.Turn} endsPlayerTurn={action.EndsPlayerTurn} " +
-                        $"turnAdvanced=False " +
-                        $"card={(string.IsNullOrEmpty(action.CardId) ? "-" : action.CardId)} " +
-                        $"potion={(string.IsNullOrEmpty(action.PotionId) ? "-" : action.PotionId)}。");
-                }
-                SearchRouteTraits traits = action.Kind == PlanActionKind.UsePotion
-                    ? ClassifyPotionTraits(node.Traits, node.Snapshot, snapshot)
-                    : node.Traits;
-                int cumulativeEnemyHpLost = AccumulateEnemyHpLost(node, snapshot);
-                node = new SearchNode(
-                    action,
-                    node.ActionCount + 1,
-                    snapshot.PotionUseCount,
-                    snapshot.PotionStrategicCost,
-                    snapshot.Turn,
-                    traits,
-                    node.FutureSoldHp,
-                    ApplySoldHpPenalty(snapshot.Score, node.FutureSoldHp),
-                    snapshot.StateKey,
-                    snapshot.HasRisk,
-                    snapshot.BoundaryReason,
-                    terminal,
-                    node,
-                    snapshot,
-                    node.CombatProgress)
-                {
-                    CumulativeEnemyHpLost = cumulativeEnemyHpLost,
-                };
-                node = AttachOrderedMutationLineage(node);
-                if (terminal || node.Turn > node.Parent!.Turn)
-                {
-                    // Fixed prefixes have no sibling alternatives for comparative HP investment or block.
-                    node = node with { Outcome = CreateUncomparedTurnOutcome(node) };
-                }
-                bool combatOutcomeLocked = snapshot.PlayerDead || snapshot.AllEnemiesDead;
-                node.Parent!.Snapshot.ReleaseSimulator();
-                if (combatOutcomeLocked)
-                {
-                    // The remaining prefix actions are unreachable once the combat outcome is
-                    // locked; replaying them from a stopped simulator is the reported failure.
-                    break;
-                }
-            }
-            if (resetSchedulingBaseline && prefix.Count > 0)
-            {
-                // 固定前缀模拟的是“玩家已经完成这些动作后重新计算”。后续搜索必须以此刻真实状态
-                // 重新建立进展基线；沿用前缀之前的最低/最高值会让同一局面区别于手动动作后的新根。
-                node = node with
-                {
-                    CombatProgress = CombatProgressState.Capture(node.Snapshot),
-                    Cycle = null,
-                };
-                node.PowerCommitment = null;
-                node.OrderedMutationLineage = null;
-                node.OrderedMutationBoundaryLineage = null;
-                node.OrderedMutationRetentionLease = null;
-                node.OrderedMutationActivationTicket = null;
-            }
-            return node;
-        }
-        catch
-        {
-            node.Snapshot.ReleaseSimulator();
-            throw;
-        }
-    }
-
-    private bool CanApplyFixedPrefixAction(SearchNode node, PlanAction action)
-    {
-        CombatPredictionSimulator simulator = (CombatPredictionSimulator)node.Snapshot.Simulator;
-        if (node.Snapshot.BoundaryReason != SearchBoundaryReason.None || !simulator.IsInProgress)
-            return false;
-        SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
-        if (action.Kind == PlanActionKind.EndTurn)
-            return true;
-        if (action.Kind == PlanActionKind.UsePotion)
-        {
-            return EnumeratePlannedPotionActions(new ExpansionPlan(node, CardNameFirst: false))
-                .Any(candidate => candidate.Action.PotionSlot == action.PotionSlot
-                    && string.Equals(candidate.Action.PotionId, action.PotionId, StringComparison.Ordinal)
-                    && candidate.Action.TargetCombatId == action.TargetCombatId);
-        }
-
-        SimPlayerCombatState player = simulator.State.GetPlayerCombatState(_player);
-        PredictedCard? card = FindCardForReplay(player.Hand.Cards, action);
-        // Reordering or inserting earlier actions can change the active roster.
-        // Keep the planned identity: an invalid suffix rejects the adjusted route
-        // rather than replaying it against a missing target or choosing another one.
-        return card != null && combat.CanPlayCard(simulator, card)
-            && TargetsFor(card, simulator).Any(target => target.Target?.CombatId == action.TargetCombatId);
-    }
+        => SearchProbeHelpers.ApplyFixedPrefix(
+            seed, prefix, ExpansionContext,
+            FixedPrefixReplay,
+            resetSchedulingBaseline,
+            attachLineage: AttachOrderedMutationLineage,
+            createUncomparedOutcome: CreateUncomparedTurnOutcome);
 
     private PlanAction WithDisplayNames(PlanAction action)
         => action with

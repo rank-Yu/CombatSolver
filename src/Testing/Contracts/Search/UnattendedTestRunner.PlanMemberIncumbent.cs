@@ -184,7 +184,7 @@ internal sealed partial class CombatBeamSolver
         var member = new CombatBeamSolver(root, names, damage,
             policy with { DisableSharedPrimaryIncumbentsForTesting = true }, token,
             primaryIncumbent: incumbent, attributionPurpose: ContinuationPurpose.PlanCommitment);
-        SearchNode opening = CreateOpeningSearchSeed(member.Replay([]));
+        SearchNode opening = OpeningProbe.CreateOpeningSearchSeed(member.Replay([]));
         string before = UnattendedTestRunner.DescribePlanMemberStateForTesting(
             (CombatPredictionSimulator)opening.Snapshot.Simulator, root);
         PlanAction prefix = member.PrepareCardActions(opening)

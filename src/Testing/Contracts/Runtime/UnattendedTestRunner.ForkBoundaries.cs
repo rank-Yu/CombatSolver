@@ -1852,7 +1852,7 @@ internal sealed partial class UnattendedTestRunner
             generatedCopy.Preview.Id.Entry,
             CardStateKey: generatedKey);
         if (!ReferenceEquals(
-                CombatBeamSolver.FindCardForReplay([deckCard, generatedCopy], action),
+                SearchProbeHelpers.FindCardForReplay([deckCard, generatedCopy], action),
                 generatedCopy))
         {
             throw new InvalidOperationException("回放卡牌身份没有选中计划中的生成复制。");

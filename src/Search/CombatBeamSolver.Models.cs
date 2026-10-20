@@ -16,6 +16,8 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 
 internal sealed partial class CombatBeamSolver
 {
@@ -69,21 +71,6 @@ internal sealed partial class CombatBeamSolver
         public int BestProjectedPlayerHp;
         public int BestUsefulBlock;
         public long BestSetupValue;
-    }
-
-    private readonly record struct ThreatFocus(
-        uint? CombatId,
-        int Pressure,
-        int RemainingHp,
-        int CurrentThreat,
-        int TotalThreat,
-        int IncomingHitCount);
-
-    private sealed record CoverageSummary(
-        IReadOnlyList<PredictionGap> Gaps,
-        bool HasUncompensatedRisk)
-    {
-        public static CoverageSummary None { get; } = new([], false);
     }
 
     private sealed class SearchRunContext(
@@ -273,8 +260,8 @@ internal sealed partial class CombatBeamSolver
             }
             ExpandedTranspositions = [];
             StandPatCache = [];
-            ThreatProjectionCache = [];
-            CoverageCache = [];
+            ThreatProjectionCache.Clear();
+            CoverageCache.Clear();
         }
 
         public void ResetReclaimableCaches()
@@ -285,40 +272,10 @@ internal sealed partial class CombatBeamSolver
             // pending probes. Keep these scalar answers through its drained checkpoints.
             if (EnsurePruneMemory == null)
                 StandPatCache = [];
-            ThreatProjectionCache = [];
-            CoverageCache = [];
+            ThreatProjectionCache.Clear();
+            CoverageCache.Clear();
         }
     }
-
-    [Flags]
-    private enum ActionOptionFamily
-    {
-        None = 0,
-        ImmediateDefense = 1 << 0,
-        ImmediateOffense = 1 << 1,
-        ResourceAndCycle = 1 << 2,
-        PersistentSetup = 1 << 3,
-        Control = 1 << 4,
-        TargetRemoval = 1 << 5,
-        HpInvestment = 1 << 6,
-    }
-
-    private readonly record struct ActionCandidate(
-        SearchNode Node,
-        CardType CardType,
-        uint? TargetCombatId,
-        int EnergySpent,
-        int StarsSpent,
-        int Damage,
-        int Block,
-        int Hp,
-        int MaxHp,
-        int CumulativeHpLost,
-        int LongTermResourceValue,
-        int AngerCopiesGenerated,
-        ActionOptionFamily OptionFamilies,
-        bool IsPure,
-        double NormalizedValue);
 
     [InlineArray(10)]
     private struct HandFingerprintBuffer
@@ -447,3 +404,54 @@ internal sealed partial class CombatBeamSolver
         bool IsComparable);
 
 }
+
+[Flags]
+internal enum ActionOptionFamily
+{
+    None = 0,
+    ImmediateDefense = 1 << 0,
+    ImmediateOffense = 1 << 1,
+    ResourceAndCycle = 1 << 2,
+    PersistentSetup = 1 << 3,
+    Control = 1 << 4,
+    TargetRemoval = 1 << 5,
+    HpInvestment = 1 << 6,
+}
+
+internal readonly record struct ActionCandidate(
+    SearchNode Node,
+    CardType CardType,
+    uint? TargetCombatId,
+    int EnergySpent,
+    int StarsSpent,
+    int Damage,
+    int Block,
+    int Hp,
+    int MaxHp,
+    int CumulativeHpLost,
+    int LongTermResourceValue,
+    int AngerCopiesGenerated,
+    ActionOptionFamily OptionFamilies,
+    bool IsPure,
+    double NormalizedValue);
+
+internal readonly record struct ThreatFocus(
+    uint? CombatId,
+    int Pressure,
+    int RemainingHp,
+    int CurrentThreat,
+    int TotalThreat,
+    int IncomingHitCount);
+
+internal sealed record CoverageSummary(
+    IReadOnlyList<PredictionGap> Gaps,
+    bool HasUncompensatedRisk)
+{
+    public static CoverageSummary None { get; } = new([], false);
+}
+
+internal readonly record struct ThreatProjection(
+    int Hp,
+    int DeathSaveHpRestored,
+    int DeathSaveUseCount,
+    int BlockConsumed = 0);

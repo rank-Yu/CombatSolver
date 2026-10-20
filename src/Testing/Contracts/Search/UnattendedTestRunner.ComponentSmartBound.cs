@@ -77,7 +77,10 @@ internal sealed partial class UnattendedTestRunner
         catch (PotionPolicyUnsatisfiedException) { }
         if (bound.ComponentSmartBoundPrunedForTesting <= 0)
             throw new InvalidOperationException("Impossible optional layer produced no eligibility prunes.");
-        var builder = Solver(smart, DirectSearchPurpose.PrimaryBeam);
+        var builder = new OpeningProbe(root, names, damage, smart,
+            searchProfile: smart.Profile,
+            potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
+            maximumPotionUses: 1);
         PlanAction bottled = builder.BuildOpeningPotionActions().First(action => action.PotionId == "BOTTLED_POTENTIAL");
         var posterior = new CombatBeamSolver(root, names, damage, smart, deadline.Token,
             potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,

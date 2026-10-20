@@ -223,7 +223,7 @@ internal static partial class CombatSearchCoordinator
             },
         });
 
-        CombatBeamSolver builder = new(context.Root, context.DisplayNames,
+        OpeningProbe builder = NewOpeningProbe(context.Root, context.DisplayNames,
             context.BattleDamage, context.Policy, context.CancellationToken,
             context.ProgressCallback, context.Profile);
         PlanCommitment? plan = null;
@@ -327,7 +327,7 @@ internal static partial class CombatSearchCoordinator
     {
         CombatRootSnapshot root = context.Root;
         bool hasPower = root.PlayerCardIds.Any(PowerCardValuationModels.Registry.ContainsCardId);
-        CombatBeamSolver builder = new(root, context.DisplayNames, context.BattleDamage,
+        OpeningProbe builder = NewOpeningProbe(root, context.DisplayNames, context.BattleDamage,
             context.Policy, context.CancellationToken, context.ProgressCallback, context.Profile,
             potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
             maximumPotionUses: 1);

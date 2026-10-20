@@ -1,5 +1,7 @@
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal sealed partial class CombatBeamSolver
 {
     // An exact optional-potion layer can affect the Smart selection only if it

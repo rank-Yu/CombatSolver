@@ -28,6 +28,20 @@ $forbiddenSearchReferences = @(
 )
 
 $violations = [System.Collections.Generic.List[string]]::new()
+$probeRoot = Join-Path $searchRoot "Probes"
+$probeSolverReferences = @(Get-ChildItem -LiteralPath $probeRoot -Filter '*.cs' -File |
+    ForEach-Object { Select-String -LiteralPath $_.FullName -SimpleMatch 'CombatBeamSolver' })
+if ($probeSolverReferences.Count -gt 0) {
+    $violations.Add('Opening probes must not reference CombatBeamSolver')
+}
+if (-not (Test-Path -LiteralPath (Join-Path $probeRoot 'OpeningProbe.cs') -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path $probeRoot 'SearchEvaluator.cs') -PathType Leaf)) {
+    $violations.Add('Opening probe component is missing')
+}
+$probeBoundaryOutput = & python3 -B (Join-Path $repositoryRoot 'tools/inspection/check_probe_boundaries.py') $repositoryRoot 2>&1
+if ($LASTEXITCODE -ne 0) {
+    $violations.Add('Shared probe/execution methods still have solver method bodies: ' + ($probeBoundaryOutput -join '; '))
+}
 foreach ($relative in @('tools/search/StrategyCorpus/run.py', 'tools/search/StrategyCorpus/compare.py', 'coverage/corpora/strategy/p0.json')) {
     if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $relative) -PathType Leaf)) {
         $violations.Add("Strategy corpus input missing: $relative")
@@ -50,7 +64,7 @@ if (-not $potionPolicySource.Contains('PotionValuationRegistry.Default') -or
 if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot 'src/Search/OpeningActionRegistry.cs') -PathType Leaf)) {
     $violations.Add('Opening action registry missing')
 }
-$openingSource = Get-Content -LiteralPath (Join-Path $repositoryRoot 'src/Search/CombatBeamSolver.Expansion.Opening.cs') -Raw
+$openingSource = Get-Content -LiteralPath (Join-Path $repositoryRoot 'src/Search/Probes/OpeningProbe.Opening.cs') -Raw
 if (-not $openingSource.Contains('OpeningActionRegistry.Default') -or
     $openingSource -match '"(?:WHITE_NOISE|NIGHTMARE|DUPLICATOR)"') {
     $violations.Add('Opening action IDs remain outside the registry')
@@ -520,7 +534,6 @@ $playerTurnEndCallers = @(
     "src/Search/CombatBeamSolver.Expansion.cs",
     "src/Search/CombatBeamSolver.Expansion.Candidates.cs",
     "src/Search/CombatBeamSolver.Expansion.Choices.cs",
-    "src/Search/CombatBeamSolver.Expansion.Opening.cs",
     "src/Search/CombatBeamSolver.Expansion.Replay.cs",
     "src/Runtime/LiveEndTurnRiskEvaluator.cs",
     "src/Testing/Host/UnattendedTestRunner.cs",
@@ -550,7 +563,6 @@ $legacyLoopGuardPaths = @(
     (Join-Path $searchRoot "CombatBeamSolver.Expansion.cs"),
     (Join-Path $searchRoot "CombatBeamSolver.Expansion.Candidates.cs"),
     (Join-Path $searchRoot "CombatBeamSolver.Expansion.Choices.cs"),
-    (Join-Path $searchRoot "CombatBeamSolver.Expansion.Opening.cs"),
     (Join-Path $searchRoot "CombatBeamSolver.Expansion.Replay.cs"),
     (Join-Path $searchRoot "CombatBeamSolver.ParallelExpansion.cs"),
     (Join-Path $searchRoot "SolverWeights.cs")
@@ -874,23 +886,23 @@ foreach ($check in @(
     @{ RelativePath = "src/Engine/InCombat/Simulation/CombatPredictionRngSet.cs"; Text = "private sealed class FrozenStream(PredictionRngState state)" },
     @{ RelativePath = "src/Engine/InCombat/Simulation/CombatPredictionRngSet.cs"; Text = "new FrozenStream(_mutable.CaptureState())" },
     @{ RelativePath = "src/Testing/Host/UnattendedTestRunner.Assertions.cs"; Text = "AssertLazyRngFork(scenario.CombatState.RunState.Rng)" },
-    @{ RelativePath = "src/Search/CombatBeamSolver.StateEvaluation.cs"; Text = "AppendRngState(ref key, simulator.Rng.ShuffleState);" },
+    @{ RelativePath = "src/Search/Probes/SearchEvaluator.cs"; Text = "AppendRngState(ref key, simulator.Rng.ShuffleState);" },
     @{ RelativePath = "src/Runtime/ContinuationStamp.cs"; Text = "simulator.Rng.ShuffleState" },
-    @{ RelativePath = "src/Search/CombatBeamSolver.StateEvaluation.cs"; Text = "AppendRngState(ref key, simulator.Rng.CombatCardGenerationState);" },
+    @{ RelativePath = "src/Search/Probes/SearchEvaluator.cs"; Text = "AppendRngState(ref key, simulator.Rng.CombatCardGenerationState);" },
     @{ RelativePath = "src/Runtime/ContinuationStamp.cs"; Text = "simulator.Rng.CombatCardGenerationState" },
-    @{ RelativePath = "src/Search/CombatBeamSolver.StateEvaluation.cs"; Text = "AppendRngState(ref key, simulator.Rng.CombatPotionGenerationState);" },
+    @{ RelativePath = "src/Search/Probes/SearchEvaluator.cs"; Text = "AppendRngState(ref key, simulator.Rng.CombatPotionGenerationState);" },
     @{ RelativePath = "src/Runtime/ContinuationStamp.cs"; Text = "simulator.Rng.CombatPotionGenerationState" },
-    @{ RelativePath = "src/Search/CombatBeamSolver.StateEvaluation.cs"; Text = "AppendRngState(ref key, simulator.Rng.CombatCardSelectionState);" },
+    @{ RelativePath = "src/Search/Probes/SearchEvaluator.cs"; Text = "AppendRngState(ref key, simulator.Rng.CombatCardSelectionState);" },
     @{ RelativePath = "src/Runtime/ContinuationStamp.cs"; Text = "simulator.Rng.CombatCardSelectionState" },
-    @{ RelativePath = "src/Search/CombatBeamSolver.StateEvaluation.cs"; Text = "AppendRngState(ref key, simulator.Rng.CombatEnergyCostsState);" },
+    @{ RelativePath = "src/Search/Probes/SearchEvaluator.cs"; Text = "AppendRngState(ref key, simulator.Rng.CombatEnergyCostsState);" },
     @{ RelativePath = "src/Runtime/ContinuationStamp.cs"; Text = "simulator.Rng.CombatEnergyCostsState" },
-    @{ RelativePath = "src/Search/CombatBeamSolver.StateEvaluation.cs"; Text = "AppendRngState(ref key, simulator.Rng.CombatTargetsState);" },
+    @{ RelativePath = "src/Search/Probes/SearchEvaluator.cs"; Text = "AppendRngState(ref key, simulator.Rng.CombatTargetsState);" },
     @{ RelativePath = "src/Runtime/ContinuationStamp.cs"; Text = "simulator.Rng.CombatTargetsState" },
-    @{ RelativePath = "src/Search/CombatBeamSolver.StateEvaluation.cs"; Text = "AppendRngState(ref key, simulator.Rng.CombatOrbGenerationState);" },
+    @{ RelativePath = "src/Search/Probes/SearchEvaluator.cs"; Text = "AppendRngState(ref key, simulator.Rng.CombatOrbGenerationState);" },
     @{ RelativePath = "src/Runtime/ContinuationStamp.cs"; Text = "simulator.Rng.CombatOrbGenerationState" },
-    @{ RelativePath = "src/Search/CombatBeamSolver.StateEvaluation.cs"; Text = "AppendRngState(ref key, simulator.Rng.MonsterAiState);" },
+    @{ RelativePath = "src/Search/Probes/SearchEvaluator.cs"; Text = "AppendRngState(ref key, simulator.Rng.MonsterAiState);" },
     @{ RelativePath = "src/Runtime/ContinuationStamp.cs"; Text = "simulator.Rng.MonsterAiState" },
-    @{ RelativePath = "src/Search/CombatBeamSolver.StateEvaluation.cs"; Text = "AppendRngState(ref key, simulator.Rng.NicheState);" },
+    @{ RelativePath = "src/Search/Probes/SearchEvaluator.cs"; Text = "AppendRngState(ref key, simulator.Rng.NicheState);" },
     @{ RelativePath = "src/Runtime/ContinuationStamp.cs"; Text = "simulator.Rng.NicheState" },
     @{ RelativePath = "src/Engine/Common/PredictedCard.cs"; Text = "internal bool TryMarkPowerAfflictionEntryChecked()" },
     @{ RelativePath = "src/Engine/Common/PredictedCard.cs"; Text = "HasCheckedPowerAfflictionEntry = HasCheckedPowerAfflictionEntry," },
@@ -899,7 +911,7 @@ foreach ($check in @(
     @{ RelativePath = "src/Search/SimulatedCombatState.Fork.cs"; Text = "ReferenceEquals(view.Prefix, _rootRunHookListeners)" },
     @{ RelativePath = "src/Testing/Host/UnattendedTestRunner.Assertions.cs"; Text = "AssertFrozenRootRunListeners(scenario.CombatState, scenario.Player);" },
     @{ RelativePath = "src/Search/CombatBeamSolver.Models.cs"; Text = "SnapshotListBuffer<PredictedCard> SnapshotLiveCards = new()" },
-    @{ RelativePath = "src/Search/CombatBeamSolver.StateEvaluation.cs"; Text = "_run.SnapshotLiveCards.Rent()" },
+    @{ RelativePath = "src/Search/Probes/SearchEvaluator.cs"; Text = "_liveCards.Rent()" },
     @{ RelativePath = "src/Search/CombatBeamSolver.Phases.cs"; Text = "SearchWaveMemoryPolicy.ParentWaveCapacity(" })) {
     $checkPath = Join-Path $repositoryRoot $check.RelativePath
     if (-not (Select-String -LiteralPath $checkPath -SimpleMatch $check.Text -Quiet)) {
@@ -1090,7 +1102,6 @@ $expectedBeamFiles = @(
     "CombatBeamSolver.Expansion.cs",
     "CombatBeamSolver.Expansion.Candidates.cs",
     "CombatBeamSolver.Expansion.Choices.cs",
-    "CombatBeamSolver.Expansion.Opening.cs",
     "CombatBeamSolver.ExpansionExecutor.cs",
     "CombatBeamSolver.ExpansionPlan.cs",
     "CombatBeamSolver.Expansion.Replay.cs",
@@ -1188,7 +1199,7 @@ $beamStructureChecks = @(
     @{ File = "CombatBeamSolver.AdmittedExpansion.cs"; Text = "_completedActions != Actions!.Count" },
     @{ File = "CombatBeamSolver.AdmittedExpansion.cs"; Text = "_completedPotions != Potions!.Count" },
     @{ File = "CombatBeamSolver.EndTurnChoiceReplay.cs"; Text = "private PreparedEndTurnEvaluation EvaluatePreparedEndTurn(" },
-    @{ File = "CombatBeamSolver.TurnExecutionContinuation.cs"; Text = "private static SearchBoundaryReason ContinuePlayerStart(" },
+    @{ File = "CombatBeamSolver.RoundTransition.cs"; Text = "SearchRoundExecution.AdvanceRoundPlayerStart(" },
     @{ File = "CombatBeamSolver.TurnSetup.cs"; Text = "internal IReadOnlyList<TurnSetupRootCandidate> CaptureTurnSetupRootsForFlash()" },
     @{ File = "CombatBeamSolver.RoundTransition.cs"; Text = "private sealed class RoundReplayCheckpoint(" },
     @{ File = "CombatBeamSolver.RoundTransition.cs"; Text = "combat.EndActionChoices();" },
@@ -1948,7 +1959,7 @@ foreach ($check in @(
     @{ File = 'src/Search/CombatBeamSolver.Phases.cs'; Text = 'policy.RelicTargetsSatisfied(node.Snapshot.RelicCounters)' },
     @{ File = 'src/Search/CombatSearchCoordinator.cs'; Text = 'policy.RelicTargetsSatisfied(result.Snapshot.RelicCounters)' },
     @{ File = 'src/Runtime/SolvedRouteCache.cs'; Text = 'policy.RelicTargets' },
-    @{ File = 'src/Search/CombatBeamSolver.Expansion.Opening.cs'; Text = 'ApplyFixedPrefix(seed, prefix)' },
+    @{ File = 'src/Search/Probes/SearchProbeHelpers.cs'; Text = 'internal static SearchNode? ApplyFixedPrefix(' },
     @{ File = 'src/UI/SolverRelicStrategyPanel.cs'; Text = 'row.Enabled.ButtonPressed' })) {
     if (-not (Select-String -LiteralPath (Join-Path $repositoryRoot $check.File) -SimpleMatch $check.Text -Quiet)) {
         $violations.Add("$($check.File): missing relic policy ownership '$($check.Text)'")
@@ -2156,8 +2167,8 @@ if (-not (Select-String -LiteralPath (Join-Path $repositoryRoot 'src/Search/Comb
 if (-not (Select-String -LiteralPath (Join-Path $repositoryRoot 'src/Runtime/CombatRootSnapshot.cs') -SimpleMatch 'playerState.AllCards.Cast<AbstractModel>()' -Quiet)) {
     $violations.Add('Loop budget/history ownership changed: src/Runtime/CombatRootSnapshot.cs')
 }
-if (-not (Select-String -LiteralPath (Join-Path $repositoryRoot 'src/Search/CombatBeamSolver.StateEvaluation.cs') -SimpleMatch '_historyDependencies' -Quiet)) {
-    $violations.Add('Loop budget/history ownership changed: src/Search/CombatBeamSolver.StateEvaluation.cs')
+if (-not (Select-String -LiteralPath (Join-Path $repositoryRoot 'src/Search/Probes/SearchEvaluator.cs') -SimpleMatch '_historyDependencies' -Quiet)) {
+    $violations.Add('Loop budget/history ownership changed: src/Search/Probes/SearchEvaluator.cs')
 }
 if (-not (Select-String -LiteralPath (Join-Path $repositoryRoot 'src/Search/CombatHistoryCounterKey.cs') -SimpleMatch 'simulator.History.GetCounters(owner)' -Quiet)) {
     $violations.Add('History key must consume incremental totals')
@@ -2196,7 +2207,7 @@ if (-not (Select-String -LiteralPath (Join-Path $repositoryRoot 'src/Testing/Hos
 }
 foreach ($boundary in @(
     @('src/Search/CombatSearchCoordinator.PotionChain.cs', 'FrontierContinuationScheduler'),
-    @('src/Search/CombatBeamSolver.Expansion.Opening.cs', 'BuildFreeEntropicPotionActionsAfterPrefix'),
+    @('src/Search/Probes/OpeningProbe.Opening.cs', 'BuildFreeEntropicPotionActionsAfterPrefix'),
     @('src/Search/SimulatedCombatState.Potions.cs', 'IsFreeEntropicPotionAtSlot')
 )) {
     if (-not (Select-String -LiteralPath (Join-Path $repositoryRoot $boundary[0]) -SimpleMatch $boundary[1] -Quiet)) {

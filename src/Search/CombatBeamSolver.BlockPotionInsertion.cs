@@ -3,6 +3,8 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal sealed partial class CombatBeamSolver
 {
     private const string BlockPotionId = "BLOCK_POTION";
@@ -187,7 +189,7 @@ internal sealed partial class CombatBeamSolver
                 }
 
                 if (action.Kind is (PlanActionKind.PlayCard or PlanActionKind.UsePotion)
-                    && !CanApplyFixedPrefixAction(current, action))
+                    && !CanApplyFixedPrefixAction(ExpansionContext, current, action))
                 {
                     current.Snapshot.ReleaseSimulator();
                     return null;

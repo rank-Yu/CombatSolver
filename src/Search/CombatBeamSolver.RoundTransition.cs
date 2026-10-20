@@ -6,6 +6,8 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal sealed partial class CombatBeamSolver
 {
     private SearchBoundaryReason AdvanceRoundPlayerStart(
@@ -19,62 +21,10 @@ internal sealed partial class CombatBeamSolver
         TurnStartChoiceCursor roundChoices,
         bool takingExtraTurn,
         RoundReplayCheckpointCapture? capture = null)
-    {
-        simulatedCombat.SetActionChoiceTiming(PlanChoiceTiming.PlayerTurnStart);
-        using SearchMeasurementScope _ = _run.Performance.Measure(SearchMetricPhase.RoundPlayerStart);
-        simulatedCombat.CurrentSide = CombatSide.Player;
-        if (!takingExtraTurn)
-            simulatedCombat.RoundNumber++;
-        simulatedCombat.AdvancePlayerTurn(_player);
-        simulatedCombat.BeginSideTurn(_player.Creature);
-        simulatedCombat.SnapshotPowerAmountsAtTurnStart([_player.Creature]);
-
-        if (!CombatSolver.Engine.InCombat.Mirrors.HookMirrors.BeforeSideTurnStart(
-                simulator, simulatedCombat.CurrentSide, [_player.Creature]))
-        {
-            return SearchBoundaryReason.PendingChoice;
-        }
-
-        if (simulatedPlayer.Block > 0)
-        {
-            if (simulatedCombat.ShouldClearBlock(_player.Creature, out AbstractModel? preventer))
-                simulatedPlayer.DamageBlock(simulatedPlayer.Block, ValueProp.Move);
-            else
-                PersistentRelicSupport.TriggerAfterPreventingBlockClear(
-                    simulator,
-                    preventer,
-                    _player.Creature);
-        }
-        if (!CorePowerSupport.TriggerAfterBlockCleared(
-                simulator,
-                simulatedCombat,
-                _player.Creature))
-        {
-            return SearchBoundaryReason.PendingChoice;
-        }
-
-        if (PersistentRelicSupport.ShouldPlayerResetEnergy(simulatedCombat, _player))
-            playerState.LoseEnergy(playerState.Energy);
-        playerState.GainEnergy(PersistentPowerSupport.GetModifiedMaxEnergy(simulatedCombat, _player)
-            + simulatedCombat.ConsumeEnergyNextTurn(_player));
-        if (simulatedCombat.HasPendingChoice
-            || !PersistentPowerSupport.TriggerAfterEnergyReset(simulator, simulatedCombat, _player))
-        {
-            return SearchBoundaryReason.PendingChoice;
-        }
-        TurnStartRelicSupport.TriggerAfterEnergyReset(simulator, simulatedCombat, _player);
-        if (simulatedCombat.HasPendingChoice)
-            return SearchBoundaryReason.PendingChoice;
-        TurnStartRelicSupport.TriggerAfterEnergyResetLate(simulator, simulatedCombat, _player);
-        if (simulatedCombat.HasPendingChoice)
-            return SearchBoundaryReason.PendingChoice;
-        var progress = new PlayerStartProgress(_player, _startTurnNumber + roundIndex + 1,
-            rootSetup: false, takingExtraTurn, processedEnemyDeaths, shufflesCrossed, simulator.ShuffleEventCount);
-        SearchBoundaryReason result = ContinuePlayerStart(simulator, simulatedCombat, progress,
-            PlayerStartStage.BeforeHand, this, capture, _run.Performance);
-        shufflesCrossed = progress.ShufflesCrossed;
-        return result;
-    }
+        => SearchRoundExecution.AdvanceRoundPlayerStart(
+            RoundContext, simulator, simulatedCombat, playerState, simulatedPlayer,
+            roundIndex, processedEnemyDeaths, ref shufflesCrossed, roundChoices,
+            takingExtraTurn, capture);
 
     private RoundReplayCheckpoint? _roundReplayCheckpoint;
 
@@ -339,9 +289,9 @@ internal sealed partial class CombatBeamSolver
                 DrawCount = checkpoint.HandDrawCount ?? 0,
                 WillShuffle = checkpoint.HandDrawCount.HasValue,
             };
-            SearchBoundaryReason result = ContinuePlayerStart(simulator, combat, progress,
-                checkpoint.HandDrawCount.HasValue ? PlayerStartStage.Draw : PlayerStartStage.AfterPlayer,
-                metrics: _run.Performance);
+            SearchBoundaryReason result = SearchRoundExecution.ContinuePlayerStart(
+                RoundContext, simulator, combat, progress,
+                checkpoint.HandDrawCount.HasValue ? PlayerStartStage.Draw : PlayerStartStage.AfterPlayer);
             shufflesCrossed = progress.ShufflesCrossed;
             return result;
         }

@@ -16,10 +16,15 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 
 internal sealed partial class CombatBeamSolver
 {
     private IEnumerable<SearchNode> Expand(SearchNode node)
+        => ExpandBeam(node);
+
+    private IEnumerable<SearchNode> ExpandBeam(SearchNode node)
     {
         cancellationToken.ThrowIfCancellationRequested();
         SimulationSnapshot snapshot = node.Snapshot;

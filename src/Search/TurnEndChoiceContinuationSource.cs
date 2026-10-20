@@ -2,14 +2,14 @@ namespace CombatSolver;
 
 internal sealed class TurnEndChoiceContinuationSource : IFrontierContinuationSource
 {
-    private readonly CombatBeamSolver _builder;
+    private readonly OpeningProbe _builder;
     private readonly PlanAction[] _beforeEndTurn;
     private readonly string _chosenKey;
 
     public bool DeduplicatePrefixes => false;
 
     internal TurnEndChoiceContinuationSource(
-        CombatBeamSolver builder,
+        OpeningProbe builder,
         PlanAction[] beforeEndTurn,
         string chosenKey)
     {
@@ -20,7 +20,7 @@ internal sealed class TurnEndChoiceContinuationSource : IFrontierContinuationSou
 
     public IEnumerable<PlanAction[]> Enumerate()
         => _builder.BuildTurnEndChoiceActionsAfterPrefix(_beforeEndTurn)
-            .Where(action => CombatBeamSolver.TurnEndChoiceKey(action) != _chosenKey)
+            .Where(action => OpeningProbe.TurnEndChoiceKey(action) != _chosenKey)
             .Take(2)
             .Select(action => _beforeEndTurn.Append(action).ToArray());
 

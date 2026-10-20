@@ -1,5 +1,3 @@
-using System.Collections;
-using System.Reflection;
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Simulation;
 using MegaCrit.Sts2.Core.Combat;
@@ -45,6 +43,7 @@ internal sealed partial class UnattendedTestRunner
                 MaxCardBranchesPerNode = 24, SoftTimeBudgetMilliseconds = 5000 },
         };
         CombatBeamSolver driver = new(root, names, damage, policy, searchProfile: policy.Profile);
+        OpeningProbe probeProbe = new(root, names, damage, policy, searchProfile: policy.Profile);
         SimulationSnapshot seed = InvokeForcedTerminalReplay(driver, [], null, 0, null);
         PlanAction action = new(PlanActionKind.PlayCard, root.StartTurnNumber, CardId: "ACROBATICS");
         SimulationSnapshot probe = InvokeForcedTerminalReplay(driver, [action], seed, root.StartTurnNumber, null);
@@ -58,9 +57,7 @@ internal sealed partial class UnattendedTestRunner
             PlanCardChoice[] choices = CardChoiceSupport.BuildChoices(spec, names, 24, 24).ToArray();
             Check(choices.Count(choice => choice.Cards.Single().CardId == "FLICK_FLACK") == 2,
                 "duplicate-state choices must survive");
-            MethodInfo valueMethod = typeof(CombatBeamSolver).GetMethod("OpeningDiscardChoiceCardValue",
-                BindingFlags.Instance | BindingFlags.NonPublic)!;
-            object cache = Activator.CreateInstance(valueMethod.GetParameters()[3].ParameterType)!;
+            Dictionary<string, OpeningProbe.OpeningDiscardChoiceValues> cache = [];
             SearchNode seedNode = ForcedTerminalAnnotationNode(seed, null, null);
             int changedTokens = 0;
             foreach (PlanCardChoice choice in choices)
@@ -74,8 +71,7 @@ internal sealed partial class UnattendedTestRunner
                 try
                 {
                     SearchNode child = ForcedTerminalAnnotationNode(completed, seedNode, action with { Choice = choice });
-                    double value = (double)InvokeForcedTerminalMethod(driver, "OpeningDiscardChoiceCardValue",
-                        [seedNode, child, choice, cache])!;
+                    double value = probeProbe.OpeningDiscardChoiceCardValue(seedNode, child, choice, cache);
                     Check(value == expectedValue, "selection-time value differs for " + token.CardId);
                     SimPlayerCombatState after = completed.Simulator.State.GetPlayerCombatState(player);
                     bool retainedKey = after.Hand.Cards.Concat(after.DrawPile.Cards).Concat(after.DiscardPile.Cards)
@@ -92,22 +88,22 @@ internal sealed partial class UnattendedTestRunner
                     }
                     PlanCardChoice forged = choice with { Cards = [token with { StateKey = token.StateKey + "invalid" }] };
                     bool rejected = false;
-                    try { InvokeForcedTerminalMethod(driver, "OpeningDiscardChoiceCardValue", [seedNode, child, forged, cache]); }
+                    try { probeProbe.OpeningDiscardChoiceCardValue(seedNode, child, forged, cache); }
                     catch (InvalidOperationException error) when (error.Message.Contains("找不到选择时的卡牌", StringComparison.Ordinal)) { rejected = true; }
                     Check(rejected, "forged state key accepted");
                     rejected = false;
-                    try { InvokeForcedTerminalMethod(driver, "OpeningDiscardChoiceCardValue",
-                        [seedNode, child, choice with { ContextId = "foreign" }, cache]); }
+                    try { probeProbe.OpeningDiscardChoiceCardValue(
+                        seedNode, child, choice with { ContextId = "foreign" }, cache); }
                     catch (InvalidOperationException error) when (error.Message.Contains("选择上下文不一致", StringComparison.Ordinal)) { rejected = true; }
                     Check(rejected, "foreign choice context accepted");
                 }
                 finally { if (!ReferenceEquals(completed, nativeExpected)) completed.ReleaseSimulator(); }
             }
-            Check(changedTokens == 2 && ((IDictionary)cache).Count == 1, "one immutable probe table per sibling action");
+            Check(changedTokens == 2 && cache.Count == 1, "one immutable probe table per sibling action");
             foreach (int dop in new[] { 1, 2 })
             {
-                CombatBeamSolver opening = new(root, names, damage, policy with
-                    { MaxDegreeOfParallelism = dop, VerifyIncrementalSearch = dop == 1 }, searchProfile: policy.Profile);
+                _ = dop;
+                OpeningProbe opening = new(root, names, damage, policy, searchProfile: policy.Profile);
                 IReadOnlyList<PlanAction> candidates = await Task.Run(() => opening.BuildOpeningHandSetupActions());
                 Check(candidates.Count > 0 && candidates.All(item => item.CardId == "ACROBATICS"),
                     "opening selection failed at DOP " + dop);

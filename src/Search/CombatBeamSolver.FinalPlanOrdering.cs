@@ -1,5 +1,7 @@
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal sealed partial class CombatBeamSolver
 {
     private sealed class FinalPlanOrdering(
@@ -139,7 +141,7 @@ internal sealed partial class CombatBeamSolver
                         $"won={diagnostic.CompleteVictory} hp={diagnostic.Snapshot.PlayerHp} " +
                         $"projected_hp={diagnostic.Features.ProjectedPlayerHp} " +
                         $"enemy_hp={diagnostic.Features.EnemyHp} " +
-                        $"actions={string.Join(',', diagnostic.Node.Actions.Select(CombatBeamSolver.PolicyActionToken))}");
+                        $"actions={string.Join(',', diagnostic.Node.Actions.Select(SearchProbeHelpers.PolicyActionToken))}");
                 }
             }
             int potionFreeBaselineIndex = -1;
@@ -195,7 +197,7 @@ internal sealed partial class CombatBeamSolver
                         $"won={potionFreeWon} hp_deficit={potionFreeBaseline.HpDeficit} " +
                         $"enemy_hp={potionFreeBaseline.Features.EnemyHp} " +
                         $"boundary={potionFreeBaseline.Features.BoundaryReason} " +
-                        $"actions={string.Join(',', potionFreeBaseline.Node.Actions.Select(CombatBeamSolver.PolicyActionToken))}");
+                        $"actions={string.Join(',', potionFreeBaseline.Node.Actions.Select(SearchProbeHelpers.PolicyActionToken))}");
                 }
                 else
                 {

@@ -18,15 +18,11 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 
 internal sealed partial class CombatBeamSolver
 {
-    private static int AccumulateEnemyHpLost(
-        SearchNode parent,
-        SimulationSnapshot childSnapshot)
-        => checked(parent.CumulativeEnemyHpLost
-            + Math.Max(0, parent.Snapshot.RawEnemyHp - childSnapshot.RawEnemyHp));
-
     private List<SearchNode> AnnotateTurnOutcomes(List<SearchNode> ended)
     {
         if (ended.Count == 0)
@@ -327,9 +323,6 @@ internal sealed partial class CombatBeamSolver
             current = parent;
         return current;
     }
-
-    private double ApplySoldHpPenalty(double score, int futureSoldHp)
-        => score + futureSoldHp * SoldHpPenalty();
 
     private static double SoldHpPenalty()
         => SolverWeights.SoldHpPenalty;

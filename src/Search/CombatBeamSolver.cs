@@ -19,6 +19,8 @@ using BufferCard = MegaCrit.Sts2.Core.Models.Cards.Buffer;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal readonly record struct PrimarySearchIncumbent(
     int StrategicHpDeficit,
     int CombatEndedTurn,
@@ -67,6 +69,60 @@ internal sealed partial class CombatBeamSolver(
     private readonly SearchRunContext _run = new(
         policy.MeasurePhasePerformance,
         policy.FramePressureSignal);
+    private SearchEvaluator? _evaluator;
+    private SearchRoundContext? _roundContext;
+    private SearchExpansionContext? _expansionContext;
+    private CandidateSelectionContext? _candidateSelection;
+    private CandidateSelectionContext CandidateSelection => _candidateSelection ??= new(
+        _profile,
+        _theftPolicy,
+        _developmentStrategy,
+        onProtected: count => _run.ActionAdmissionRepresentativesProtected += count,
+        _detailedDiagnostics,
+        policy.Diagnostics.Info,
+        isRoutingChoice: node => CurrentTurnRoutingChoice(node) != null);
+    private SearchExpansionContext ExpansionContext => _expansionContext ??= new SearchExpansionContext(
+        _player,
+        displayNames,
+        Evaluator,
+        root.PotionSlotCount,
+        _maximumPotionUses,
+        _earliestPotionTurn,
+        _potionStrategy,
+        _potionPolicy,
+        _forceAllPotionsDisabled,
+        onDuplicateCard: () => _run.DuplicateCardBranchesPruned++,
+        decorateNode: AttachCycleSchedulingEvidence);
+    private SearchRoundContext RoundContext => _roundContext ??= new SearchRoundContext(
+        _player,
+        _startTurnNumber,
+        _run.Performance,
+        recordExecutionFrames: true,
+        captureBeforeHandDraw: (capture, simulator, combat, cursor, deaths, shuffles,
+            takingExtraTurn, sideStarted, drawCount, willShuffle) =>
+            ((RoundReplayCheckpointCapture?)capture)?.CaptureBeforeHandDraw(
+                this, simulator, combat, cursor, deaths, shuffles,
+                takingExtraTurn, sideStarted, drawCount, willShuffle),
+        capture: (capture, simulator, combat, cursor, deaths, shuffles,
+            takingExtraTurn, sideStarted) =>
+            ((RoundReplayCheckpointCapture?)capture)?.Capture(
+                this, simulator, combat, cursor, deaths, shuffles,
+                takingExtraTurn, sideStarted));
+    private SearchEvaluator Evaluator => _evaluator ??= new SearchEvaluator(
+        root,
+        _player,
+        policy,
+        _run.Performance,
+        _run.SnapshotLiveCards,
+        _run.ThreatProjectionCache,
+        _run.CoverageCache,
+        _startTurnNumber,
+        _historyDependencies,
+        _growthBudgets,
+        _relicTargets,
+        _ignoreLongTermRewards,
+        _strategicBossHpRelief,
+        _theftPolicy);
     private readonly bool _includeTurnSetup = policy.IncludeTurnSetup;
     /// <summary>
     /// The turn-setup choices the caller already selected (the Flash materializer). Null keeps the

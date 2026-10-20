@@ -19,7 +19,7 @@ internal static partial class CombatSearchCoordinator
         SolverSearchProfile profile = context.Profile;
         if (policy.IncludeTurnSetup)
             return baseline;
-        CombatBeamSolver builder = new(root, displayNames, battleDamage, policy,
+        OpeningProbe builder = NewOpeningProbe(root, displayNames, battleDamage, policy,
             cancellationToken, progressCallback, profile,
             potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
             maximumPotionUses: 1);
@@ -114,7 +114,7 @@ internal static partial class CombatSearchCoordinator
             policy.Diagnostics.Info("[CombatSolver/Test] POWER_ROUTE_PORTFOLIO stopped reason=AcceptableBattleHpLoss members_run=0");
             return baseline;
         }
-        CombatBeamSolver prefixBuilder = new(
+        OpeningProbe prefixBuilder = NewOpeningProbe(
             root,
             displayNames,
             battleDamage,

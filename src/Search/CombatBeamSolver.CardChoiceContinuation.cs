@@ -2,6 +2,8 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal sealed partial class CombatBeamSolver
 {
     private CardChoiceReplayCheckpoint? _cardChoiceReplayCheckpoint;
@@ -32,7 +34,7 @@ internal sealed partial class CombatBeamSolver
                 PlanCardChoice[] choices;
                 try
                 {
-                    CardChoiceSpec spec = BuildPrimaryCardChoiceSpec(probe)!;
+                    CardChoiceSpec spec = BuildPrimaryCardChoiceSpec(_player, probe)!;
                     choices = CardChoiceSupport.BuildChoices(spec, displayNames, 32, 32).ToArray();
                 }
                 finally { probe.ReleaseSimulator(); }

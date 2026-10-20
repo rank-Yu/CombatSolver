@@ -4,6 +4,8 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal sealed partial class CombatBeamSolver
 {
     // An additive probe. Budget-limited safe prefixes rejoin the ordinary frontier.

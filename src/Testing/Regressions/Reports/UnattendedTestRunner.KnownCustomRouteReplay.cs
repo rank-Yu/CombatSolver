@@ -76,7 +76,7 @@ internal sealed partial class UnattendedTestRunner
                         IReadOnlyList<PredictedCard> hand = parent.Simulator.State.GetPlayerCombatState(player).Hand.Cards;
                         PlanAction descriptor = new(PlanActionKind.PlayCard, 1,
                             CardId: cardIds[index], CardOccurrence: 0);
-                        PredictedCard card = CombatBeamSolver.FindCardForReplay(hand, descriptor)
+                        PredictedCard card = SearchProbeHelpers.FindCardForReplay(hand, descriptor)
                             ?? throw new InvalidOperationException($"旧路线第 {index} 步找不到 {cardIds[index]}#0。");
                         if (card.Preview.CurrentUpgradeLevel != 1)
                             throw new InvalidOperationException($"旧路线第 {index} 步并非日志中的升级牌。");

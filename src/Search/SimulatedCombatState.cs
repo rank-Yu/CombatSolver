@@ -39,6 +39,8 @@ internal sealed partial class SimulatedCombatState
       ICombatPredictionStateOwner, ICombatPredictionRootCaptureBoundary,
       ICombatPredictionRootMaterializable, IPredictionForkBoundary
 {
+    internal const string ExplodeMoveId = "EXPLODE_MOVE";
+
     private readonly IRunState _runState;
     private readonly IReadOnlyList<Creature> _playerCreatures;
     private readonly IReadOnlyList<Player> _players;

@@ -117,7 +117,7 @@ internal static partial class CombatSearchCoordinator
                     .ToArray();
                 if (opening.LastOrDefault()?.Kind != PlanActionKind.EndTurn)
                     continue;
-                CombatBeamSolver targetBuilder = new(root, displayNames,
+                OpeningProbe targetBuilder = NewOpeningProbe(root, displayNames,
                     battleDamage, policy, cancellationToken, progressCallback,
                     discoveryProfile, potionPolicyOverride: SolverPotionPolicy.Disabled,
                     maximumPotionUses: 0);
@@ -280,7 +280,7 @@ internal static partial class CombatSearchCoordinator
             }
             if (refineNearZeroLoss && selected.ProjectedBattleHpLost > 0)
             {
-                CombatBeamSolver NewPrefixBuilder() => new(root, displayNames, battleDamage,
+                OpeningProbe NewPrefixBuilder() => NewOpeningProbe(root, displayNames, battleDamage,
                     policy, cancellationToken, progressCallback, policy.Profile,
                     potionPolicyOverride: SolverPotionPolicy.Disabled,
                     maximumPotionUses: 0);
@@ -421,7 +421,7 @@ internal static partial class CombatSearchCoordinator
                 && prefix.All(action => action.Kind != PlanActionKind.UsePotion)
                 && refinementWindow.CanStart(20_000))
             {
-                CombatBeamSolver prefixBuilder = new(root, displayNames, battleDamage,
+                OpeningProbe prefixBuilder = NewOpeningProbe(root, displayNames, battleDamage,
                     policy, cancellationToken, progressCallback, policy.Profile,
                     potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
                     maximumPotionUses: selected.ExplicitPotionCount);
@@ -516,12 +516,12 @@ internal static partial class CombatSearchCoordinator
                 { Kind: PlanActionKind.EndTurn, TurnStartChoices: { Count: > 0 } } chosenEndTurn
                 && ledger.RemainingRequestMillisecondsLong > 25_000)
             {
-                CombatBeamSolver choiceBuilder = new(root, displayNames, battleDamage,
+                OpeningProbe choiceBuilder = NewOpeningProbe(root, displayNames, battleDamage,
                     policy, cancellationToken, progressCallback, policy.Profile,
                     potionPolicyOverride: SolverPotionPolicy.Disabled,
                     maximumPotionUses: 0);
                 PlanAction[] beforeEndTurn = firstTurn[..^1];
-                string chosenKey = CombatBeamSolver.TurnEndChoiceKey(chosenEndTurn);
+                string chosenKey = OpeningProbe.TurnEndChoiceKey(chosenEndTurn);
                 foreach (ContinuationSearchOutcome outcome in
                          new FrontierContinuationScheduler(context).Run(
                              new TurnEndChoiceContinuationSource(
@@ -540,7 +540,7 @@ internal static partial class CombatSearchCoordinator
                         && candidate.ProjectedBattleHpLost < selected.ProjectedBattleHpLost
                         && IsBetterPotionPolicyResult(root, policy, candidate, selected);
                     policy.Diagnostics.Info($"[CombatSolver/Test] TURN_END_CHOICE_POSTERIOR " +
-                        $"choice={CombatBeamSolver.TurnEndChoiceKey(alternative)} " +
+                        $"choice={OpeningProbe.TurnEndChoiceKey(alternative)} " +
                         $"hp_lost={candidate.ProjectedBattleHpLost} " +
                         $"potions={candidate.PotionCount} selected={improved}");
                     if (improved)
@@ -551,7 +551,7 @@ internal static partial class CombatSearchCoordinator
                     .ToArray();
                 if (selectedFirstTurn.LastOrDefault() is
                     { Kind: PlanActionKind.EndTurn, TurnStartChoices: { Count: > 0 } } selectedEndTurn
-                    && CombatBeamSolver.TurnEndChoiceKey(selectedEndTurn) != chosenKey)
+                    && OpeningProbe.TurnEndChoiceKey(selectedEndTurn) != chosenKey)
                 {
                     PlanAction[] played = selectedFirstTurn[..^1];
                     for (int index = 0; index + 1 < played.Length; index++)
@@ -567,8 +567,8 @@ internal static partial class CombatSearchCoordinator
                             break;
                         PlanAction? endTurn = choiceBuilder
                             .BuildTurnEndChoiceActionsAfterPrefix(shorter)
-                            .FirstOrDefault(action => CombatBeamSolver.TurnEndChoiceKey(action)
-                                == CombatBeamSolver.TurnEndChoiceKey(selectedEndTurn));
+                            .FirstOrDefault(action => OpeningProbe.TurnEndChoiceKey(action)
+                                == OpeningProbe.TurnEndChoiceKey(selectedEndTurn));
                         if (endTurn == null)
                             continue;
                         foreach (ContinuationSearchOutcome outcome in

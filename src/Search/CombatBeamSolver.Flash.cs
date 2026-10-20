@@ -2,6 +2,8 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 /// <summary>A Flash action's choices do not line up with the choices the existing engine asks for.</summary>
 internal sealed class FlashChoiceMismatchException(string message) : InvalidOperationException(message);
 
@@ -23,7 +25,7 @@ internal sealed partial class CombatBeamSolver
     /// </summary>
     internal SimulationSnapshot? ReplayFixedPrefixForFlash(SimulationSnapshot rootSnapshot)
     {
-        SearchNode seed = CreateOpeningSearchSeed(rootSnapshot);
+        SearchNode seed = OpeningProbe.CreateOpeningSearchSeed(rootSnapshot);
         return ApplyFixedPrefix(seed)?.Snapshot;
     }
 
@@ -35,7 +37,7 @@ internal sealed partial class CombatBeamSolver
     internal int ReplayFixedPrefixPlanPayoffForFlash(PlanCommitment plan)
     {
         SimulationSnapshot rootSnapshot = Replay([]);
-        SearchNode seed = CreateOpeningSearchSeed(rootSnapshot);
+        SearchNode seed = OpeningProbe.CreateOpeningSearchSeed(rootSnapshot);
         SearchNode? node = ApplyFixedPrefix(seed);
         return node == null ? 0 : plan.CountRealizedPayoffs(node);
     }

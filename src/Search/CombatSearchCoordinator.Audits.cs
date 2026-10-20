@@ -120,7 +120,7 @@ internal static partial class CombatSearchCoordinator
         IReadOnlyList<PlanAction> openingPotions = policy.PotionPolicy == SolverPotionPolicy.Disabled
             || maximumSmartPotionUses == 0
             ? []
-            : new CombatBeamSolver(
+            : NewOpeningProbe(
                     root,
                     displayNames,
                     battleDamage,
@@ -133,7 +133,7 @@ internal static partial class CombatSearchCoordinator
                 .BuildOpeningPotionActions();
         IReadOnlyList<PlanAction> generatedCardPotions = openingPotions.Count == 0
             ? []
-            : new CombatBeamSolver(
+            : NewOpeningProbe(
                     root,
                     displayNames,
                     battleDamage,
@@ -144,7 +144,7 @@ internal static partial class CombatSearchCoordinator
                     potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
                     maximumPotionUses: maximumSmartPotionUses)
                 .SelectGeneratedCardPotionActions(openingPotions);
-        IReadOnlyList<PlanAction> openingResources = new CombatBeamSolver(
+        IReadOnlyList<PlanAction> openingResources = NewOpeningProbe(
                 root,
                 displayNames,
                 battleDamage,
@@ -156,7 +156,7 @@ internal static partial class CombatSearchCoordinator
         List<(PlanAction Potion, PlanAction Power)> potionPowerPairs = [];
         foreach (PlanAction openingPotion in openingPotions)
         {
-            IReadOnlyList<PlanAction> powers = new CombatBeamSolver(
+            IReadOnlyList<PlanAction> powers = NewOpeningProbe(
                     root,
                     displayNames,
                     battleDamage,
@@ -186,7 +186,7 @@ internal static partial class CombatSearchCoordinator
         FrontierContinuationScheduler continuationScheduler = new(context);
         foreach (PlanAction openingResource in openingResources)
         {
-            PlanAction? defensiveFollowUp = new CombatBeamSolver(
+            PlanAction? defensiveFollowUp = NewOpeningProbe(
                     root,
                     displayNames,
                     battleDamage,
@@ -312,7 +312,7 @@ internal static partial class CombatSearchCoordinator
                 continue;
             }
 
-            PlanAction? defensiveFollowUp = new CombatBeamSolver(
+            PlanAction? defensiveFollowUp = NewOpeningProbe(
                     root,
                     displayNames,
                     battleDamage,
@@ -419,7 +419,7 @@ internal static partial class CombatSearchCoordinator
             List<SolverResult> searches = [primary, potionFree];
             SolverResult selected = primary;
             FrontierContinuationScheduler continuationScheduler = new(context);
-            IReadOnlyList<PlanAction> openingPotions = new CombatBeamSolver(
+            IReadOnlyList<PlanAction> openingPotions = NewOpeningProbe(
                     root,
                     displayNames,
                     battleDamage,
@@ -467,7 +467,7 @@ internal static partial class CombatSearchCoordinator
                 if (primary.PotionCount != 2)
                     continue;
 
-                IReadOnlyList<PlanAction> secondPotions = new CombatBeamSolver(
+                IReadOnlyList<PlanAction> secondPotions = NewOpeningProbe(
                         root,
                         displayNames,
                         battleDamage,
@@ -518,7 +518,7 @@ internal static partial class CombatSearchCoordinator
                         continue;
 
                     PlanAction[] pairPrefix = [openingPotion, secondPotion];
-                    PlanAction? defensiveFollowUp = new CombatBeamSolver(
+                    PlanAction? defensiveFollowUp = NewOpeningProbe(
                             root,
                             displayNames,
                             battleDamage,
@@ -706,7 +706,7 @@ internal static partial class CombatSearchCoordinator
                     && HasReachedProvablePrimaryQualityLowerBound(root, policy, gradient)))
                 return gradient;
 
-            CombatBeamSolver builder = new(root, displayNames, battleDamage, policy,
+            OpeningProbe builder = NewOpeningProbe(root, displayNames, battleDamage, policy,
                 searchCancellationToken, progressCallback, profile,
                 potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
                 maximumPotionUses: 1);

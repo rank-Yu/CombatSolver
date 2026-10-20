@@ -3,7 +3,7 @@ namespace CombatSolver;
 internal static partial class CombatSearchCoordinator
 {
     private static PlanAction[]? BuildRevealedPowerRepairPrefix(
-        CombatBeamSolver builder, IReadOnlyList<PlanAction> openings, SolverSearchProfile profile)
+        OpeningProbe builder, IReadOnlyList<PlanAction> openings, SolverSearchProfile profile)
     {
         foreach (PlanAction opening in openings.Take(3))
         {
@@ -23,7 +23,7 @@ internal static partial class CombatSearchCoordinator
     }
 
     private static PlanAction[]? FindForcedPowerTurnBoundary(
-        CombatRootSnapshot root, SearchPolicySnapshot policy, CombatBeamSolver builder,
+        CombatRootSnapshot root, SearchPolicySnapshot policy, OpeningProbe builder,
         SolverResult candidate)
     {
         IReadOnlyList<PlanAction> actions = candidate.BestNode.Actions;

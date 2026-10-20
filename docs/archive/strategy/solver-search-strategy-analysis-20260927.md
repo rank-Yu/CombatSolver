@@ -140,7 +140,7 @@ Entry / 回合 Hook
 
 ### 3.5 开局前缀
 
-[`CombatBeamSolver.Expansion.Opening`](../../../src/Search/CombatBeamSolver.Expansion.Opening.cs) 提供一组“从原根真实回放过的前缀”构造函数，供协调器组合：
+[`CombatBeamSolver.Expansion.Opening`](../../../src/Search/Probes/OpeningProbe.Opening.cs) 提供一组“从原根真实回放过的前缀”构造函数，供协调器组合：
 
 - 能力：开局可打能力、检索出的能力、升级后再打的能力、白噪声生成的能力、双能力续接；
 - 药水：开局必需药、格挡药、生成牌药、`TouchOfInsanity`、赌徒特酿全换；
@@ -534,7 +534,7 @@ StrategicHpDeficit = cumulativeHpLost
 | 请求内主搜、药水与补充探索 | [`CombatSearchCoordinator`](../../../src/Search/CombatSearchCoordinator.cs) 及 `.FailureRecovery`、`.PowerRoutes`、`.NoveltyPortfolio`、`.EarlyTurnExploration` |
 | 回合层与预算推进 | [`CombatBeamSolver.Phases`](../../../src/Search/CombatBeamSolver.Phases.cs) 的 `SolveCore` |
 | 动作候选与支配 | [`CombatBeamSolver.Expansion`](../../../src/Search/CombatBeamSolver.Expansion.cs)、[`Expansion.Candidates`](../../../src/Search/CombatBeamSolver.Expansion.Candidates.cs) |
-| 开局前缀 | [`CombatBeamSolver.Expansion.Opening`](../../../src/Search/CombatBeamSolver.Expansion.Opening.cs) |
+| 开局前缀 | [`CombatBeamSolver.Expansion.Opening`](../../../src/Search/Probes/OpeningProbe.Opening.cs) |
 | 选牌预算与回放 | [`CardChoiceSupport`](../../../src/Search/CardChoiceSupport.cs)、[`Expansion.Choices`](../../../src/Search/CombatBeamSolver.Expansion.Choices.cs)、[`PrimaryChoiceReplay`](../../../src/Search/CombatBeamSolver.PrimaryChoiceReplay.cs) |
 | 威胁、快照与基础分 | [`CombatBeamSolver.StateEvaluation`](../../../src/Search/CombatBeamSolver.StateEvaluation.cs) |
 | 持续效果与联动价值 | [`StrategicEffectModel`](../../../src/Search/StrategicEffectModel.cs)、[`PowerCardValuation`](../../../src/Search/PowerCardValuation) |

@@ -3,6 +3,8 @@ using MegaCrit.Sts2.Core.Models;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal sealed partial class CombatBeamSolver
 {
     private PotionChoiceReplayCheckpoint? _potionChoiceReplayCheckpoint;

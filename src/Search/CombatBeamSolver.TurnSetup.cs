@@ -4,6 +4,8 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 /// <summary>One turn-setup search root: the choices answering the native setup page, and the play state.</summary>
 internal sealed record TurnSetupRootCandidate(
     IReadOnlyList<PlanCardChoice> Choices,

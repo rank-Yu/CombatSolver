@@ -19,6 +19,8 @@ using BufferCard = MegaCrit.Sts2.Core.Models.Cards.Buffer;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 
 internal sealed partial class CombatBeamSolver
 {
@@ -2190,22 +2192,6 @@ internal sealed partial class CombatBeamSolver
             SearchBoundaryReason.UnsupportedEffect => 3,
             SearchBoundaryReason.EventDefeat => 4,
             _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, null),
-        };
-
-    private static string PolicyActionToken(PlanAction action)
-        => action.Kind switch
-        {
-            PlanActionKind.PlayCard => action.Choice == null
-                ? $"{action.Turn}:C:{action.CardId}"
-                : $"{action.Turn}:C:{action.CardId}[{string.Join(',', action.Choice.Cards.Select(card => card.CardId))}]",
-            PlanActionKind.UsePotion => action.Choice == null
-                ? $"{action.Turn}:P:{action.PotionId}"
-                : $"{action.Turn}:P:{action.PotionId}[{string.Join(',', action.Choice.Cards.Select(card => card.CardId))}]",
-            PlanActionKind.EndTurn => action.TurnStartChoices is not { Count: > 0 }
-                ? $"{action.Turn}:E"
-                : $"{action.Turn}:E:" + string.Join(';', action.TurnStartChoices.Select(choice =>
-                    $"{choice.SourceId}={string.Join(',', choice.Cards.Select(card => card.CardId))}")),
-            _ => throw new ArgumentOutOfRangeException(nameof(action), action.Kind, null),
         };
 
     private static string PolicyActionIdentityToken(PlanAction action)

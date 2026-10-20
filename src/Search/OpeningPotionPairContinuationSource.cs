@@ -2,15 +2,15 @@ namespace CombatSolver;
 
 internal sealed class OpeningPotionPairContinuationSource : IFrontierContinuationSource
 {
-    private readonly CombatBeamSolver _builder;
+    private readonly OpeningProbe _builder;
 
     public bool DeduplicatePrefixes => true;
 
     internal OpeningPotionPairContinuationSource(SearchPassContext context)
     {
-        _builder = new CombatBeamSolver(context.Root, context.DisplayNames,
+        _builder = new OpeningProbe(context.Root, context.DisplayNames,
             context.BattleDamage, context.Policy, context.CancellationToken,
-            context.ProgressCallback, context.Policy.Profile,
+            searchProfile: context.Policy.Profile,
             potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
             maximumPotionUses: 2);
     }

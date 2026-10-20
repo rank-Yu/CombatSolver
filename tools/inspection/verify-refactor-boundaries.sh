@@ -4,7 +4,18 @@ set -Eeuo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$script_dir/../.." && pwd)"
 search_root="$repository_root/src/Search"
+probe_root="$search_root/Probes"
 violations=()
+if rg -q 'CombatBeamSolver' "$probe_root" --glob '*.cs'; then
+    violations+=("Opening probes must not reference CombatBeamSolver")
+fi
+if [[ ! -f "$probe_root/OpeningProbe.cs" || ! -f "$probe_root/SearchEvaluator.cs" ]]; then
+    violations+=("Opening probe component is missing")
+fi
+if ! python3 -B "$repository_root/tools/inspection/check_probe_boundaries.py" "$repository_root" >/tmp/b1-probe-boundaries.log 2>&1; then
+    violations+=("Shared probe/execution methods still have solver method bodies: $(tr '
+' ';' </tmp/b1-probe-boundaries.log)")
+fi
 for corpus_input in tools/search/StrategyCorpus/run.py tools/search/StrategyCorpus/compare.py coverage/corpora/strategy/p0.json; do
     [[ -f "$repository_root/$corpus_input" ]] || violations+=("Strategy corpus input missing: $corpus_input")
 done
@@ -18,12 +29,12 @@ if ! rg -Fq 'PotionValuationRegistry.Default' "$repository_root/src/Search/Potio
     violations+=("Potion valuation classifications remain outside the registry")
 fi
 [[ -f "$repository_root/src/Search/OpeningActionRegistry.cs" ]] || violations+=("Opening action registry missing")
-if ! rg -Fq 'OpeningActionRegistry.Default' "$repository_root/src/Search/CombatBeamSolver.Expansion.Opening.cs" ||
-   rg -q '"(WHITE_NOISE|NIGHTMARE|DUPLICATOR)"' "$repository_root/src/Search/CombatBeamSolver.Expansion.Opening.cs"; then
+if ! rg -Fq 'OpeningActionRegistry.Default' "$repository_root/src/Search/Probes/OpeningProbe.Opening.cs" ||
+   rg -q '"(WHITE_NOISE|NIGHTMARE|DUPLICATOR)"' "$repository_root/src/Search/Probes/OpeningProbe.Opening.cs"; then
     violations+=("Opening action IDs remain outside the registry")
 fi
 if [[ ! -f "$repository_root/src/Search/TargetPlanRegistry.cs" ]] ||
-   ! rg -Fq 'TargetPlanRegistry.Default' "$repository_root/src/Search/CombatBeamSolver.Expansion.Opening.cs"; then
+   ! rg -Fq 'TargetPlanRegistry.Default' "$repository_root/src/Search/Probes/OpeningProbe.Opening.cs"; then
     violations+=("Opening target plans are not registered")
 fi
 strategy_id_literal_count=$(rg -o --no-filename '"[A-Z][A-Z0-9_]{4,}"' "$repository_root/src/Search" \
@@ -136,7 +147,7 @@ if ! rg -Fq 'PlanMechanismRegistry.Default.DeferredCopies' "$repository_root/src
    ! rg -Fq 'BuildOpeningCopyActionsAfterPrefix(' "$repository_root/src/Search/CombatSearchCoordinator.PlanSearch.cs" ||
    rg -Fq 'PlanChoiceEffect.Nightmare' "$repository_root/src/Search/CombatSearchCoordinator.PlanSearch.cs" ||
    rg -Fq 'OpeningCandidatePurpose.NightmareCopyCard' "$repository_root/src/Search/CombatSearchCoordinator.PlanSearch.cs" ||
-   ! rg -Fq 'HasPlayableChoiceEffect(' "$repository_root/src/Search/CombatBeamSolver.Expansion.Opening.cs"; then
+   ! rg -Fq 'HasPlayableChoiceEffect(' "$repository_root/src/Search/Probes/OpeningProbe.Opening.cs"; then
     violations+=("Plan copy discovery must follow registered choice semantics")
 fi
 if ! rg -Fq 'ImmutableArray<DeferredCopyPlanRule>' "$repository_root/src/Search/PlanMechanismRegistry.cs" ||
@@ -518,7 +529,7 @@ for relative_path in \
     src/Search/CombatBeamSolver.Expansion.cs \
     src/Search/CombatBeamSolver.Expansion.Candidates.cs \
     src/Search/CombatBeamSolver.Expansion.Choices.cs \
-    src/Search/CombatBeamSolver.Expansion.Opening.cs \
+    src/Search/Probes/OpeningProbe.Opening.cs \
     src/Search/CombatBeamSolver.Expansion.Replay.cs \
     src/Runtime/LiveEndTurnRiskEvaluator.cs \
     src/Testing/Host/UnattendedTestRunner.cs \
@@ -550,7 +561,6 @@ legacy_loop_guard_paths=(
     "$search_root/CombatBeamSolver.Expansion.cs"
     "$search_root/CombatBeamSolver.Expansion.Candidates.cs"
     "$search_root/CombatBeamSolver.Expansion.Choices.cs"
-    "$search_root/CombatBeamSolver.Expansion.Opening.cs"
     "$search_root/CombatBeamSolver.Expansion.Replay.cs"
     "$search_root/CombatBeamSolver.ParallelExpansion.cs"
     "$search_root/SolverWeights.cs"
@@ -863,23 +873,23 @@ src/Search/CombatBeamSolver.Phases.cs	SearchWaveMemoryPolicy.ParentWaveCapacity(
 src/Engine/InCombat/Simulation/CombatPredictionRngSet.cs	private sealed class FrozenStream(PredictionRngState state)
 src/Engine/InCombat/Simulation/CombatPredictionRngSet.cs	new FrozenStream(_mutable.CaptureState())
 src/Testing/Host/UnattendedTestRunner.Assertions.cs	AssertLazyRngFork(scenario.CombatState.RunState.Rng)
-src/Search/CombatBeamSolver.StateEvaluation.cs	AppendRngState(ref key, simulator.Rng.ShuffleState);
+src/Search/Probes/SearchEvaluator.cs	AppendRngState(ref key, simulator.Rng.ShuffleState);
 src/Runtime/ContinuationStamp.cs	simulator.Rng.ShuffleState
-src/Search/CombatBeamSolver.StateEvaluation.cs	AppendRngState(ref key, simulator.Rng.CombatCardGenerationState);
+src/Search/Probes/SearchEvaluator.cs	AppendRngState(ref key, simulator.Rng.CombatCardGenerationState);
 src/Runtime/ContinuationStamp.cs	simulator.Rng.CombatCardGenerationState
-src/Search/CombatBeamSolver.StateEvaluation.cs	AppendRngState(ref key, simulator.Rng.CombatPotionGenerationState);
+src/Search/Probes/SearchEvaluator.cs	AppendRngState(ref key, simulator.Rng.CombatPotionGenerationState);
 src/Runtime/ContinuationStamp.cs	simulator.Rng.CombatPotionGenerationState
-src/Search/CombatBeamSolver.StateEvaluation.cs	AppendRngState(ref key, simulator.Rng.CombatCardSelectionState);
+src/Search/Probes/SearchEvaluator.cs	AppendRngState(ref key, simulator.Rng.CombatCardSelectionState);
 src/Runtime/ContinuationStamp.cs	simulator.Rng.CombatCardSelectionState
-src/Search/CombatBeamSolver.StateEvaluation.cs	AppendRngState(ref key, simulator.Rng.CombatEnergyCostsState);
+src/Search/Probes/SearchEvaluator.cs	AppendRngState(ref key, simulator.Rng.CombatEnergyCostsState);
 src/Runtime/ContinuationStamp.cs	simulator.Rng.CombatEnergyCostsState
-src/Search/CombatBeamSolver.StateEvaluation.cs	AppendRngState(ref key, simulator.Rng.CombatTargetsState);
+src/Search/Probes/SearchEvaluator.cs	AppendRngState(ref key, simulator.Rng.CombatTargetsState);
 src/Runtime/ContinuationStamp.cs	simulator.Rng.CombatTargetsState
-src/Search/CombatBeamSolver.StateEvaluation.cs	AppendRngState(ref key, simulator.Rng.CombatOrbGenerationState);
+src/Search/Probes/SearchEvaluator.cs	AppendRngState(ref key, simulator.Rng.CombatOrbGenerationState);
 src/Runtime/ContinuationStamp.cs	simulator.Rng.CombatOrbGenerationState
-src/Search/CombatBeamSolver.StateEvaluation.cs	AppendRngState(ref key, simulator.Rng.MonsterAiState);
+src/Search/Probes/SearchEvaluator.cs	AppendRngState(ref key, simulator.Rng.MonsterAiState);
 src/Runtime/ContinuationStamp.cs	simulator.Rng.MonsterAiState
-src/Search/CombatBeamSolver.StateEvaluation.cs	AppendRngState(ref key, simulator.Rng.NicheState);
+src/Search/Probes/SearchEvaluator.cs	AppendRngState(ref key, simulator.Rng.NicheState);
 src/Runtime/ContinuationStamp.cs	simulator.Rng.NicheState
 src/Engine/Common/PredictedCard.cs	internal bool TryMarkPowerAfflictionEntryChecked()
 src/Engine/Common/PredictedCard.cs	HasCheckedPowerAfflictionEntry = HasCheckedPowerAfflictionEntry,
@@ -888,7 +898,7 @@ src/Search/SimulatedCombatState.Fork.cs	_liveCardsAtSnapshot = _liveCardsAtSnaps
 src/Search/SimulatedCombatState.Fork.cs	ReferenceEquals(view.Prefix, _rootRunHookListeners)
 src/Testing/Host/UnattendedTestRunner.Assertions.cs	AssertFrozenRootRunListeners(scenario.CombatState, scenario.Player);
 src/Search/CombatBeamSolver.Models.cs	SnapshotListBuffer<PredictedCard> SnapshotLiveCards = new()
-src/Search/CombatBeamSolver.StateEvaluation.cs	_run.SnapshotLiveCards.Rent()
+src/Search/Probes/SearchEvaluator.cs	_liveCards.Rent()
 EOF
 
 card_play_prediction_state_path="$repository_root/src/Engine/InCombat/Mirrors/Hooks/Card/CardPlayHookPredictionStates.cs"
@@ -968,7 +978,6 @@ expected_beam_files=(
     CombatBeamSolver.Expansion.cs
     CombatBeamSolver.Expansion.Candidates.cs
     CombatBeamSolver.Expansion.Choices.cs
-    CombatBeamSolver.Expansion.Opening.cs
     CombatBeamSolver.ExpansionExecutor.cs
     CombatBeamSolver.ExpansionPlan.cs
     CombatBeamSolver.Expansion.Replay.cs
@@ -1044,7 +1053,7 @@ CombatBeamSolver.AdmittedExpansion.cs	while (committed < parents.Length && paren
 CombatBeamSolver.AdmittedExpansion.cs	_completedActions != Actions!.Count
 CombatBeamSolver.AdmittedExpansion.cs	_completedPotions != Potions!.Count
 CombatBeamSolver.EndTurnChoiceReplay.cs	private PreparedEndTurnEvaluation EvaluatePreparedEndTurn(
-CombatBeamSolver.TurnExecutionContinuation.cs	private static SearchBoundaryReason ContinuePlayerStart(
+CombatBeamSolver.RoundTransition.cs	SearchRoundExecution.AdvanceRoundPlayerStart(
 CombatBeamSolver.TurnSetup.cs	internal IReadOnlyList<TurnSetupRootCandidate> CaptureTurnSetupRootsForFlash()
 CombatBeamSolver.RoundTransition.cs	private sealed class RoundReplayCheckpoint(
 CombatBeamSolver.RoundTransition.cs	combat.EndActionChoices();
@@ -1577,7 +1586,7 @@ src/Search/SearchPolicySnapshot.cs	IReadOnlyList<RelicCounterTarget> RelicTarget
 src/Search/CombatBeamSolver.Phases.cs	policy.RelicTargetsSatisfied(node.Snapshot.RelicCounters)
 src/Search/CombatSearchCoordinator.cs	policy.RelicTargetsSatisfied(result.Snapshot.RelicCounters)
 src/Runtime/SolvedRouteCache.cs	policy.RelicTargets
-src/Search/CombatBeamSolver.Expansion.Opening.cs	ApplyFixedPrefix(seed, prefix)
+src/Search/Probes/SearchProbeHelpers.cs	internal static SearchNode? ApplyFixedPrefix(
 src/UI/SolverRelicStrategyPanel.cs	row.Enabled.ButtonPressed
 EOF
 for rule in 'SimulationNotificationIsolation.IsActive' '"DynamicVarUpgrades"' 'table.TryGetValue(source' 'Tips.TryGetValue(__0'; do
@@ -1708,7 +1717,7 @@ done
 require_fixed "$repository_root/src/Search/CombatBeamSolver.cs" 'policy.RequestWorkTotals ?? new()' 'loop budget/history ownership changed'
 require_fixed "$repository_root/src/Search/CombatBeamSolver.CycleReplay.cs" '_replayWork.TryConsumeCycleReplayAction()' 'loop budget/history ownership changed'
 require_fixed "$repository_root/src/Runtime/CombatRootSnapshot.cs" 'playerState.AllCards.Cast<AbstractModel>()' 'loop budget/history ownership changed'
-require_fixed "$repository_root/src/Search/CombatBeamSolver.StateEvaluation.cs" '_historyDependencies' 'loop budget/history ownership changed'
+require_fixed "$repository_root/src/Search/Probes/SearchEvaluator.cs" '_historyDependencies' 'loop budget/history ownership changed'
 require_fixed "$repository_root/src/Search/CombatHistoryCounterKey.cs" 'simulator.History.GetCounters(owner)' 'history key must consume incremental totals'
 for history_file in CombatPredictionHistory.cs CombatPredictionHistory.CardContinuation.cs CombatPredictionHistory.ExecutionContinuation.cs; do
     require_fixed "$repository_root/src/Engine/InCombat/Simulation/$history_file" '_counterOwner, _counters' 'history forks must inherit counters'
@@ -1723,7 +1732,7 @@ require_fixed "$search_root/SearchRequestWorkTotals.cs" 'AttributionSnapshot()' 
 require_fixed "$repository_root/tools/replay/CheckpointTool/StrategySessionRunner.cs" 'timeout-progress.json' 'strategy session timeout must preserve its last progress snapshot'
 require_fixed "$repository_root/src/Testing/Host/DevelopmentMonitorPublisher.cs" '["memberMaxNodes"] = progress?.MaxNodes' 'timeout progress must include the active member node limit'
 require_fixed "$repository_root/src/Search/CombatSearchCoordinator.PotionChain.cs" 'FrontierContinuationScheduler' 'missing generated potion chain boundary'
-require_fixed "$repository_root/src/Search/CombatBeamSolver.Expansion.Opening.cs" 'BuildFreeEntropicPotionActionsAfterPrefix' 'missing generated potion chain boundary'
+require_fixed "$repository_root/src/Search/Probes/OpeningProbe.Opening.cs" 'BuildFreeEntropicPotionActionsAfterPrefix' 'missing generated potion chain boundary'
 require_fixed "$repository_root/src/Search/SimulatedCombatState.Potions.cs" 'IsFreeEntropicPotionAtSlot' 'missing generated potion chain boundary'
 require_fixed "$repository_root/src/Testing/Host/UnattendedTestRunner.ProtocolHost.cs" 'new BeamWeightPerturbation(' 'missing frozen Beam weight probe boundary'
 require_fixed "$repository_root/src/Runtime/SolverController.cs" 'UnattendedTestRunner.BeamWeightPerturbationOverride' 'missing frozen Beam weight probe boundary'

@@ -8,6 +8,8 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal sealed partial class CombatBeamSolver
 {
     private CancellationToken SearchCancellationToken => ReplayCancellationToken;
@@ -24,15 +26,6 @@ internal sealed partial class CombatBeamSolver
         SearchNode Node,
         CardType CardType,
         uint? TargetCombatId);
-
-    private readonly record struct PreparedCardAction(
-        PlanAction Action,
-        CardType CardType,
-        uint? TargetCombatId,
-        bool RequiresUnsupportedExistingChoice,
-        PlanCardChoice? RequiredEmptyChoice);
-
-    private readonly record struct PreparedPotionAction(PlanAction Action, PotionModel Potion);
 
     private sealed class DeferredCardActionProbe(
         PreparedCardAction action,
@@ -550,7 +543,7 @@ internal sealed partial class CombatBeamSolver
         CardChoiceReplayCheckpoint? checkpoint = deferredProbe.TakeCheckpoint();
         try
         {
-            CardChoiceSpec? choiceSpec = BuildPrimaryCardChoiceSpec(snapshot);
+            CardChoiceSpec? choiceSpec = BuildPrimaryCardChoiceSpec(_player, snapshot!);
             if (choiceSpec == null && preparedAction.RequiresUnsupportedExistingChoice)
             {
                 snapshot.ReleaseSimulator();

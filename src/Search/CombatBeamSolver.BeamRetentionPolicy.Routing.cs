@@ -18,6 +18,8 @@ using BufferCard = MegaCrit.Sts2.Core.Models.Cards.Buffer;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 
 internal sealed partial class CombatBeamSolver
 {

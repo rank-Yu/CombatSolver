@@ -36,7 +36,9 @@ internal sealed partial class UnattendedTestRunner
         };
         CombatBeamSolver driver = new(root, SolverDisplayNames.Capture(combat),
             BattleDamageTracker.Observe(combat), policy, searchProfile: policy.Profile);
-        if (!driver.BuildPowerActionsAfterPrefix([]).Any(action => action.CardId == "PANACHE"))
+        OpeningProbe probe = new(root, SolverDisplayNames.Capture(combat),
+            BattleDamageTracker.Observe(combat), policy, searchProfile: policy.Profile);
+        if (!probe.BuildPowerActionsAfterPrefix([]).Any(action => action.CardId == "PANACHE"))
             throw new InvalidOperationException("正常状态未保留可出能力牌探针。");
 
         PlanAction prepared = new(PlanActionKind.PlayCard, root.StartTurnNumber, CardId: "PREPARED");
@@ -47,7 +49,7 @@ internal sealed partial class UnattendedTestRunner
                 throw new InvalidOperationException("前缀未抵达原生早有准备的选牌边界。");
         }
         finally { pending.ReleaseSimulator(); }
-        if (driver.BuildPowerActionsAfterPrefix([prepared]).Count != 0)
+        if (probe.BuildPowerActionsAfterPrefix([prepared]).Count != 0)
             throw new InvalidOperationException("未决选牌前缀仍产生能力牌探针。");
 
         PlanAction strike = new(PlanActionKind.PlayCard, root.StartTurnNumber,
@@ -59,10 +61,10 @@ internal sealed partial class UnattendedTestRunner
                 throw new InvalidOperationException("终局前缀未击败敌人。");
         }
         finally { victory.ReleaseSimulator(); }
-        if (driver.BuildPowerActionsAfterPrefix([strike]).Count != 0)
+        if (probe.BuildPowerActionsAfterPrefix([strike]).Count != 0)
             throw new InvalidOperationException("已胜利前缀仍产生能力牌探针。");
         if (ContinuationStamp.CaptureLive(combat).StateText != liveBefore
-            || !driver.BuildPowerActionsAfterPrefix([]).Any(action => action.CardId == "PANACHE"))
+            || !probe.BuildPowerActionsAfterPrefix([]).Any(action => action.CardId == "PANACHE"))
             throw new InvalidOperationException("能力牌边界检查改变了 live 或根状态。");
         _completedChecks.Add("OpeningPowerBoundary:Normal:PendingChoice:Victory:RootAndLiveUnchanged");
     }

@@ -16,6 +16,8 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 
 internal sealed partial class CombatBeamSolver
 {
@@ -110,7 +112,15 @@ internal sealed partial class CombatBeamSolver
         }
     }
 
-    private void ResolveTurnSetupChoices(
+    private void ResolveTurnSetupChoices(IReadOnlyList<PlanCardChoice> choices,
+        SimulationSnapshot snapshot,
+        List<(IReadOnlyList<PlanCardChoice>, SimulationSnapshot)> roots,
+        ChoiceSearchBudget searchBudget,
+        ChoiceOccurrenceCollector<IReadOnlyList<PlanCardChoice>> occurrenceCollector,
+        TurnSetupChoiceLayer? preparedLayer = null)
+        => ResolveTurnSetupChoicesBeam(choices, snapshot, roots, searchBudget, occurrenceCollector, preparedLayer);
+
+    private void ResolveTurnSetupChoicesBeam(
         IReadOnlyList<PlanCardChoice> choices,
         SimulationSnapshot snapshot,
         List<(IReadOnlyList<PlanCardChoice>, SimulationSnapshot)> roots,
@@ -241,7 +251,11 @@ internal sealed partial class CombatBeamSolver
         }
     }
 
-    private SimulationSnapshot ReplayTurnSetup(IReadOnlyList<PlanCardChoice> choices, bool allowExecutionCapture = true)
+    private SimulationSnapshot ReplayTurnSetup(IReadOnlyList<PlanCardChoice> choices,
+        bool allowExecutionCapture = true)
+        => ReplayTurnSetupBeam(choices, allowExecutionCapture);
+
+    private SimulationSnapshot ReplayTurnSetupBeam(IReadOnlyList<PlanCardChoice> choices, bool allowExecutionCapture = true)
     {
         _run.WorkPacer.YieldIfNeeded();
         _run.ReplayCount++;
@@ -264,7 +278,7 @@ internal sealed partial class CombatBeamSolver
         {
             using var executionDispatch = simulator.BeginExecutionDispatch();
             boundary = PreparePlayerPlayPhase(
-                simulator,
+                RoundContext, simulator,
                 simulatedCombat,
                 cursor,
                 processedEnemyDeaths);
@@ -296,35 +310,24 @@ internal sealed partial class CombatBeamSolver
             processedEnemyDeaths);
     }
 
-    private SearchBoundaryReason PreparePlayerPlayPhase(
-        CombatPredictionSimulator simulator,
-        SimulatedCombatState simulatedCombat,
-        TurnStartChoiceCursor choices,
-        ISet<uint> processedEnemyDeaths)
-    {
-        SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(_player);
-        // The setup root is already inside this turn. Preserve events that occurred before energy reset.
-        if (PersistentRelicSupport.ShouldPlayerResetEnergy(simulatedCombat, _player))
-            playerState.LoseEnergy(playerState.Energy);
-        playerState.GainEnergy(PersistentPowerSupport.GetModifiedMaxEnergy(simulatedCombat, _player)
-            + simulatedCombat.ConsumeEnergyNextTurn(_player));
-        if (simulatedCombat.HasPendingChoice
-            || !PersistentPowerSupport.TriggerAfterEnergyReset(simulator, simulatedCombat, _player))
-        {
-            return SearchBoundaryReason.PendingChoice;
-        }
-        TurnStartRelicSupport.TriggerAfterEnergyReset(simulator, simulatedCombat, _player);
-        if (simulatedCombat.HasPendingChoice)
-            return SearchBoundaryReason.PendingChoice;
-        TurnStartRelicSupport.TriggerAfterEnergyResetLate(simulator, simulatedCombat, _player);
-        if (simulatedCombat.HasPendingChoice)
-            return SearchBoundaryReason.PendingChoice;
-        var progress = new PlayerStartProgress(_player, _startTurnNumber, rootSetup: true,
-            takingExtraTurn: false, processedEnemyDeaths, 0, simulator.ShuffleEventCount);
-        return ContinuePlayerStart(simulator, simulatedCombat, progress, PlayerStartStage.BeforeHand);
-    }
+    private SimulationSnapshot Replay(IReadOnlyList<PlanAction> actions,
+        SimulationSnapshot? parentSnapshot = null,
+        int startingTurn = 0,
+        int priorActionCount = 0,
+        ActionRelicTriggerRecorder? triggerRecorder = null,
+        ReplayForkSeed? replayForkSeed = null,
+        SearchReplayEvidence? replayEvidence = null,
+        RoundReplayCheckpoint? roundCheckpoint = null,
+        RoundReplayCheckpointCapture? roundCheckpointCapture = null,
+        CardChoiceReplayCapture? cardChoiceCapture = null,
+        ManualCardChoiceFrame? cardChoiceFrame = null,
+        PotionChoiceFrame? potionChoiceFrame = null,
+        bool countTransition = true,
+        bool allowExecutionCapture = true,
+        ContinuationCapture? continuationCapture = null)
+        => ReplayBeam(actions, parentSnapshot, startingTurn, priorActionCount, triggerRecorder, replayForkSeed, replayEvidence, roundCheckpoint, roundCheckpointCapture, cardChoiceCapture, cardChoiceFrame, potionChoiceFrame, countTransition, allowExecutionCapture, continuationCapture);
 
-    private SimulationSnapshot Replay(
+    private SimulationSnapshot ReplayBeam(
         IReadOnlyList<PlanAction> actions,
         SimulationSnapshot? parentSnapshot = null,
         int startingTurn = 0,
@@ -487,7 +490,7 @@ internal sealed partial class CombatBeamSolver
                 }
                 simulator.CheckWinCondition(simulatedCombat.GetPlayerTurnNumber(_player));
                 boundary = ResolveRequestedPlayerTurnEnd(
-                    simulator, simulatedCombat, action, processedEnemyDeaths, ref turn, ref shufflesCrossed);
+                    RoundContext, simulator, simulatedCombat, action, processedEnemyDeaths, ref turn, ref shufflesCrossed);
                 LogAnnotatedReplayState(simulator, action, priorActionCount + actionOffset, turn, replayEvidence);
                 continuationCapture?.Observe(this, simulator, priorActionCount + actionOffset, turn, boundary);
                 continue;
@@ -576,7 +579,7 @@ internal sealed partial class CombatBeamSolver
             // servicing a requested turn end. A lethal forced-end card never starts a round.
             simulator.CheckWinCondition(simulatedCombat.GetPlayerTurnNumber(_player));
             boundary = ResolveRequestedPlayerTurnEnd(
-                simulator, simulatedCombat, action, processedEnemyDeaths, ref turn, ref shufflesCrossed);
+                RoundContext, simulator, simulatedCombat, action, processedEnemyDeaths, ref turn, ref shufflesCrossed);
             LogAnnotatedReplayState(simulator, action, priorActionCount + actionOffset, turn, replayEvidence);
             if (continuationCapture != null)
             {
@@ -619,43 +622,6 @@ internal sealed partial class CombatBeamSolver
         try { cardChoiceCapture?.Receive(this, simulator, processedEnemyDeaths); }
         catch { snapshot.ReleaseSimulator(); throw; }
         return snapshot;
-    }
-
-    private SearchBoundaryReason ResolveRequestedPlayerTurnEnd(
-        CombatPredictionSimulator simulator,
-        SimulatedCombatState combat,
-        PlanAction action,
-        ForkableSet<uint> processedEnemyDeaths,
-        ref int turn,
-        ref int shufflesCrossed)
-    {
-        bool requested = combat.ConsumePlayerTurnEndRequest();
-        if (!requested || !simulator.IsInProgress)
-            return SearchBoundaryReason.None;
-        SearchBoundaryReason boundary = AdvanceRound(
-            simulator, combat, turn - _startTurnNumber, processedEnemyDeaths,
-            ref shufflesCrossed, action.TurnStartChoices);
-        if (boundary == SearchBoundaryReason.None && !SettleReplayActionBoundary(simulator, combat))
-            boundary = SearchBoundaryReason.PendingChoice;
-        _ = combat.ConsumePlayerTurnEndRequest();
-        turn = combat.GetPlayerTurnNumber(_player);
-        return boundary;
-    }
-
-    internal static bool SettleReplayActionBoundary(
-        CombatPredictionSimulator simulator,
-        SimulatedCombatState combat)
-    {
-        using var executionDispatch = simulator.BeginExecutionDispatch();
-        simulator.SynchronizePowerAmountPredictionStates();
-        PowerLifecycleSupport.ResolvePowerAmountChanges(simulator, combat);
-        if (simulator.HasPendingChoice)
-            return false;
-        combat.NormalizeAeonglassWithers(simulator);
-        if (simulator.HasPendingChoice)
-            return false;
-        combat.NormalizeCardAfflictions(simulator);
-        return !simulator.HasPendingChoice;
     }
 
     private void LogAnnotatedReplayState(
@@ -726,6 +692,15 @@ internal sealed partial class CombatBeamSolver
     }
 
     private SimulationSnapshot ReplayAction(
+        SearchNode parent,
+        PlanAction action,
+        ReplayForkSeed? replayForkSeed = null,
+        RoundReplayCheckpointCapture? roundCheckpointCapture = null,
+        CardChoiceReplayCapture? cardChoiceCapture = null)
+        => ReplayActionBeam(
+            parent, action, replayForkSeed, roundCheckpointCapture, cardChoiceCapture);
+
+    private SimulationSnapshot ReplayActionBeam(
         SearchNode parent,
         PlanAction action,
         ReplayForkSeed? replayForkSeed = null,
@@ -923,45 +898,6 @@ internal sealed partial class CombatBeamSolver
             $"incremental_key={incremental.StateKey} replayed_key={replayed.StateKey}");
     }
 
-    internal static PredictedCard? FindCardForReplay(
-        IReadOnlyList<PredictedCard> cards,
-        PlanAction action)
-    {
-        if (!string.IsNullOrEmpty(action.CardStateKey))
-        {
-            int occurrence = action.CardStateOccurrence;
-            foreach (PredictedCard card in cards)
-            {
-                if (!string.Equals(
-                        CardChoiceSupport.ChoiceCardKey(card),
-                        action.CardStateKey,
-                        StringComparison.Ordinal))
-                {
-                    continue;
-                }
-                if (occurrence-- == 0)
-                    return card;
-            }
-            return null;
-        }
-        return FindCardOccurrence(cards, action.CardId, action.CardOccurrence);
-    }
-
-    private static PredictedCard? FindCardOccurrence(
-        IReadOnlyList<PredictedCard> cards,
-        string cardId,
-        int occurrence)
-    {
-        foreach (PredictedCard card in cards)
-        {
-            if (!string.Equals(card.Preview.Id.Entry, cardId, StringComparison.Ordinal))
-                continue;
-            if (occurrence-- == 0)
-                return card;
-        }
-        return null;
-    }
-
     private SearchBoundaryReason AdvanceRound(
         CombatPredictionSimulator simulator,
         SimulatedCombatState simulatedCombat,
@@ -970,275 +906,8 @@ internal sealed partial class CombatBeamSolver
         ref int shufflesCrossed,
         IReadOnlyList<PlanCardChoice>? turnStartChoices,
         RoundReplayCheckpointCapture? roundCheckpointCapture = null)
-    {
-        if (!simulator.IsInProgress)
-            return SearchBoundaryReason.None;
-        SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(_player);
-        IReadOnlyList<PlanCardChoice>? roundChoicePlans = turnStartChoices?
-            .Where(choice => choice.Effect != PlanChoiceEffect.ApplyKnowledgeCurse)
-            .ToArray();
-        TurnStartChoiceCursor roundChoices = new(roundChoicePlans);
-        simulatedCombat.BeginActionChoices(roundChoices);
-        simulatedCombat.SetActionChoiceTiming(PlanChoiceTiming.PlayerTurnEnd);
-        try
-        {
-        int roundHistoryEntryStart = simulator.History.Entries.Count;
-        int etherealExhaustCount = simulatedCombat.CountEtherealCardsInHand(simulator, _player);
-        {
-            using SearchMeasurementScope _ = _run.Performance.Measure(SearchMetricPhase.RoundPlayerEnd);
-            bool playerTurnEndCompleted;
-            using (_run.Performance.Measure(SearchMetricPhase.RoundEndSimulation))
-                playerTurnEndCompleted = PlayerTurnEndLifecycle.RunPhaseOne(
-                    simulator,
-                    simulatedCombat,
-                    _player,
-                    [_player.Creature]);
-            if (!playerTurnEndCompleted)
-                return SearchBoundaryReason.PendingChoice;
-            simulatedCombat.CommitHistoryCourseTurn(_player);
-            simulatedCombat.NormalizeAeonglassWithers(simulator);
-            simulatedCombat.NormalizeCardAfflictions(simulator);
-            if (!CorePowerSupport.ApplyEnemyDeathPowers(
-                    simulator,
-                    simulatedCombat,
-                    simulatedCombat.KnownEnemies,
-                    processedEnemyDeaths))
-            {
-                return SearchBoundaryReason.PendingChoice;
-            }
-            // Finish the already-started phase-one compensation above, but do not
-            // flush the hand or enter phase two after either native phase-one check ended combat.
-            if (!simulator.IsInProgress)
-                return SearchBoundaryReason.None;
-            using (_run.Performance.Measure(SearchMetricPhase.RoundFlush))
-                CorePowerSupport.FlushPlayerHandAtTurnEnd(simulator, simulatedCombat, _player);
-            int turnEndShuffleEvents = simulator.ShuffleEventCount;
-            bool playerTurnEndCompletedPhaseTwo;
-            using (_run.Performance.Measure(SearchMetricPhase.RoundPlayerEndPowers))
-            {
-                playerTurnEndCompletedPhaseTwo = PlayerTurnEndLifecycle.RunPhaseTwo(
-                    simulator,
-                    simulatedCombat,
-                    [_player.Creature],
-                    etherealExhaustCount);
-            }
-            shufflesCrossed += simulator.ShuffleEventCount - turnEndShuffleEvents;
-            if (!playerTurnEndCompletedPhaseTwo)
-                return SearchBoundaryReason.PendingChoice;
-            if (!CorePowerSupport.ApplyEnemyDeathPowers(
-                    simulator,
-                    simulatedCombat,
-                    simulatedCombat.KnownEnemies,
-                    processedEnemyDeaths))
-            {
-                return SearchBoundaryReason.PendingChoice;
-            }
-        }
-
-        bool takingExtraTurn = Engine.InCombat.Mirrors.HookMirrors.ShouldTakeExtraTurn(simulator, simulatedCombat, _player);
-        bool hasActiveEmotionChip = simulatedCombat.RelicsOf(_player).Any(relic => relic is MegaCrit.Sts2.Core.Models.Relics.EmotionChip && !relic.IsMelted);
-        SimCreatureState simulatedPlayer = simulator.State.GetCreature(_player.Creature);
-        if (!takingExtraTurn)
-        {
-            simulatedCombat.SetActionChoiceTiming(PlanChoiceTiming.EnemyTurn);
-            using SearchMeasurementScope _ = _run.Performance.Measure(SearchMetricPhase.RoundEnemyTurn);
-            Creature[] actingEnemies = simulatedCombat.Enemies.ToArray();
-            {
-                using SearchMeasurementScope enemyStart = _run.Performance.Measure(SearchMetricPhase.RoundEnemyStart);
-                simulatedCombat.CurrentSide = CombatSide.Enemy;
-                foreach (Creature enemy in simulatedCombat.Enemies)
-                    simulatedCombat.BeginSideTurn(enemy);
-                simulatedCombat.SnapshotPowerAmountsAtTurnStart(simulatedCombat.Enemies);
-                // 怪物方开始回合时，上一怪物回合留下的格挡先清除。
-                if (!CombatSolver.Engine.InCombat.Mirrors.HookMirrors.BeforeSideTurnStart(
-                        simulator, simulatedCombat.CurrentSide, simulatedCombat.Enemies))
-                {
-                    return SearchBoundaryReason.PendingChoice;
-                }
-                foreach (Creature enemy in simulatedCombat.Enemies)
-                {
-                    SimCreatureState simulatedEnemy = simulator.State.GetCreature(enemy);
-                    if (simulatedEnemy.Block > 0)
-                    {
-                        if (simulatedCombat.ShouldClearBlock(enemy, out AbstractModel? preventer))
-                            simulatedEnemy.DamageBlock(simulatedEnemy.Block, ValueProp.Move);
-                        else
-                            PersistentRelicSupport.TriggerAfterPreventingBlockClear(simulator, preventer, enemy);
-                    }
-                    if (!CorePowerSupport.TriggerAfterBlockCleared(
-                            simulator,
-                            simulatedCombat,
-                            enemy))
-                    {
-                        return SearchBoundaryReason.PendingChoice;
-                    }
-                }
-                bool decrementEnemyPlating = simulatedCombat.RoundNumber > 1;
-                if (!simulatedCombat.TriggerSideTurnStart(
-                        simulator,
-                        CombatSide.Enemy,
-                        simulatedCombat.Enemies,
-                        decrementEnemyPlating))
-                {
-                    return SearchBoundaryReason.PendingChoice;
-                }
-                int enemyPoisonHistoryStart = simulator.History.Entries.Count;
-                if (!CorePowerSupport.TriggerPoison(
-                        simulator,
-                        simulatedCombat,
-                        simulatedCombat.Enemies.ToArray()))
-                {
-                    return SearchBoundaryReason.PendingChoice;
-                }
-                TriggeredPowerSupport.CompensateHistorySince(
-                    simulator,
-                    simulatedCombat,
-                    enemyPoisonHistoryStart);
-                if (simulatedCombat.HasPendingChoice)
-                    return SearchBoundaryReason.PendingChoice;
-                if (!CorePowerSupport.ApplyEnemyDeathPowers(
-                        simulator,
-                        simulatedCombat,
-                        simulatedCombat.KnownEnemies,
-                        processedEnemyDeaths))
-                {
-                    return SearchBoundaryReason.PendingChoice;
-                }
-            }
-            // Vanilla checks after the entire enemy-side start, not between listeners.
-            if (simulator.CheckWinCondition(simulatedCombat.GetPlayerTurnNumber(_player)))
-                return SearchBoundaryReason.None;
-            Dictionary<Creature, MoveState> performedMoves;
-            {
-                using SearchMeasurementScope enemyMoves = _run.Performance.Measure(SearchMetricPhase.RoundEnemyMoves);
-                performedMoves = new Dictionary<Creature, MoveState>(actingEnemies.Length);
-                foreach (Creature actingEnemy in actingEnemies)
-                {
-                    if (!simulatedCombat.CanPerformMonsterMove(simulator, actingEnemy))
-                        continue;
-                    ForecastMove move = simulatedCombat.CurrentMonsterMove(actingEnemy);
-                    if (simulatedCombat.ConsumeStunNextMove(actingEnemy))
-                    {
-                        performedMoves[actingEnemy] = move.Move;
-                        if (simulator.CheckWinCondition(simulatedCombat.GetPlayerTurnNumber(_player)))
-                            return SearchBoundaryReason.None;
-                        continue;
-                    }
-                    if (simulatedCombat.TryConsumeForcedMonsterMove(actingEnemy, out string forcedMove, out int forcedDamage))
-                    {
-                        performedMoves[actingEnemy] = move.Move;
-                        if (forcedMove == "EXPLODE_MOVE")
-                        {
-                            MonsterMoveSemantics.DamagePlayer(
-                                simulator,
-                                simulatedCombat,
-                                move.Owner,
-                                _player.Creature,
-                                forcedDamage);
-                            if (simulatedCombat.HasPendingChoice)
-                                return SearchBoundaryReason.PendingChoice;
-                            using (simulator.PushDamageSource(
-                                CombatDamageSource.For(
-                                    CombatDamageSourceKind.MonsterMove,
-                                    move.Owner.Monster?.Id.Entry)))
-                            {
-                                simulator.Kill(move.Owner, force: true);
-                            }
-                            if (simulatedCombat.HasPendingChoice)
-                                return SearchBoundaryReason.PendingChoice;
-                            if (!CorePowerSupport.ApplyEnemyDeathPowers(
-                                    simulator,
-                                    simulatedCombat,
-                                    simulatedCombat.KnownEnemies,
-                                    processedEnemyDeaths))
-                            {
-                                return SearchBoundaryReason.PendingChoice;
-                            }
-                        }
-                        if (simulator.CheckWinCondition(simulatedCombat.GetPlayerTurnNumber(_player)))
-                            return SearchBoundaryReason.None;
-                        continue;
-                    }
-                    bool playerDied = MonsterMoveSemantics.ApplyForecastMove(
-                            simulator,
-                            simulatedCombat,
-                            move,
-                            _player.Creature,
-                            processedEnemyDeaths,
-                            turnStartChoices);
-                    performedMoves[actingEnemy] = move.Move;
-                    if (move.Owner.CombatId is uint revivedCombatId
-                        && simulator.State.GetCreature(move.Owner).IsAlive)
-                    {
-                        processedEnemyDeaths.Remove(revivedCombatId);
-                    }
-                    if (simulatedCombat.HasPendingChoice)
-                        return SearchBoundaryReason.PendingChoice;
-                    // ApplyForecastMove has completed its attack finally and command tails.
-                    if (simulator.CheckWinCondition(simulatedCombat.GetPlayerTurnNumber(_player))
-                        || playerDied)
-                        return SearchBoundaryReason.None;
-                }
-            }
-
-            using (_run.Performance.Measure(SearchMetricPhase.RoundEnemyEndPowers))
-            {
-                if (!CorePowerSupport.TriggerEnemySideTurnEndEffects(
-                        simulator,
-                        simulatedCombat,
-                        simulatedCombat.Enemies.ToArray()))
-                {
-                    return SearchBoundaryReason.PendingChoice;
-                }
-                if (simulatedCombat.BattlewornDummyTimedOut)
-                    return SearchBoundaryReason.EventDefeat;
-                if (!CorePowerSupport.ApplyEnemyDeathPowers(
-                        simulator,
-                        simulatedCombat,
-                        simulatedCombat.KnownEnemies,
-                        processedEnemyDeaths))
-                {
-                    return SearchBoundaryReason.PendingChoice;
-                }
-                int playerPoisonHistoryStart = simulator.History.Entries.Count;
-                if (!CorePowerSupport.TriggerPoison(
-                        simulator,
-                        simulatedCombat,
-                        [_player.Creature]))
-                {
-                    return SearchBoundaryReason.PendingChoice;
-                }
-                TriggeredPowerSupport.CompensateHistorySince(
-                    simulator,
-                    simulatedCombat,
-                    playerPoisonHistoryStart);
-                if (simulatedCombat.HasPendingChoice)
-                    return SearchBoundaryReason.PendingChoice;
-                simulatedCombat.ClearNoDraw(_player.Creature);
-                simulatedCombat.RecordRelicRoundDamage(simulator, _player, roundHistoryEntryStart);
-            }
-            if (simulator.CheckWinCondition(simulatedCombat.GetPlayerTurnNumber(_player)))
-                return SearchBoundaryReason.None;
-            simulatedCombat.PrepareMonsterMovesForNextRound(simulator, performedMoves);
-        }
-        else
-        {
-            // An extra turn advances the player's turn number too, so damage from the
-            // just-finished turn becomes Emotion Chip's "previous turn" window.
-            if (hasActiveEmotionChip)
-                simulatedCombat.RecordRelicRoundDamage(simulator, _player, roundHistoryEntryStart);
-            if (!Engine.InCombat.Mirrors.HookMirrors.AfterTakingExtraTurn(simulator, simulatedCombat, _player))
-                return SearchBoundaryReason.PendingChoice;
-        }
-
-        return AdvanceRoundPlayerStart(simulator, simulatedCombat, playerState, simulatedPlayer,
-            roundIndex, processedEnemyDeaths, ref shufflesCrossed, roundChoices, takingExtraTurn,
-            turnStartChoices is not { Count: > 0 } ? roundCheckpointCapture : null);
-        }
-        finally
-        {
-            simulatedCombat.EndActionChoices();
-        }
-    }
+        => SearchRoundExecution.AdvanceRound(
+            RoundContext, simulator, simulatedCombat, roundIndex, processedEnemyDeaths,
+            ref shufflesCrossed, turnStartChoices, roundCheckpointCapture);
 
 }

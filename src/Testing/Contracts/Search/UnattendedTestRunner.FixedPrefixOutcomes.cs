@@ -32,14 +32,14 @@ internal sealed partial class UnattendedTestRunner
         {
             if (!condition) throw new InvalidOperationException("Fixed potion prefix policy failed: " + label);
         }
-        var disabled = new CombatBeamSolver(root, names, damage, policy, potionPolicyOverride: SolverPotionPolicy.Disabled);
+        var disabled = new OpeningProbe(root, names, damage, policy, potionPolicyOverride: SolverPotionPolicy.Disabled);
         Check(!disabled.CanReplayOpeningPrefix([first]), "disabled potion use");
-        var zero = new CombatBeamSolver(root, names, damage, policy, maximumPotionUses: 0);
+        var zero = new OpeningProbe(root, names, damage, policy, maximumPotionUses: 0);
         Check(!zero.CanReplayOpeningPrefix([first]), "zero explicit uses");
-        var one = new CombatBeamSolver(root, names, damage, policy, maximumPotionUses: 1);
+        var one = new OpeningProbe(root, names, damage, policy, maximumPotionUses: 1);
         Check(one.CanReplayOpeningPrefix([first]), "one permitted use");
         Check(!one.CanReplayOpeningPrefix([first, second]), "total explicit-use quota");
-        var later = new CombatBeamSolver(root, names, damage, policy, earliestPotionTurn: root.StartTurnNumber + 1);
+        var later = new OpeningProbe(root, names, damage, policy, earliestPotionTurn: root.StartTurnNumber + 1);
         Check(!later.CanReplayOpeningPrefix([first]), "earliest use turn");
         Check(!one.CanReplayOpeningPrefix([first with { TargetCombatId = combat.Enemies[0].CombatId }]), "target identity");
         var protectedPolicy = policy with
@@ -47,9 +47,9 @@ internal sealed partial class UnattendedTestRunner
             PotionStrategy = new PotionStrategySnapshot(SolverPotionPolicy.Smart,
                 [new(0, "BLOCK_POTION", SolverPotionDirective.Disabled)])
         };
-        var protectedDriver = new CombatBeamSolver(root, names, damage, protectedPolicy);
+        var protectedDriver = new OpeningProbe(root, names, damage, protectedPolicy);
         Check(!protectedDriver.CanReplayOpeningPrefix([first]), "protected potion directive");
-        var required = new CombatBeamSolver(root, names, damage, policy,
+        var required = new OpeningProbe(root, names, damage, policy,
             potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne, maximumPotionUses: 2);
         Check(required.CanReplayOpeningPrefix([first, second]), "required opening potion pair");
         _completedChecks.Add("FixedPotionPrefix:Disabled:Quota:EarliestTurn:Target:Protect:RequiredPair");
@@ -251,7 +251,7 @@ internal sealed partial class UnattendedTestRunner
         PlanAction strike = new(PlanActionKind.PlayCard, firstTurn + 3,
             CardId: "STRIKE_IRONCLAD", TargetCombatId: combat.Enemies.Single().CombatId);
         PlanAction defend = new(PlanActionKind.PlayCard, firstTurn + 3, CardId: "DEFEND_IRONCLAD");
-        CombatBeamSolver prefixProbe = new(root, names, damage, policy, searchProfile: policy.Profile);
+        OpeningProbe prefixProbe = new(root, names, damage, policy, searchProfile: policy.Profile);
         PlanAction immediateStrike = strike with { Turn = firstTurn };
         Check(prefixProbe.CanReplayOpeningPrefix([immediateStrike, new PlanAction(PlanActionKind.EndTurn, firstTurn)]),
             "opening discovery accepts the prefix truncated at terminal victory");

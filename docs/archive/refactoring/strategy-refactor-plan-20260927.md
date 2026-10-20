@@ -149,7 +149,7 @@ SearchRequestPipeline.Run(root, policy, budgetLedger)
 
 **目标**：用一个调度器替代约 40 处 `fixedPrefixActions:` 直接构造与十几条补充通道。
 
-**范围**：`CombatSearchCoordinator` 内所有 `new CombatBeamSolver(..., fixedPrefixActions: …)` 调用点、[`Expansion.Opening`](../../../src/Search/CombatBeamSolver.Expansion.Opening.cs)、[`Expansion.Replay`](../../../src/Search/CombatBeamSolver.Expansion.Replay.cs) 的 `ApplyFixedPrefix`、[`BlockPotionInsertion`](../../../src/Search/CombatBeamSolver.BlockPotionInsertion.cs) 的 `ReplayAdjustedRoute`。
+**范围**：`CombatSearchCoordinator` 内所有 `new CombatBeamSolver(..., fixedPrefixActions: …)` 调用点、[`Expansion.Opening`](../../../src/Search/Probes/OpeningProbe.Opening.cs)、[`Expansion.Replay`](../../../src/Search/CombatBeamSolver.Expansion.Replay.cs) 的 `ApplyFixedPrefix`、[`BlockPotionInsertion`](../../../src/Search/CombatBeamSolver.BlockPotionInsertion.cs) 的 `ReplayAdjustedRoute`。
 
 **步骤**：
 1. 定义 `ContinuationSearchRequest`：`Root`、`Prefix`、`Trait`、`PotionPolicyOverride`、`PotionBounds`、`BudgetSlice`、`Purpose`（枚举，替代字符串模式）；

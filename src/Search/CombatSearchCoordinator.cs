@@ -470,7 +470,7 @@ internal static partial class CombatSearchCoordinator
                 {
                     PlanAction[] prefix = [.. opening.Take(generatedIndex - 1), opening[discardIndex]];
                     SearchBudgetWindow reorderedWindow = passContext.SliceWindow;
-                    CombatBeamSolver builder = new(root, displayNames, battleDamage,
+                    OpeningProbe builder = NewOpeningProbe(root, displayNames, battleDamage,
                         beamPolicy, cancellationToken, progressCallback, passProfile,
                         potionPolicyOverride: SolverPotionPolicy.Disabled, maximumPotionUses: 0);
                     if (reorderedWindow.CanStart(5_000)
@@ -500,7 +500,7 @@ internal static partial class CombatSearchCoordinator
             {
                 PlanAction[] opening = passResult.BestNode.Actions
                     .TakeWhile(action => action.Turn == root.StartTurnNumber).ToArray();
-                CombatBeamSolver targetBuilder = new(root, displayNames, battleDamage,
+                OpeningProbe targetBuilder = NewOpeningProbe(root, displayNames, battleDamage,
                     beamPolicy, cancellationToken, progressCallback, passProfile,
                     potionPolicyOverride: SolverPotionPolicy.Disabled, maximumPotionUses: 0);
                 foreach (PlanAction[] prefix in targetBuilder
@@ -587,7 +587,7 @@ internal static partial class CombatSearchCoordinator
                 && initialPotionPolicyOverride == SolverPotionPolicy.Disabled)
             {
                 PlanAction endTurn = new(PlanActionKind.EndTurn, root.StartTurnNumber);
-                CombatBeamSolver deferredBuilder = new(root, displayNames, battleDamage,
+                OpeningProbe deferredBuilder = NewOpeningProbe(root, displayNames, battleDamage,
                     beamPolicy, cancellationToken, progressCallback, passProfile,
                     potionPolicyOverride: SolverPotionPolicy.Disabled, maximumPotionUses: 0);
                 if (deferredBuilder.CanReplayOpeningPrefix([endTurn]))
@@ -623,7 +623,7 @@ internal static partial class CombatSearchCoordinator
                 && passResult.ProjectedBattleHpLost >= SolverWeights.PotionMinimumHpSaved
                 && initialPotionPolicyOverride == SolverPotionPolicy.Disabled)
             {
-                CombatBeamSolver openingBuilder = new(root, displayNames, battleDamage,
+                OpeningProbe openingBuilder = NewOpeningProbe(root, displayNames, battleDamage,
                     beamPolicy, cancellationToken, progressCallback, passProfile,
                     potionPolicyOverride: SolverPotionPolicy.Disabled, maximumPotionUses: 0);
                 IReadOnlyList<PlanAction> freeAttacks = openingBuilder.BuildOpeningFreeOffensiveActions();

@@ -1,5 +1,7 @@
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal sealed partial class CombatBeamSolver
 {
     private readonly record struct TranspositionLabel(

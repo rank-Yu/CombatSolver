@@ -15,7 +15,7 @@ internal static partial class CombatSearchCoordinator
             return baseline;
 
         PlanAction[] route = baseline.BestNode.Actions.ToArray();
-        CombatBeamSolver builder = new(context.Root, context.DisplayNames,
+        OpeningProbe builder = NewOpeningProbe(context.Root, context.DisplayNames,
             context.BattleDamage, context.Policy, context.CancellationToken,
             context.ProgressCallback, context.Profile);
         List<PlanAction[]> anchors = [];

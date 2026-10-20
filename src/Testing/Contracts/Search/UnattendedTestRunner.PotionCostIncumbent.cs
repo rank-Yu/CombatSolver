@@ -165,7 +165,7 @@ internal sealed partial class CombatBeamSolver
 
     private SearchNode CostRouteForTesting(int? slot, out SearchNode potionOnly, bool laterTurn = false)
     {
-        SearchNode node = CreateOpeningSearchSeed(Replay([]));
+        SearchNode node = OpeningProbe.CreateOpeningSearchSeed(Replay([]));
         if (laterTurn) node = CostChildForTesting(node, new(PlanActionKind.EndTurn, node.Turn));
         if (slot is { } selectedSlot)
         {

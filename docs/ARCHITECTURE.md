@@ -46,12 +46,14 @@
 | `.FinalPlanOrdering.cs` / `RouteQualityPolicy` | 完整路线质量与各既有投影顺序 |
 | `.StateEvaluation.cs` / `.Terminal.cs` | 评分特征、终局回放和回合结果 |
 | `SimulatedCombatState*.cs` | 分支战斗状态与动作语义 |
+| `Probes/OpeningProbe*.cs` | 冻结根上的开局/前缀探针（卡牌、药水、准备、防御、目标与回合边界）及浅层回放；协调器与三个续接来源持有，不依赖 `CombatBeamSolver` |
+| `Probes/SearchEvaluator.cs` | 原搜索与探针共用的状态评分、指纹与威胁投影；不持有搜索前沿 |
 | `PrimaryIncumbentTable` / `ResourceIncumbentPolicy` | 同根同政策的资源桶见证、未来收益上界与认证回退 |
 | `BeamSolveDispatch` | 协调器主搜索成员与干净固定前缀续接的后端分发（Off/Shadow/On）、Shadow 隔离与回落 |
 | `FlashBeam/Bridge/` / `CombatBeamSolver.Flash.cs` / `CardChoiceSupport.Flash.cs` | Flash 准入、规则编译、旧引擎状态投影、动作与选择翻译；旧引擎回放入口与选择令牌生成（[Flash 规格](flash-search/README.md)） |
 | `FlashBeam/FlashBeamSolver.cs` / `FlashBeam/Scoring/` | FlashBeam 搜索；从 `FlashBattle` 计算的状态评估（移植 `Snapshot` 与 `BeamRankScore`，逐内容数值表由 `Bridge/FlashScoreBridge` 在根上编译），Scoring 不引用原版模型类型 |
 
-成员共享原请求账本；预算准入、候选合法性和取优由所属策略决定。分支状态不承担 Beam 政策；中途保路和终局比较保持明确入口。药水反事实与强制用药的硬准入先于质量比较。终局可选用药遵守机会成本门槛，获胜且减少复活消耗或追回资源时保留对应政策例外；`RouteQualityPolicy.PotionPolicy` 为审计、组合成员和后置搜索统一比较战略战损加可选药水成本，成长与回合数在其后比较。固定前缀构造实际父链，EndTurn 从模拟前后状态生成 `TurnOutcome`。
+探针与现有搜索通过 `SearchEvaluator` 共用评分和指纹，探针只做冻结根上的单层展开与固定前缀回放；`OpeningProbe` 不引用 `CombatBeamSolver`，其产出仍由协调器交给 `BeamSolveDispatch` 求解。成员共享原请求账本；预算准入、候选合法性和取优由所属策略决定。分支状态不承担 Beam 政策；中途保路和终局比较保持明确入口。药水反事实与强制用药的硬准入先于质量比较。终局可选用药遵守机会成本门槛，获胜且减少复活消耗或追回资源时保留对应政策例外；`RouteQualityPolicy.PotionPolicy` 为审计、组合成员和后置搜索统一比较战略战损加可选药水成本，成长与回合数在其后比较。固定前缀构造实际父链，EndTurn 从模拟前后状态生成 `TurnOutcome`。
 
 `CombatSearchCoordinator.Audits` 的智能开局药水补搜逐成员扣除请求剩余节点和时间。开局成员沿用智能梯度同一次请求计算出的用药准入上限，首回合及损血边界续搜也受该上限约束；保留上游净差、必然受击及整场战损三轴准入。无药路线只有死亡、尚无完整胜利时，最后一个生成能力成员可复用同药水选择成员自生的完整首回合动作，并在其他复合前缀前调度；缓存只存纯值动作，不持有节点或实机状态。仍占原成员名额，沿既有前缀回放重建调度基线、普通排序及药水资格比较，不增加配置容量。
 

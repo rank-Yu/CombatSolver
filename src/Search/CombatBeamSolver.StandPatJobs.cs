@@ -3,6 +3,8 @@ using System.Runtime.ExceptionServices;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal sealed partial class CombatBeamSolver
 {
     private void PrepareStandPatProbes(IEnumerable<SearchNode> nodes)

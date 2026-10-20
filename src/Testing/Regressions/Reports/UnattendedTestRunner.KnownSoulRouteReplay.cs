@@ -120,7 +120,7 @@ internal sealed partial class UnattendedTestRunner
                         {
                             IReadOnlyList<PredictedCard> hand = parent.Simulator.State.GetPlayerCombatState(player).Hand.Cards;
                             PlanAction descriptor = new(PlanActionKind.PlayCard, turn, CardId: cardId, CardOccurrence: 0);
-                            PredictedCard card = CombatBeamSolver.FindCardForReplay(hand, descriptor)
+                            PredictedCard card = SearchProbeHelpers.FindCardForReplay(hand, descriptor)
                                 ?? throw new InvalidOperationException($"当前手牌找不到 {cardId}#0。");
                             string stateKey = CardChoiceSupport.ChoiceCardKey(card);
                             int stateOccurrence = hand.TakeWhile(candidate => !ReferenceEquals(candidate, card))

@@ -1,6 +1,8 @@
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 internal sealed partial class CombatBeamSolver
 {
     // This transient, synchronous callback payload never crosses the Search boundary.

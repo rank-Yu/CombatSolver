@@ -16,15 +16,11 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+using static CombatSolver.SearchProbeHelpers;
+
 
 internal sealed partial class CombatBeamSolver
 {
-    private readonly record struct PrimaryChoiceMatch(
-        string ContextId,
-        PlanChoiceEffect Effect,
-        PileType SourcePile,
-        int MinCount);
-
     private readonly record struct PendingChoiceReplayBranch(
         PlanAction Action,
         bool PruneInvalidBranch);
@@ -870,21 +866,6 @@ internal sealed partial class CombatBeamSolver
         }
     }
 
-    private CardChoiceSpec? BuildPrimaryCardChoiceSpec(SimulationSnapshot probeSnapshot)
-    {
-        CombatPredictionSimulator probeSimulator =
-            (CombatPredictionSimulator)probeSnapshot.Simulator;
-        SimulatedCombatState probeCombat =
-            (SimulatedCombatState)probeSnapshot.Simulator.State.CombatState;
-        return probeCombat.PendingTurnStartChoice is { } pendingChoice
-            && string.IsNullOrEmpty(pendingChoice.SourceId)
-                ? TurnStartChoiceSupport.BuildPendingSpec(
-                    probeSimulator,
-                    probeCombat,
-                    _player)
-                : null;
-    }
-
     /// <summary>
     /// Inspects the pending boundary without advancing or mutating its simulator. Root-level
     /// choice coordinators use the actual first-layer semantic width instead of silently falling
@@ -945,18 +926,6 @@ internal sealed partial class CombatBeamSolver
             : branches.Count;
     }
 
-    private static CardChoiceSpec? BuildRequiredEmptyChoiceSpec(PlanCardChoice? requiredEmptyChoice)
-        => requiredEmptyChoice == null
-            ? null
-            : new CardChoiceSpec(
-                requiredEmptyChoice.Effect,
-                requiredEmptyChoice.SourcePile,
-                0,
-                0,
-                [],
-                [],
-                ReplacementValue: 0d);
-
     private static bool HasChoiceBeforePrimary(
         SimulationSnapshot snapshot,
         CardChoiceSpec? primaryChoiceSpec)
@@ -975,44 +944,6 @@ internal sealed partial class CombatBeamSolver
     /// becomes <see cref="PlanAction.Choice"/>, and every other action choice is appended to
     /// <see cref="PlanAction.NestedChoices"/> (counted before the primary while it is still missing).
     /// </summary>
-    private static PlanAction AppendPendingChoice(
-        PlanAction action,
-        TurnStartChoiceRequest request,
-        PlanCardChoice branch,
-        bool turnResolution,
-        PrimaryChoiceMatch? unresolvedPrimaryChoice)
-    {
-        bool primaryChoice = !turnResolution
-            && action.Choice == null
-            && string.IsNullOrEmpty(request.SourceId)
-            && (unresolvedPrimaryChoice == null
-                || MatchesPrimaryChoice(request, unresolvedPrimaryChoice));
-        IReadOnlyList<PlanCardChoice> existing = turnResolution
-            ? action.TurnStartChoices ?? []
-            : action.NestedChoices ?? [];
-        List<PlanCardChoice> next = new(existing.Count + 1);
-        next.AddRange(existing);
-        PlanCardChoice resolvedBranch = branch with
-        {
-            SourceId = request.SourceId,
-            ContextId = request.ContextId,
-            Timing = request.Timing,
-        };
-        if (!primaryChoice)
-            next.Add(resolvedBranch);
-        return turnResolution
-            ? action with { TurnStartChoices = next }
-            : primaryChoice
-                ? action with { Choice = resolvedBranch }
-                : action with
-                {
-                    NestedChoices = next,
-                    NestedChoicesBeforePrimary = action.Choice == null
-                        ? action.NestedChoicesBeforePrimary + 1
-                        : action.NestedChoicesBeforePrimary,
-                };
-    }
-
     private static bool MatchesPrimaryChoice(
         TurnStartChoiceRequest request,
         CardChoiceSpec? primaryChoiceSpec)
