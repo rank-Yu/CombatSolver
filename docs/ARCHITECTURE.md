@@ -87,6 +87,8 @@ Smart 药水梯度在主成员耗尽时间时拥有一个独立成员时间：�
 
 每项战斗语义只有一个权威结算实现；Flash 内核是逐项差分校验的派生实现，不是第二个权威。可变值由根快照、影子状态、克隆 Model 或 `PredictionStateStore` 持有。一次 Fork 共用 `PredictionForkContext`，引用随同一上下文重映射；COW 取得可写所有者后再写。
 
+死亡是否致命（Fatal）的判定由 `SimulatedCombatState.ShouldOwnerDeathTriggerFatal` 从分支 Power 集合与分支 HP/死亡状态结算；`ReattachPower.AreAllOtherSegmentsDead` 的原版 live `CombatState` 遍历不能在本判定中调用。The Hunt、Feed、HandOfGreed 与 BookRepairKnife 共用该入口；原版 `OwnerIsSecondaryEnemy` 等纯类型属性仍可由分支克隆 Power 读取。
+
 Fork 发生在动作、选牌、Power、死亡和出牌事务允许复制的稳定边界。玩家记录的卡牌/药水嵌套效果作用域由引擎持有；选牌检查点保存不可变身份序列，恢复建立分支独占列表。最外层效果结束后再检查手空。稳定根及跨回合状态的该作用域为空，普通 Fork 要求为空。
 
 未知 gameplay subscriber 显式拒绝；已支持来源在主线程捕获，并在分支中消费隔离状态。登记合同与封闭入口见 [第三方适配手册](third-party/README.md)。

@@ -185,11 +185,19 @@ internal static class ModifyDamageMirrors
         var facing = context.StateStore.Get(power, () => new SurroundedPredictionState(power)).Facing;
         return facing switch
         {
-            SurroundedPower.Direction.Right when context.Dealer.HasPower<BackAttackLeftPower>() => 1.5m,
-            SurroundedPower.Direction.Left when context.Dealer.HasPower<BackAttackRightPower>() => 1.5m,
+            SurroundedPower.Direction.Right when HasBackAttack<BackAttackLeftPower>(context, context.Dealer) => 1.5m,
+            SurroundedPower.Direction.Left when HasBackAttack<BackAttackRightPower>(context, context.Dealer) => 1.5m,
             _ => 1
         };
     }
+
+    // Search always runs on SimulatedCombatState; the live fallback only serves a direct
+    // live-root simulator and must not be reached from a background worker.
+    private static bool HasBackAttack<T>(ModifyDamageMirrorContext context, Creature dealer)
+        where T : PowerModel
+        => context.CombatState is SimulatedCombatState combat
+            ? combat.GetPower<T>(dealer) != null
+            : dealer.HasPower<T>();
 
     private static decimal HandleTrackingPower(TrackingPower power, ModifyDamageMirrorContext context)
     {

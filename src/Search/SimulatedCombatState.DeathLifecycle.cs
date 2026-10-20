@@ -120,9 +120,9 @@ internal sealed partial class SimulatedCombatState
     public void BeginReattach(CombatPredictionSimulator simulator, Creature creature)
     {
         Creature[] otherSegments = GetTeammatesOf(creature)
-            .Where(candidate => candidate != creature && GetAmount<ReattachPower>(candidate) > 0)
+            .Where(candidate => candidate != creature && HasReattachPower(candidate))
             .ToArray();
-        bool allDead = otherSegments.All(candidate => simulator.State.GetCreature(candidate).IsDead);
+        bool allDead = AreAllOtherSegmentsDead(simulator, creature);
         if (allDead)
         {
             foreach (Creature segment in otherSegments.Append(creature))
@@ -131,6 +131,65 @@ internal sealed partial class SimulatedCombatState
         }
         SetDeathPhase(creature, PredictedDeathPhase.Reviving);
         ForceMonsterMove(creature, "DEAD_MOVE");
+    }
+
+    /// <summary>
+    /// Mirrors <c>PowerModel.ShouldOwnerDeathTriggerFatal</c> over this branch's powers.
+    /// </summary>
+    /// <remarks>
+    /// The native <see cref="ReattachPower.ShouldOwnerDeathTriggerFatal"/> calls
+    /// <c>AreAllOtherSegmentsDead</c>, which walks <c>Owner.CombatState</c> — the live combat
+    /// state. During background search that reads root HP, so a branch that had already killed
+    /// the other Decimillipede segments missed the Fatal reward (The Hunt/Feed/HandOfGreed).
+    /// The branch owns the power amounts and the death HP; evaluate the same predicate there.
+    /// Vanilla v0.111.0 only overrides the default for ReattachPower and MinionPower; every
+    /// other power keeps the native default (true) unless a mod overrides it.
+    /// </remarks>
+    public bool ShouldOwnerDeathTriggerFatal(
+        CombatPredictionSimulator simulator,
+        Creature owner)
+    {
+        foreach (PowerModel power in EffectivePowers())
+        {
+            if (!ReferenceEquals(power.Owner, owner))
+                continue;
+            bool fatal = power switch
+            {
+                ReattachPower => AreAllOtherSegmentsDead(simulator, owner),
+                MinionPower => false,
+                _ => power.ShouldOwnerDeathTriggerFatal(),
+            };
+            if (!fatal)
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Native <c>ReattachPower.AreAllOtherSegmentsDead</c>, evaluated on branch HP/death state.
+    /// </summary>
+    private bool AreAllOtherSegmentsDead(
+        CombatPredictionSimulator simulator,
+        Creature owner)
+    {
+        foreach (Creature other in GetTeammatesOf(owner))
+        {
+            if (ReferenceEquals(other, owner) || !HasReattachPower(other))
+                continue;
+            if (!simulator.State.GetCreature(other).IsDead)
+                return false;
+        }
+        return true;
+    }
+
+    private bool HasReattachPower(Creature owner)
+    {
+        foreach (PowerModel power in EffectivePowers())
+        {
+            if (power is ReattachPower && ReferenceEquals(power.Owner, owner))
+                return true;
+        }
+        return false;
     }
 
     public void CompleteDeathPhase(Creature creature)

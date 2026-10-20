@@ -278,11 +278,19 @@ internal static class BeforeCardPlayedMirrors
         }
 
         var state = context.StateStore.Get(power, () => new SurroundedPredictionState(power));
-        if (target.HasPower<BackAttackLeftPower>())
+        // Search always runs on SimulatedCombatState. A direct live-root simulator keeps the
+        // native read; production search must not observe the root power list here.
+        bool hasLeft = context.CombatState is SimulatedCombatState combat
+            ? combat.GetPower<BackAttackLeftPower>(target) != null
+            : target.HasPower<BackAttackLeftPower>();
+        bool hasRight = context.CombatState is SimulatedCombatState predicted
+            ? predicted.GetPower<BackAttackRightPower>(target) != null
+            : target.HasPower<BackAttackRightPower>();
+        if (hasLeft)
         {
             state.Facing = SurroundedPower.Direction.Left;
         }
-        else if (target.HasPower<BackAttackRightPower>())
+        else if (hasRight)
         {
             state.Facing = SurroundedPower.Direction.Right;
         }

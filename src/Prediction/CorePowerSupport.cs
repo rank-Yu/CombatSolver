@@ -32,9 +32,7 @@ internal static class CorePowerSupport
         CardModel card = playedCard.Preview;
         Creature owner = playedCard.Preview.Owner.Creature;
         bool targetDeathTriggersFatal = target == null
-            || combat.EffectivePowers()
-                .Where(power => power.Owner == target)
-                .All(power => power.ShouldOwnerDeathTriggerFatal());
+            || combat.ShouldOwnerDeathTriggerFatal(simulator, target);
         MonologuePower[] pendingMonologues = combat.CapturePendingMonologues(owner);
         CardOnPlaySupport.Apply(
             simulator,

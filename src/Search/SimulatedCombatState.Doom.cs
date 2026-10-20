@@ -15,9 +15,7 @@ internal sealed partial class SimulatedCombatState
         foreach (Player player in Players)
         {
             int count = creatures.Count(creature => creature != player.Creature
-                && EffectivePowers()
-                    .Where(power => power.Owner == creature)
-                    .All(power => power.ShouldOwnerDeathTriggerFatal()));
+                && ShouldOwnerDeathTriggerFatal(simulator, creature));
             fatalCounts[player] = count;
         }
         foreach (Creature creature in creatures)

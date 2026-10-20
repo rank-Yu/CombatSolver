@@ -32,7 +32,12 @@ internal static class FrostOrbMirrors
         if (context.Simulator.HasPendingChoice)
             return completedTargets;
 
-        if (!orb.Owner.Creature.HasPower<HibernatePower>())
+        // Search always runs on SimulatedCombatState; the live fallback only serves a direct
+        // live-root simulator and must not be reached from a background worker.
+        bool hibernate = context.State.CombatState is SimulatedCombatState combat
+            ? combat.GetPower<HibernatePower>(orb.Owner.Creature) != null
+            : orb.Owner.Creature.HasPower<HibernatePower>();
+        if (!hibernate)
         {
             return completedTargets;
         }
