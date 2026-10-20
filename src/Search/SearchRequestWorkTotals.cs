@@ -18,13 +18,21 @@ internal readonly record struct SearchRequestWorkSnapshot(
     long ExpandedNodes, long TransitionCount, long ChoiceBranchesEvaluated,
     TimeSpan Elapsed, long WorkerAllocatedBytes,
     long Gen0Collections, long Gen1Collections, long Gen2Collections,
-    TimeSpan GcPauseDuration, TimeSpan MaxObservedGcPause, int RecordedSolverCount, int CycleReplayActions = 0);
+    TimeSpan GcPauseDuration, TimeSpan MaxObservedGcPause, int RecordedSolverCount,
+    int CycleReplayActions = 0,
+    // Legacy-equivalent expanded-node units used by the shared request node budget. Legacy
+    // contributions equal ExpandedNodes; Flash reports its physical expansions divided by the
+    // profile width multiple the request actually used, so a wider Flash member consumes the
+    // same budget share as the legacy member of that profile. Telemetry keeps the physical
+    // ExpandedNodes.
+    long BudgetExpandedNodes = 0);
 
 internal readonly record struct SearchSolverWorkContribution(
     int ExpandedNodes, int TransitionCount, int ChoiceBranchesEvaluated,
     TimeSpan Elapsed, long WorkerAllocatedBytes,
     int Gen0Collections, int Gen1Collections, int Gen2Collections,
-    TimeSpan GcPauseDuration, TimeSpan MaxObservedGcPause);
+    TimeSpan GcPauseDuration, TimeSpan MaxObservedGcPause,
+    long BudgetExpandedNodes = -1);
 
 internal readonly record struct SearchWorkAttribution(
     string Mechanism,
@@ -75,6 +83,8 @@ internal sealed class SearchRequestWorkTotals
         ArgumentOutOfRangeException.ThrowIfNegative(work.ChoiceBranchesEvaluated);
         ValidateWork(work.Elapsed, work.WorkerAllocatedBytes, work.Gen0Collections, work.Gen1Collections,
             work.Gen2Collections, work.GcPauseDuration, work.MaxObservedGcPause);
+        long budgetNodes = work.BudgetExpandedNodes < 0 ? work.ExpandedNodes : work.BudgetExpandedNodes;
+        ArgumentOutOfRangeException.ThrowIfNegative(budgetNodes);
         lock (_gate)
         {
             Accumulate(work.Elapsed, work.WorkerAllocatedBytes, work.Gen0Collections, work.Gen1Collections,
@@ -82,6 +92,7 @@ internal sealed class SearchRequestWorkTotals
             _totals = _totals with
             {
                 ExpandedNodes = _totals.ExpandedNodes + work.ExpandedNodes,
+                BudgetExpandedNodes = _totals.BudgetExpandedNodes + budgetNodes,
                 TransitionCount = _totals.TransitionCount + work.TransitionCount,
                 ChoiceBranchesEvaluated = _totals.ChoiceBranchesEvaluated + work.ChoiceBranchesEvaluated,
                 RecordedSolverCount = _totals.RecordedSolverCount + 1,

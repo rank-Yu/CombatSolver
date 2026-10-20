@@ -73,7 +73,7 @@ internal static partial class CombatSearchCoordinator
         List<BeamWidthPortfolioMemberCost> costs = [];
         BeamWidthPortfolioBaseline baseline = default;
         bool baselineObserved = false;
-        long expandedByMembers = 0;
+        long budgetExpandedByMembers = 0;
         BeamPortfolioExperiment? experiment = policy.PortfolioExperiment;
         SolverResult? baselineResult = null;
         SolverResult? incumbent = initialPlanIncumbent;
@@ -150,7 +150,8 @@ internal static partial class CombatSearchCoordinator
             long managedHeapAfter = GC.GetTotalMemory(forceFullCollection: false);
             SearchRequestWorkSnapshot after = totals.Snapshot();
             long expanded = after.ExpandedNodes - before.ExpandedNodes;
-            expandedByMembers += expanded;
+            long budgetExpanded = after.BudgetExpandedNodes - before.BudgetExpandedNodes;
+            budgetExpandedByMembers += budgetExpanded;
             costs.Add(new BeamWidthPortfolioMemberCost(memberElapsed, memberAllocated, managedHeapAfter));
             bool won = IsCompleteVictory(memberResult);
             bool terminal = won || memberResult.Snapshot.PlayerDead;
@@ -183,7 +184,10 @@ internal static partial class CombatSearchCoordinator
                     IsProvenZeroDamageRoute(root, policy, memberResult),
                     memberElapsed,
                     expanded,
-                    effectiveProfile.BeamWidth);
+                    effectiveProfile.BeamWidth)
+                {
+                    BudgetExpandedNodes = budgetExpanded,
+                };
                 baselineObserved = true;
                 telemetry.RecordFirstRoutePublished(passClock.Elapsed.TotalMilliseconds);
                 publishBaseline?.Invoke(memberResult);
@@ -198,6 +202,7 @@ internal static partial class CombatSearchCoordinator
                 terminal ? memberResult.ProjectedBattleHpLost : null,
                 memberResult.PotionCount)
             {
+                BudgetExpandedNodes = budgetExpanded,
                 StopPortfolio = memberResult.ResultScope != SolverResultScope.SearchCompletion,
                 MemoryTruncated = memberResult.BoundaryReason == SearchBoundaryReason.MemoryNoProgress,
             };
@@ -213,7 +218,7 @@ internal static partial class CombatSearchCoordinator
             string? rejection = member.AggressivePowerCommitment
                 ? PowerCommitmentPortfolioGate.Reject(hasReachablePower)
                 : BeamWidthPortfolioGate.RejectRefinement(
-                    baseline, member.BeamWidth, profile.MaxExpandedNodes - expandedByMembers,
+                    baseline, member.BeamWidth, profile.MaxExpandedNodes - budgetExpandedByMembers,
                     RemainingMilliseconds(), profile.SoftTimeBudgetMilliseconds);
             // 学习型跳过器未见过能力承诺或进攻精炼成员，不由它裁决这些新策略。
             if (rejection != null || experiment == null || member.AggressivePowerCommitment
@@ -235,7 +240,7 @@ internal static partial class CombatSearchCoordinator
                 first.BestNode.ActionCount, first.CombatEndedTurn ?? 0,
                 baseline.ExpandedNodes, first.TransitionCount, baseline.ElapsedMilliseconds,
                 best.ProjectedBattleHpLost, best.PotionCount,
-                (double)(profile.MaxExpandedNodes - expandedByMembers) / profile.MaxExpandedNodes,
+                (double)(profile.MaxExpandedNodes - budgetExpandedByMembers) / profile.MaxExpandedNodes,
                 Math.Max(0d, (double)RemainingMilliseconds() / profile.SoftTimeBudgetMilliseconds),
                 (double)member.BeamWidth / profile.BeamWidth,
                 member.SecondRankBand ? 1 : 0, member.BaseScoreOnly ? 1 : 0,

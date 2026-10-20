@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CombatSolver.Engine.InCombat.Flash;
 using MegaCrit.Sts2.Core.Entities.Players;
 
@@ -36,7 +37,7 @@ internal sealed record FlashSolveOutcome(
 /// engine (each step's projection must match), then materialization of the verified route as a
 /// fixed prefix through the existing solver so the result has the existing shape.
 /// </summary>
-internal static class FlashRouteMaterializer
+internal static partial class FlashRouteMaterializer
 {
     /// <summary>
     /// FlashBeam width and node budget as a multiple of the existing profile's, under the same soft time
@@ -77,15 +78,50 @@ internal static class FlashRouteMaterializer
         int earlyTurnScoutDepth = 0,
         Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null)
     {
+        FlashWorkAccounting accounting = new(policy.RequestWorkTotals, purpose, continuationPurpose,
+            profileScale, policy.FramePressureSignal, policy.Diagnostics);
+        Stopwatch workWatch = Stopwatch.StartNew();
+        try
+        {
+            return SolveCore(root, displayNames, battleDamage, policy, profile, cancellationToken,
+                accounting, flashOptions, potionPolicyOverride, progressCallback, purpose,
+                primaryIncumbent, fixedPrefixActions, maximumPotionUses, minimumPotionUses,
+                earliestPotionTurn, continuationPurpose, potionFreePolicyBaseline,
+                resetFixedPrefixSchedulingBaseline, profileScale, planCommitment, earlyTurnScoutDepth,
+                earlyTurnScoutObserver);
+        }
+        finally
+        {
+            accounting.Record(workWatch.Elapsed);
+        }
+    }
+
+    private static FlashSolveOutcome SolveCore(
+        CombatRootSnapshot root,
+        SolverDisplayNames displayNames,
+        BattleDamageSnapshot battleDamage,
+        SearchPolicySnapshot policy,
+        SolverSearchProfile profile,
+        CancellationToken cancellationToken,
+        FlashWorkAccounting accounting,
+        FlashBeamOptions? flashOptions = null,
+        SolverPotionPolicy? potionPolicyOverride = null,
+        Action<SolverProgress>? progressCallback = null,
+        DirectSearchPurpose? purpose = null,
+        PrimarySearchIncumbent? primaryIncumbent = null,
+        IReadOnlyList<PlanAction>? fixedPrefixActions = null,
+        int? maximumPotionUses = null,
+        int? minimumPotionUses = null,
+        int? earliestPotionTurn = null,
+        ContinuationPurpose? continuationPurpose = null,
+        PotionFreePolicyBaseline? potionFreePolicyBaseline = null,
+        bool? resetFixedPrefixSchedulingBaseline = null,
+        int profileScale = ProfileWidthScale,
+        PlanCommitment? planCommitment = null,
+        int earlyTurnScoutDepth = 0,
+        Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null)
+    {
         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
-        SearchRequestWorkTotals? workTotals = policy.RequestWorkTotals;
-        bool recordFlashWork = workTotals != null
-            && (policy.UseNoveltyPortfolio || purpose == DirectSearchPurpose.EarlyTurnScout);
-        long allocatedAtStart = GC.GetAllocatedBytesForCurrentThread();
-        int gen0AtStart = GC.CollectionCount(0);
-        int gen1AtStart = GC.CollectionCount(1);
-        int gen2AtStart = GC.CollectionCount(2);
-        TimeSpan gcPauseAtStart = GC.GetTotalPauseDuration();
         Player player = root.PlayerIdentity;
         IReadOnlyList<PlanAction> prefix = fixedPrefixActions ?? [];
         int prefixLength = prefix.Count;
@@ -94,6 +130,7 @@ internal static class FlashRouteMaterializer
             maximumPotionUses: maximumPotionUses,
             earliestPotionTurn: earliestPotionTurn,
             resetFixedPrefixSchedulingBaseline: resetFixedPrefixSchedulingBaseline ?? false);
+        accounting.Attach(probe);
         bool turnSetup = policy.IncludeTurnSetup;
         if (turnSetup
             && (root.CurrentSide != MegaCrit.Sts2.Core.Combat.CombatSide.Player
@@ -326,25 +363,71 @@ internal static class FlashRouteMaterializer
                     ? 0.25d
                     : 0d,
         };
-        FlashBeamResult search = new FlashBeamSolver(rules, options).Solve(battles, cancellationToken);
-        if (progressCallback != null && noveltyRequest)
+        accounting.SetProfileScale(options.BeamWidth / (double)Math.Max(1, profile.BeamWidth));
+        FlashProgressBridge progressBridge = new(probe, player, root, displayNames, battleDamage,
+            policy, profile, searchRoots, battles, rules, prefix, potionUsage.PotionUseCount,
+            progressCallback, accounting.Pacer, cancellationToken);
+        options = options with
         {
-            // The novelty search reports one progress checkpoint before materialization. The
-            // coordinator's enriched callback needs a prior checkpoint to publish its route seed and
-            // current-turn preview after the complete-victory interim result arrives.
-            progressCallback(new SolverProgress(
-                root.StartTurnNumber,
-                root.StartTurnNumber + search.TurnsSearched,
-                search.TurnsSearched,
-                0,
-                search.ExpandedNodes,
-                search.Transitions,
-                profile.MaxExpandedNodes,
-                0,
-                0,
-                (long)search.Elapsed.TotalMilliseconds,
-                "Flash novelty",
-                RequestBudgetMilliseconds: profile.SoftTimeBudgetMilliseconds));
+            Pacer = accounting.Pacer,
+            Progress = progressBridge.Publish,
+            PollTakeover = progressBridge.Poll,
+        };
+        FlashBeamSolver solver = new(rules, options);
+        FlashBeamResult search;
+        try
+        {
+            search = solver.Solve(battles, cancellationToken);
+        }
+        finally
+        {
+            // A canceled solve still reports the work it actually performed.
+            accounting.Expanded = solver.ExpandedNodes;
+            accounting.Transitions = solver.TransitionCount;
+            accounting.ProgressStats = progressBridge.Stats;
+        }
+        if (search.Takeover == FlashTakeoverAction.AdoptRoute)
+        {
+            // The player asked for the exact seed that was displayed. Its materialization replays and
+            // verifies the route on the existing engine and returns the existing RouteAdoption shape.
+            SolverResult adopted = progressBridge.MaterializeRequestedSeed();
+            return new FlashSolveOutcome(adopted, FlashRejection.None, "", search, [],
+                admission, TimeSpan.Zero, watch.Elapsed);
+        }
+        if (search.Takeover == FlashTakeoverAction.ApplyCurrentTurn)
+        {
+            if (search.BestRootIndex < 0 || search.BestRootIndex >= searchRoots.Count)
+                throw new InvalidOperationException(
+                    $"Flash 当前回合采纳根下标 {search.BestRootIndex} 超出回合准备根数 {searchRoots.Count}。");
+            TurnSetupRootCandidate adoptedRoot = searchRoots[search.BestRootIndex];
+            watch.Restart();
+            List<PlanAction> adoptedPlan = VerifyRoute(probe, player, adoptedRoot.Snapshot,
+                battles[search.BestRootIndex], rules, prefix, search.BestRoute,
+                potionUsage.PotionUseCount, ownsStartSnapshot: false);
+            TimeSpan adoptedVerification = watch.Elapsed;
+            try
+            {
+                SolverResult adopted = MaterializeFixedPlan(probe, root, displayNames, battleDamage,
+                    policy, potionPolicyOverride, potionFreePolicyBaseline, maximumPotionUses,
+                    minimumPotionUses, earliestPotionTurn,
+                    turnSetup ? adoptedRoot.Choices : null,
+                    turnSetup ? adoptedRoot.Snapshot : null, adoptedPlan, cancellationToken,
+                    SolverResultScope.CurrentTurnAdoption, routeAdoptionActions: null, out _);
+                policy.Diagnostics.Info(
+                    $"[CombatSolver/Flash] FLASH_TAKEOVER_MATERIALIZED kind=ApplyCurrentTurn " +
+                    $"scope={adopted.ResultScope} actions={adopted.BestNode.ActionCount} " +
+                    $"flash_expanded={search.ExpandedNodes}");
+                return new FlashSolveOutcome(adopted, FlashRejection.None, "", search, adoptedPlan,
+                    admission, adoptedVerification, watch.Elapsed);
+            }
+            catch (PotionPolicyUnsatisfiedException ex)
+            {
+                return new FlashSolveOutcome(null, FlashRejection.None, ex.Message, search, adoptedPlan,
+                    admission, adoptedVerification, watch.Elapsed)
+                {
+                    ConstraintFailure = $"materialize-potion-policy {ex.Message}",
+                };
+            }
         }
         if (!search.PotionPolicySatisfied)
         {
@@ -362,48 +445,12 @@ internal static class FlashRouteMaterializer
         watch.Restart();
         // The verified route is the fixed prefix plus the Flash route; the existing solver replays the
         // whole plan from the request root and packages it.
-        List<PlanAction> plan = new(prefixLength + search.BestRoute.Length);
-        plan.AddRange(prefix);
-        SimulationSnapshot snapshot = selectedRoot.Snapshot;
-        FlashBattle state = battles[search.BestRootIndex];
-        for (int step = 0; step < search.BestRoute.Length; step++)
-        {
-            FlashAction action = search.BestRoute[step];
-            PlanAction planned;
-            try
-            {
-                snapshot = FlashChoiceTranslator.Replay(probe.ReplayCoreForBridge, snapshot, player, action, out planned);
-            }
-            catch (FlashChoiceMismatchException ex)
-            {
-                throw new FlashVerificationException(step, [ex.Message]);
-            }
-            plan.Add(planned);
-            if (FlashKernel.Step(ref state, action, rules, out _) != FlashStepResult.Completed)
-                throw new InvalidOperationException("已选路线的 Flash 动作缺少选择。");
-            FlashBattle projected;
-            try
-            {
-                projected = FlashStateImporter.Import(snapshot, player, rules, potionUsage.PotionUseCount);
-            }
-            catch (FlashImportException ex)
-            {
-                // The existing engine reached a state Flash cannot represent, so this step cannot be verified.
-                throw new FlashVerificationException(step, [$"旧引擎状态无法投影：{ex.Reason} {ex.Detail}"]);
-            }
-            if (!FlashFingerprint.Equal(projected, state))
-                throw new FlashVerificationException(step, FlashBattleDump.Diff(projected, state, "old", "flash"));
-        }
+        List<PlanAction> plan = VerifyRoute(probe, player, selectedRoot.Snapshot,
+            battles[search.BestRootIndex], rules, prefix, search.BestRoute,
+            potionUsage.PotionUseCount, ownsStartSnapshot: false);
         TimeSpan verification = watch.Elapsed;
 
         watch.Restart();
-        // The verified route is the whole plan; the existing solver only replays and packages it.
-        SolverSearchProfile materializeProfile = profile with
-        {
-            BeamWidth = 1,
-            MaxExpandedNodes = 1,
-            SoftTimeBudgetMilliseconds = Math.Max(1, Math.Min(profile.SoftTimeBudgetMilliseconds, 2_000)),
-        };
         SolverResult result;
         SearchNode materializedSelectionNode;
         try
@@ -411,8 +458,8 @@ internal static class FlashRouteMaterializer
             result = MaterializeFixedPlan(probe, root, displayNames, battleDamage, policy,
                 potionPolicyOverride, potionFreePolicyBaseline, maximumPotionUses, minimumPotionUses,
                 earliestPotionTurn, turnSetup ? selectedRoot.Choices : null,
-                turnSetup ? selectedRoot.Snapshot : null, plan, watch, cancellationToken,
-                workTotals, recordPrefixWork: !recordFlashWork, continuationPurpose, purpose,
+                turnSetup ? selectedRoot.Snapshot : null, plan, cancellationToken,
+                SolverResultScope.SearchCompletion, routeAdoptionActions: null,
                 out materializedSelectionNode);
         }
         catch (PotionPolicyUnsatisfiedException ex)
@@ -459,21 +506,6 @@ internal static class FlashRouteMaterializer
             {
                 ConstraintFailure = failure,
             };
-        }
-        if (recordFlashWork)
-        {
-            workTotals!.Record(new SearchSolverWorkContribution(
-                search.ExpandedNodes,
-                search.Transitions,
-                0,
-                search.Elapsed,
-                Math.Max(0, GC.GetAllocatedBytesForCurrentThread() - allocatedAtStart),
-                Math.Max(0, GC.CollectionCount(0) - gen0AtStart),
-                Math.Max(0, GC.CollectionCount(1) - gen1AtStart),
-                Math.Max(0, GC.CollectionCount(2) - gen2AtStart),
-                MaxZero(GC.GetTotalPauseDuration() - gcPauseAtStart),
-                TimeSpan.Zero),
-                directSearchPurpose: purpose);
         }
         // Publish the scout frontier only after the whole Flash attempt, including materialization,
         // succeeded. A later failure falls back to the existing solver, whose observer must be the only
@@ -524,14 +556,12 @@ internal static class FlashRouteMaterializer
         IReadOnlyList<PlanCardChoice>? turnSetupChoices,
         SimulationSnapshot? turnSetupSnapshot,
         IReadOnlyList<PlanAction> plan,
-        System.Diagnostics.Stopwatch watch,
         CancellationToken cancellationToken,
-        SearchRequestWorkTotals? workTotals,
-        bool recordPrefixWork,
-        ContinuationPurpose? continuationPurpose,
-        DirectSearchPurpose? purpose,
+        SolverResultScope scope,
+        IReadOnlyList<PlanAction>? routeAdoptionActions,
         out SearchNode selectedNode)
     {
+        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
         using IDisposable isolation = SimulationNotificationIsolation.Enter();
         FlashPruningRequest pruning = FlashBridgeFacts.CapturePruningRequest(
             root, policy, potionPolicyOverride, maximumPotionUses, minimumPotionUses, battleDamage);
@@ -598,25 +628,10 @@ internal static class FlashRouteMaterializer
             root.BossHpRelief, watch, allocatedAtStart, gen0, gen1, gen2, gcPause);
         try
         {
-            SolverResult materialized = materializer.MaterializeSelectedRoute(
-                selection, onlyDeathRoutes, SolverResultScope.SearchCompletion,
-                candidateSearchedTurnLayers: 0, candidateTimeBudgetReached: false);
-            if (recordPrefixWork && workTotals != null)
-            {
-                workTotals.Record(new SearchSolverWorkContribution(
-                    0,
-                    metrics.TransitionCount,
-                    0,
-                    watch.Elapsed,
-                    Math.Max(0, GC.GetAllocatedBytesForCurrentThread() - allocatedAtStart),
-                    Math.Max(0, GC.CollectionCount(0) - gen0),
-                    Math.Max(0, GC.CollectionCount(1) - gen1),
-                    Math.Max(0, GC.CollectionCount(2) - gen2),
-                    MaxZero(GC.GetTotalPauseDuration() - gcPause),
-                    TimeSpan.Zero),
-                    continuationPurpose, purpose);
-            }
-            return materialized;
+            return materializer.MaterializeSelectedRoute(
+                selection, onlyDeathRoutes, scope,
+                candidateSearchedTurnLayers: 0, candidateTimeBudgetReached: false,
+                routeAdoptionActions: routeAdoptionActions);
         }
         catch
         {

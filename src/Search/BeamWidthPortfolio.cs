@@ -40,6 +40,12 @@ internal readonly record struct BeamWidthPortfolioRun<TResult>(
     int PotionCount)
 {
     /// <summary>
+    /// Legacy-equivalent expanded nodes consumed from the shared member budget. Negative means
+    /// "same as <see cref="ExpandedNodes"/>" (the legacy solver's default).
+    /// </summary>
+    public long BudgetExpandedNodes { get; init; } = -1;
+
+    /// <summary>
     /// 接管、路线采纳这类不属于一次普通搜索完成的结果。置位时该成员直接成为选中结果，
     /// 后续成员不再运行，保持协调器遇到非 SearchCompletion 时立刻返回的既有规则。
     /// </summary>
@@ -263,6 +269,7 @@ internal static class BeamWidthPortfolio
         List<BeamWidthPortfolioMember> members = new(memberSpecs.Count);
         long remainingNodes = sharedMaxExpandedNodes;
         long totalExpanded = 0;
+        long totalBudgetExpanded = 0;
         long totalTransitions = 0;
         TResult? selected = default;
         int selectedIndex = -1;
@@ -282,7 +289,10 @@ internal static class BeamWidthPortfolio
                 ? Math.Max(remainingNodes, DedicatedPowerNodeReserve(sharedMaxExpandedNodes))
                 : remainingNodes;
             if (spec.BoundedRefinement)
-                memberNodeBudget = Math.Min(memberNodeBudget, totalExpanded / BoundedRefinementWorkDivisor);
+            {
+                memberNodeBudget = Math.Min(memberNodeBudget,
+                    totalBudgetExpanded / BoundedRefinementWorkDivisor);
+            }
             if (memberNodeBudget <= 0)
             {
                 members.Add(Skipped(spec, SkippedBudgetExhausted));
@@ -303,9 +313,13 @@ internal static class BeamWidthPortfolio
             BeamWidthPortfolioRun<TResult> run = solve(memberProfile);
             ArgumentOutOfRangeException.ThrowIfNegative(run.ExpandedNodes);
             ArgumentOutOfRangeException.ThrowIfNegative(run.TransitionCount);
+            long budgetExpanded = run.BudgetExpandedNodes < 0
+                ? run.ExpandedNodes : run.BudgetExpandedNodes;
+            ArgumentOutOfRangeException.ThrowIfNegative(budgetExpanded);
             ArgumentNullException.ThrowIfNull(run.Termination);
-            remainingNodes = Math.Max(0, remainingNodes - run.ExpandedNodes);
+            remainingNodes = Math.Max(0, remainingNodes - budgetExpanded);
             totalExpanded += run.ExpandedNodes;
+            totalBudgetExpanded += budgetExpanded;
             totalTransitions += run.TransitionCount;
             if (firstRanIndex < 0)
             {

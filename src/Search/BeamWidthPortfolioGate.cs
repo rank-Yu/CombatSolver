@@ -16,7 +16,11 @@ internal readonly record struct BeamWidthPortfolioBaseline(
     bool ProvenZeroDamage,
     long ElapsedMilliseconds,
     long ExpandedNodes,
-    int BeamWidth);
+    int BeamWidth)
+{
+    /// <summary>Legacy-equivalent expanded nodes for the node-headroom gate; negative means actual.</summary>
+    public long BudgetExpandedNodes { get; init; } = -1;
+}
 
 /// <summary>
 /// 组合入口按基线完成情况及共享节点、时间余量准入补搜。成员执行期间的内存预约、回收和停止
@@ -90,7 +94,9 @@ internal static class BeamWidthPortfolioGate
             return SkippedBaselineNotFrontierExhausted;
         if (baseline.ElapsedMilliseconds * BaselineTimeShareDivisor > timeBudgetMilliseconds)
             return SkippedBaselineTimeShareExceeded;
-        if (remainingNodes < baseline.ExpandedNodes)
+        long baselineBudgetNodes = baseline.BudgetExpandedNodes < 0
+            ? baseline.ExpandedNodes : baseline.BudgetExpandedNodes;
+        if (remainingNodes < baselineBudgetNodes)
             return SkippedNodeHeadroom;
         if (EstimateMemberCost(baseline.ElapsedMilliseconds, baseline.BeamWidth, memberBeamWidth)
             > remainingMilliseconds)

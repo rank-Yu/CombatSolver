@@ -399,10 +399,11 @@ internal static class BeamSolveDispatch
                 request.Profile,
                 request.Context.CancellationToken,
                 potionPolicyOverride: request.PotionPolicyOverride,
-                // ProgressCallbackOverride stays with the existing solver; the Flash search never
-                // reports progress. The potion audit request's scheduling reset is forwarded to the
+                // The continuation's own callback (or the request's override) receives the Flash
+                // search's progress and route-preview seed at the same cadence as the existing
+                // solver. The potion audit request's scheduling reset is forwarded to the
                 // materialize solver so its fixed-prefix baseline is the same.
-                progressCallback: null,
+                progressCallback: request.ProgressCallbackOverride ?? request.Context.ProgressCallback,
                 primaryIncumbent: request.PrimaryIncumbent,
                 fixedPrefixActions: request.Prefix,
                 maximumPotionUses: request.MaximumPotionUses,
@@ -460,7 +461,11 @@ internal static class BeamSolveDispatch
             + $"flash_capacity_pruned={search.CapacityPruned} "
             + $"flash_capacity_dropped={DescribeCapacityDrops(search.CapacityDroppedChildren)} "
             + $"flash_ended_compactions={search.EndedCompactions} "
-            + $"flash_ended_dropped={search.EndedCompressedStates}");
+            + $"flash_ended_dropped={search.EndedCompressedStates} "
+            + $"flash_yields={search.WorkerYieldCount} "
+            + $"flash_frame_waits={search.FrameRecoveryWaitCount} "
+            + $"flash_frame_wait_ms={search.FrameRecoveryWaitDuration.TotalMilliseconds:0} "
+            + $"flash_max_gc_pause_ms={search.MaxObservedGcPause.TotalMilliseconds:0}");
     }
 
     /// <summary>The per-region child capacity drops, e.g. <c>Cards:2,Powers:1</c>; <c>-</c> when none.</summary>
