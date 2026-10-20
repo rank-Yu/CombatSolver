@@ -579,6 +579,8 @@ internal sealed class UnattendedTestResult
     public UnattendedStageTiming[] StageTimings { get; init; } = [];
     public string[] CompletedChecks { get; init; } = [];
     public string? Error { get; init; }
+    /// <summary>Stable failure category (for Flash failures, the <c>FLASH_SEARCH_FAILED reason=</c> token).</summary>
+    public string? FailureCategory { get; init; }
     public DateTimeOffset FinishedAtUtc { get; init; } = DateTimeOffset.UtcNow;
 }
 

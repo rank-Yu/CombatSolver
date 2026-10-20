@@ -10,6 +10,7 @@ internal enum CombatBugReportIssueKind
     SearchSetupFailure,
     IncompatibleGameplayMod,
     SearchFailure,
+    FlashSearchFailed,
     SearchActionReplayFailure,
     SearchCapacityFailure,
     PotionPolicyUnsatisfied,
@@ -57,6 +58,8 @@ internal sealed class CombatBugReportIssueLedger
         }
         string detail = $"{failure.GetType().Name}：{failure.Message}";
         Record(primaryKind, detail);
+        if (failure is FlashSearchFailedException flashFailure)
+            Record(CombatBugReportIssueKind.FlashSearchFailed, flashFailure.EventLine);
         if (failure is SearchTransitionException
             || failure.Message.Contains("搜索动作回放失败", StringComparison.Ordinal))
         {
@@ -224,6 +227,7 @@ internal static class CombatBugReportDescription
             CombatBugReportIssueKind.SearchSetupFailure => "搜索初始化失败",
             CombatBugReportIssueKind.IncompatibleGameplayMod => "内容性 Mod 暂未适配",
             CombatBugReportIssueKind.SearchFailure => "计算失败",
+            CombatBugReportIssueKind.FlashSearchFailed => "Flash 快速搜索失败",
             CombatBugReportIssueKind.SearchActionReplayFailure => "搜索动作回放失败",
             CombatBugReportIssueKind.SearchCapacityFailure => "搜索内存或容量错误",
             CombatBugReportIssueKind.PotionPolicyUnsatisfied => "药水策略未满足",

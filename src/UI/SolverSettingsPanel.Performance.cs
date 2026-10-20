@@ -212,7 +212,7 @@ internal sealed partial class SolverSettingsPanel
             _earlyTurnExplorationEnabled,
             SolverText.Get("常规搜索后，保留前两回合不同的合法路线并继续搜索完整战斗。最多使用 40 分钟，可随时取消；只采用战损和用药综合结果更好的完整胜利路线。默认关闭，下次搜索生效。"));
         AddBasicRow(budgetGrid, SolverText.Get("Flash 快速搜索（实验）"), CreateFlashSearchModeInput(),
-            SolverText.Get("实验性的高速搜索内核，目前只支持部分角色、卡牌、遗物和怪物。关闭：只用常规搜索。对照：常规搜索结束后再用 Flash 搜索一遍并写入日志，仍采用常规搜索的路线，会增加耗时。启用：支持的战斗改用 Flash 搜索，路线的每一步都由常规模拟逐步核对；遇到不支持的内容或核对不一致时自动改用常规搜索。只影响主搜索，路线精炼和补充检查仍用常规搜索。下次搜索生效。"));
+            SolverText.Get("实验性的高速搜索内核，目前只支持部分角色、卡牌、遗物和怪物。关闭：只用常规搜索。对照：常规搜索结束后再用 Flash 搜索一遍并写入日志，仍采用常规搜索的路线，会增加耗时。启用：支持的战斗只由 Flash 搜索，不再改用常规搜索；路线的每一步都由常规模拟逐步核对。遇到不支持的内容、超容量或核对不一致时会停止本回合部署并提示切换为关闭模式。下次搜索生效。"));
         AddBasicRow(
             budgetGrid,
             SolverText.Get("搜索并行度"),

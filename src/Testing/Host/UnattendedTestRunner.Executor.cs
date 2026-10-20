@@ -47,6 +47,11 @@ internal sealed partial class UnattendedTestRunner
                 runner.AssertCheckpointProfileContract(combatState);
                 return Observation(combatEnded: false);
             }
+            if (request.ScenarioId == "FLASH-SEARCH-FAILED-CONTRACT")
+            {
+                await runner.AssertFlashSearchFailedContractAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
             if (request.ScenarioId == "CHECKPOINT-RECORDED-PLAN-PATH")
             {
                 await runner.PrepareRecordedPlanDeploymentAsync(combatState, deploy: false);
@@ -1793,6 +1798,14 @@ internal sealed partial class UnattendedTestRunner
             int maximumUnexpectedReplans = 0;
             while (CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsOverOrEnding)
             {
+                // An On-mode Flash refusal stops deployment; report the real category instead of
+                // waiting for the request deadline and losing the failure in a TimeoutException.
+                if (SolverController.LastSearchFailureForTesting is FlashSearchFailedException flashFailure
+                    && !SolverController.IsSearching)
+                {
+                    throw new InvalidOperationException(
+                        $"Flash 快速搜索失败：{flashFailure.EventLine}", flashFailure);
+                }
                 expectedCardPlayed |= runner.WasExpectedCardPlayed();
                 expectedPotionUsed |= runner.WasExpectedPotionUsed();
                 expectedPlayerPowerObserved |= runner.HasExpectedPlayerPower(player);

@@ -130,7 +130,8 @@ internal static class FlashScoreBridge
             throw Reject("GrowthSourceMirrors", "第三方成长来源的目标未移植");
         }
         if (policy.DevelopmentStrategy != null)
-            throw Reject("DevelopmentStrategy", "Prioritize/Retain 依赖 ActionCandidate 与 RankBest 必保通道，Flash 没有等价结构");
+            throw new FlashImportException(FlashRejection.DevelopmentStrategy,
+                "DevelopmentStrategy：Prioritize/Retain 依赖 ActionCandidate 与 RankBest 必保通道，Flash 没有等价结构");
         if (!StrategicEffectMirrors.IsEmpty)
             throw Reject("StrategicEffectMirrors", "第三方战略效果登记表非空");
         if (!CardRemovalValueMirrors.IsEmpty)

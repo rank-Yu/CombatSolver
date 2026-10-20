@@ -296,12 +296,13 @@ internal static partial class FlashRouteMaterializer
             : null;
         if (smartCeiling != null && !bound.Enabled)
         {
-            return new FlashSolveOutcome(null, FlashRejection.None,
-                $"smart-potion-bound unavailable ({bound.DisabledReason})", null, [],
-                admission, TimeSpan.Zero, TimeSpan.Zero)
-            {
-                ConstraintFailure = $"smart-potion-bound unavailable ({bound.DisabledReason})",
-            };
+            // The existing search keeps searching without its lower-bound prune when the exact
+            // layer's bound inputs are unavailable (the existing solver's Retention.cs): it only skips
+            // the incumbent / smart-potion ceiling, not the search. Mirror that here; the ceiling
+            // is a pruning optimization, never a potion-policy filter.
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Flash] SMART_POTION_BOUND_UNAVAILABLE reason={bound.DisabledReason} action=search_without_lower_bound");
+            smartCeiling = null;
         }
 
         // Incumbent and potion turns stay in request-root units: the fixed prefix is already part of

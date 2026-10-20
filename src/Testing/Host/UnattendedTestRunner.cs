@@ -266,7 +266,10 @@ internal sealed partial class UnattendedTestRunner
                 combatState == null
                     ? startedTurn
                     : LocalContext.GetMe(combatState)?.PlayerCombatState?.TurnNumber ?? startedTurn,
-                ex.ToString());
+                ex.ToString(),
+                failureCategory: ex.GetBaseException() is FlashSearchFailedException flashFailure
+                    ? flashFailure.ReasonToken
+                    : null);
             Entry.Logger.Error($"[CombatSolver/Unattended] FAILED run_id={_request.RunId} scenario={_request.ScenarioId} stage={_stage} exception={ex}");
             try
             {

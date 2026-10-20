@@ -185,6 +185,8 @@ internal static class Program
                     TurnSetupRootCapture.Captured, generated?.Request.FlashPrefixPlan);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_SOLVE") == "1")
                 payload["flashSolve"] = FlashSolveProbe.Run(combat!, options, loop);
+            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_FAILURE_CHECKS") == "1")
+                payload["flashFailureChecks"] = FlashFailureChecks.Run(combat!, TurnSetupRootCapture.Captured);
             payload["budget"] = DescribeBudget(options);
             payload["root"] = OfflineCombat.DescribeRoot(combat!);
             string diagnostics = ModRuntime.DescribeStart(combat!);

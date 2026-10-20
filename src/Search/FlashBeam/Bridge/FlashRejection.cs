@@ -26,9 +26,18 @@ internal enum FlashRejection
 
     /// <summary>Deprecated content (DeprecatedCardPool); kept by the game only for old saves.</summary>
     DeprecatedContent,
+
+    /// <summary>
+    /// A development-only ranking strategy is active. Off mode still supports it; On mode reports an
+    /// explicit <c>development-strategy</c> failure because Flash has no equivalent ordering hooks.
+    /// </summary>
+    DevelopmentStrategy,
 }
 
-/// <summary>The existing engine's state cannot be projected into Flash; the request falls back.</summary>
+/// <summary>
+/// Admission cannot express the existing engine's root in Flash. In On mode this is an explicit
+/// <see cref="FlashSearchFailedException"/>; Off and Shadow keep their existing behavior.
+/// </summary>
 internal sealed class FlashImportException(FlashRejection reason, string detail)
     : Exception($"Flash 准入拒绝 {reason}：{detail}")
 {

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
@@ -2573,6 +2574,15 @@ internal static partial class SolverController
             Exception ex = task.Exception?.GetBaseException() ?? new InvalidOperationException("后台搜索失败但没有异常对象。");
             _combat.BugReportIssues.RecordFailure(CombatBugReportIssueKind.SearchFailure, ex);
             LastSearchFailureForTesting = ex;
+            if (ex is FlashSearchFailedException flashFailure)
+            {
+                // Flash is the only backend in On mode. Keep the player state untouched, stop this
+                // turn's deployment and record the stable event for the existing issue-bundle path.
+                CancelDeployment();
+                _combat.FullAutoEnabled = false;
+                SolverOverlay.RefreshControls();
+                Entry.Logger.Error($"[CombatSolver/Flash] {flashFailure.EventLine}");
+            }
             if (ex is PotionPolicyUnsatisfiedException)
             {
                 _combat.FullAutoEnabled = false;
@@ -3607,11 +3617,27 @@ internal static partial class SolverController
     private static string FormatSearchFailure(
         Exception exception,
         bool parallelSearchWasEnabled)
-        => exception.GetBaseException() is IncompatibleGameplayModException incompatible
-           ? FormatIncompatibleModFailure(incompatible)
-           : $"[color={SolverUiTokens.Palette.DangerHex}][b]{SolverText.Get("计算失败")}[/b]\n" +
+    {
+        Exception failure = exception.GetBaseException();
+        if (failure is IncompatibleGameplayModException incompatible)
+            return FormatIncompatibleModFailure(incompatible);
+        if (failure is FlashSearchFailedException flash)
+        {
+            string headline = string.Format(CultureInfo.CurrentCulture,
+                SolverText.Get("Flash 快速搜索失败（{0}），已停止本回合部署。"), flash.ReasonToken);
+            string advice = SolverText.Get("请将「Flash 快速搜索」切换为关闭后重试，并反馈问题包。");
+            string detail = string.Format(CultureInfo.CurrentCulture,
+                SolverText.Get("失败详情：{0}"), flash.Detail);
+            return $"[color={SolverUiTokens.Palette.DangerHex}][b]{SolverText.Get("计算失败")}[/b]\n" +
+                $"{EscapeRichText(headline)}\n{EscapeRichText(advice)}\n{EscapeRichText(detail)}[/color]" +
+                (AllowsPlayerUploadGuidance
+                    ? "\n" + SolverUiTokens.SearchFailureInstructionRichText(parallelSearchWasEnabled)
+                    : string.Empty);
+        }
+        return $"[color={SolverUiTokens.Palette.DangerHex}][b]{SolverText.Get("计算失败")}[/b]\n" +
            $"{EscapeRichText(exception.Message)}[/color]" +
            (AllowsPlayerUploadGuidance ? "\n" + SolverUiTokens.SearchFailureInstructionRichText(parallelSearchWasEnabled) : string.Empty);
+    }
 
     internal static string FormatDeploymentFailure(Exception exception)
         => exception.GetBaseException() is IncompatibleGameplayModException incompatible

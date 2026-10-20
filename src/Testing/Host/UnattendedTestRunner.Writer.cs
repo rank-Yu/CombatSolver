@@ -235,7 +235,8 @@ internal sealed partial class UnattendedTestRunner
             bool combatEnded,
             int startedTurn,
             int finishedTurn,
-            string? error = null)
+            string? error = null,
+            string? failureCategory = null)
         {
             UnattendedTestRequest request = getRequest();
             RuntimeMemorySnapshot memory = CaptureRuntimeMemory();
@@ -268,6 +269,7 @@ internal sealed partial class UnattendedTestRunner
                 StageTimings = captureStageTimings(),
                 CompletedChecks = completedChecks.ToArray(),
                 Error = error,
+                FailureCategory = failureCategory,
             }, request);
             return memory;
         }
