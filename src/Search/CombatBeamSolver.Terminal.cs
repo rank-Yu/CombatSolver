@@ -349,38 +349,4 @@ internal sealed partial class CombatBeamSolver
         return new ContinuationCapture(boundaries);
     }
 
-    private sealed class ContinuationCapture(IReadOnlyList<(int ActionIndex, int Turn)> boundaries)
-    {
-        private readonly List<CachedContinuation> _continuations = new(boundaries.Count);
-
-        public void Observe(CombatBeamSolver solver, CombatPredictionSimulator simulator,
-            int actionIndex, int turn, SearchBoundaryReason boundary)
-        {
-            if (_continuations.Count == boundaries.Count)
-                return;
-            var expected = boundaries[_continuations.Count];
-            if (actionIndex < expected.ActionIndex)
-                return;
-            if (actionIndex != expected.ActionIndex || turn != expected.Turn
-                || boundary != SearchBoundaryReason.None || simulator.HasPendingChoice
-                || simulator.TerminalStamp != null)
-            {
-                throw new InvalidOperationException(
-                    $"续用回放未抵达预期稳定边界：action={actionIndex}/{expected.ActionIndex} " +
-                    $"turn={turn}/{expected.Turn} boundary={boundary}。");
-            }
-            ((SimulatedCombatState)simulator.State.CombatState).AssertForkable();
-            ContinuationStamp stamp = ContinuationStamp.CapturePredicted(
-                solver._player, simulator, turn, solver._forecast, solver._startTurnNumber);
-            _continuations.Add(new CachedContinuation(stamp, turn, turn - solver._startTurnNumber));
-        }
-
-        public IReadOnlyList<CachedContinuation> Complete()
-        {
-            if (_continuations.Count != boundaries.Count)
-                throw new InvalidOperationException("最终路线回放缺少预期续用边界。");
-            return _continuations;
-        }
-    }
-
 }

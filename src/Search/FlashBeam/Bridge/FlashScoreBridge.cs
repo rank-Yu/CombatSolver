@@ -43,7 +43,7 @@ internal static class FlashScoreBridge
         for (int slot = 0; slot < FlashLimits.PotionSlots && slot < flashRoot.PotionSlotCount; slot++)
             rootPotions[slot] = flashRoot.Potions[slot];
         FlashPotionUsageForBridge potionUsage =
-            CombatBeamSolver.CapturePotionUsageForFlash(searchRootSnapshot);
+            OpeningProbe.CapturePotionUsageForFlash(searchRootSnapshot);
 
         FlashScoreRules score = new()
         {

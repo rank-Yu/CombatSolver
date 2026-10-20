@@ -2,9 +2,7 @@ namespace CombatSolver;
 
 using static CombatSolver.SearchProbeHelpers;
 
-internal sealed partial class CombatBeamSolver
-{
-    private sealed class FinalPlanOrdering(
+internal sealed class FinalPlanOrdering(
         SolverPotionPolicy potionPolicy,
         PotionStrategySnapshot potionStrategy,
         bool enforcePotionDirectives,
@@ -265,7 +263,7 @@ internal sealed partial class CombatBeamSolver
                 .ThenBy(candidate => candidate.HealthResourceCost)
                 .ThenByDescending(candidate => candidate.Features.LongTermResourceValue)
                 .ThenBy(candidate => candidate.Features.AngerCopiesGenerated)
-                .ThenBy(candidate => CombatBeamSolver.PolicyBoundaryRank(candidate.Features.BoundaryReason))
+                .ThenBy(candidate => PolicyBoundaryRank(candidate.Features.BoundaryReason))
                 .ThenBy(candidate => candidate.OptionalPotionCount)
                 .ThenBy(candidate => candidate.StrategicSold)
                 .ThenBy(candidate => candidate.Features.EnemyHp)
@@ -322,112 +320,3 @@ internal sealed partial class CombatBeamSolver
                 potionHpRequired);
         }
     }
-
-    private static int ComparePotionFreePolicyBaselines(
-        SearchNode left,
-        SearchNode right,
-        int initialPlayerHp,
-        int initialPlayerMaxHp,
-        BossHpRelief bossHpRelief,
-        PostCombatRelicHealProfile postCombatRelicHeal,
-        SolverTheftPolicy? theftPolicy)
-    {
-        SimulationSnapshot leftSnapshot = left.Snapshot;
-        SimulationSnapshot rightSnapshot = right.Snapshot;
-        bool leftWon = SolverInterimResultOrdering.IsCompleteVictory(
-            left.ActionCount,
-            leftSnapshot.AllEnemiesDead,
-            leftSnapshot.PlayerDead,
-            leftSnapshot.ProjectedPlayerHp);
-        bool rightWon = SolverInterimResultOrdering.IsCompleteVictory(
-            right.ActionCount,
-            rightSnapshot.AllEnemiesDead,
-            rightSnapshot.PlayerDead,
-            rightSnapshot.ProjectedPlayerHp);
-        int comparison = rightWon.CompareTo(leftWon);
-        if (comparison != 0)
-            return comparison;
-        if (!leftWon && !rightWon)
-        {
-            bool leftSurvives = !leftSnapshot.PlayerDead && leftSnapshot.ProjectedPlayerHp > 0;
-            bool rightSurvives = !rightSnapshot.PlayerDead && rightSnapshot.ProjectedPlayerHp > 0;
-            comparison = rightSurvives.CompareTo(leftSurvives);
-            if (comparison != 0)
-                return comparison;
-        }
-        comparison = leftSnapshot.ProjectedDeathSaveUseCount.CompareTo(
-            rightSnapshot.ProjectedDeathSaveUseCount);
-        if (comparison != 0)
-            return comparison;
-        comparison = TheftEncounterStrategy.CompareRecovery(theftPolicy,
-            leftWon, leftSnapshot.OutstandingStolenResource, rightWon, rightSnapshot.OutstandingStolenResource);
-        if (comparison != 0)
-            return comparison;
-        RouteQuality leftQuality = RouteQuality.Primary(leftWon,
-            ActEndingBossPolicy.StrategicHpDeficit(
-                leftSnapshot.CumulativePlayerHpLost,
-                Math.Max(0, initialPlayerMaxHp - leftSnapshot.PlayerMaxHp),
-                leftSnapshot.RecoveredPlayerHp
-                    + ActEndingBossPolicy.RankedPostCombatRelicHeal(
-                        postCombatRelicHeal, leftWon, leftSnapshot.PlayerHp, leftSnapshot.PlayerMaxHp),
-                bossHpRelief, leftSnapshot.DeathSaveHpRestored) - leftSnapshot.StrategicHpCredit,
-            leftWon ? leftSnapshot.CombatEndedTurn : null,
-            leftSnapshot.StrategyGoalHpCredit,
-            leftSnapshot.StrategyGoalCount,
-            leftSnapshot.ProjectedDeathSaveUseCount);
-        RouteQuality rightQuality = RouteQuality.Primary(rightWon,
-            ActEndingBossPolicy.StrategicHpDeficit(
-                rightSnapshot.CumulativePlayerHpLost,
-                Math.Max(0, initialPlayerMaxHp - rightSnapshot.PlayerMaxHp),
-                rightSnapshot.RecoveredPlayerHp
-                    + ActEndingBossPolicy.RankedPostCombatRelicHeal(
-                        postCombatRelicHeal, rightWon, rightSnapshot.PlayerHp, rightSnapshot.PlayerMaxHp),
-                bossHpRelief, rightSnapshot.DeathSaveHpRestored) - rightSnapshot.StrategicHpCredit,
-            rightWon ? rightSnapshot.CombatEndedTurn : null,
-            rightSnapshot.StrategyGoalHpCredit,
-            rightSnapshot.StrategyGoalCount,
-            rightSnapshot.ProjectedDeathSaveUseCount);
-        comparison = RouteQualityPolicy.Compare(leftQuality, rightQuality, RouteQualityProjection.Primary);
-        if (comparison != 0)
-            return comparison;
-        if (theftPolicy == SolverTheftPolicy.PreserveResources)
-        {
-            comparison = leftSnapshot.OutstandingStolenResource.CompareTo(
-                rightSnapshot.OutstandingStolenResource);
-            if (comparison != 0)
-                return comparison;
-        }
-        comparison = (initialPlayerHp - leftSnapshot.PlayerHp
-                + initialPlayerMaxHp - leftSnapshot.PlayerMaxHp)
-            .CompareTo(initialPlayerHp - rightSnapshot.PlayerHp
-                + initialPlayerMaxHp - rightSnapshot.PlayerMaxHp);
-        if (comparison != 0)
-            return comparison;
-        comparison = rightSnapshot.LongTermResourceValue.CompareTo(leftSnapshot.LongTermResourceValue);
-        if (comparison != 0)
-            return comparison;
-        comparison = leftSnapshot.AngerCopiesGenerated.CompareTo(rightSnapshot.AngerCopiesGenerated);
-        if (comparison != 0)
-            return comparison;
-        comparison = PolicyBoundaryRank(leftSnapshot.BoundaryReason)
-            .CompareTo(PolicyBoundaryRank(rightSnapshot.BoundaryReason));
-        if (comparison != 0)
-            return comparison;
-        comparison = leftSnapshot.EnemyHp.CompareTo(rightSnapshot.EnemyHp);
-        if (comparison != 0)
-            return comparison;
-        comparison = right.Score.CompareTo(left.Score);
-        if (comparison != 0)
-            return comparison;
-        comparison = left.FutureSoldHp.CompareTo(right.FutureSoldHp);
-        if (comparison != 0)
-            return comparison;
-        comparison = left.ActionCount.CompareTo(right.ActionCount);
-        if (comparison != 0)
-            return comparison;
-        comparison = left.StateKey.First.CompareTo(right.StateKey.First);
-        return comparison != 0
-            ? comparison
-            : left.StateKey.Second.CompareTo(right.StateKey.Second);
-    }
-}

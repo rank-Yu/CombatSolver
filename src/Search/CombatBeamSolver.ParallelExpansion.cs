@@ -14,7 +14,6 @@ internal sealed partial class CombatBeamSolver
 {
     private CancellationToken SearchCancellationToken => ReplayCancellationToken;
     private SearchMemoryPressureSignal SearchMemoryPressure => policy.MemoryPressureSignal;
-    private object? _parallelActionReplayForkGate;
 
     private void ReportParallelWork(ParallelExpansionWorkProfile profile)
     {
@@ -53,36 +52,6 @@ internal sealed partial class CombatBeamSolver
     private sealed record PreparedCardActionEvaluation(
         ExpansionBatch? Batch,
         DeferredCardActionProbe? DeferredProbe);
-
-    /// <summary>
-    /// A parent simulator cannot be forked concurrently: prediction history seals its mutable
-    /// tail and several COW containers publish a shared bit during Fork. Lanes serialize seed
-    /// creation through the parent's gate; each worker then consumes only its private fork.
-    /// </summary>
-    private sealed class ReplayForkSeed(
-        CombatPredictionSimulator simulator,
-        ForkableSet<uint> processedEnemyDeaths) : IDisposable
-    {
-        private CombatPredictionSimulator? _simulator = simulator;
-        private ForkableSet<uint>? _processedEnemyDeaths = processedEnemyDeaths;
-
-        public (CombatPredictionSimulator Simulator, ForkableSet<uint> ProcessedEnemyDeaths) Take()
-        {
-            CombatPredictionSimulator ownedSimulator = Interlocked.Exchange(ref _simulator, null)
-                ?? throw new InvalidOperationException("并行动作 Fork seed 已被消费或释放。");
-            ForkableSet<uint> ownedDeaths = Interlocked.Exchange(ref _processedEnemyDeaths, null)
-                ?? throw new InvalidOperationException("并行动作死亡集合 seed 已被消费或释放。");
-            return (ownedSimulator, ownedDeaths);
-        }
-
-        public void Dispose()
-        {
-            // Simulators do not own native resources. Clearing both roots is the explicit release
-            // boundary for a seed that failed before dispatch or was canceled before consumption.
-            Interlocked.Exchange(ref _simulator, null);
-            Interlocked.Exchange(ref _processedEnemyDeaths, null);
-        }
-    }
 
     private ExpansionBatch RentExpansionBatch() => new(_run.ExpansionBatchPool);
 

@@ -39,187 +39,9 @@ internal sealed partial class CombatBeamSolver
         public void Dispose() => Checkpoint?.Dispose();
     }
 
-    private sealed record TurnSetupChoiceLayer(
-        TurnStartChoiceRequest Request,
-        CardChoiceSpec Spec,
-        IReadOnlyList<PlanCardChoice> Branches);
-
-    private sealed record PendingChoiceBudgetSeed(
-        CardChoiceSpec? Spec,
-        int SemanticBranchCount,
-        TurnSetupChoiceLayer? TurnSetupLayer);
-
-    /// <summary>
-    /// A hierarchical lease over one exclusively owned whole-action budget. Child leases cap how
-    /// much an earlier stable branch may consume while reserving one unit for every later sibling;
-    /// actual consumption is also charged to every ancestor. Unused quota is therefore never
-    /// stranded in an invalid or shallow branch, while traversal stays deterministic.
-    /// </summary>
-    private sealed class ChoiceSearchBudget
-    {
-        private readonly ChoiceSearchBudget? _parent;
-        private int _semanticFinalQuota;
-        private int _materializedOccurrenceFinalQuota;
-        private int _replayAttemptQuota;
-
-        public ChoiceSearchBudget(
-            int semanticFinalQuota,
-            int materializedOccurrenceFinalQuota,
-            int replayAttemptQuota)
-            : this(
-                parent: null,
-                semanticFinalQuota,
-                materializedOccurrenceFinalQuota,
-                replayAttemptQuota)
-        {
-        }
-
-        private ChoiceSearchBudget(
-            ChoiceSearchBudget? parent,
-            int semanticFinalQuota,
-            int materializedOccurrenceFinalQuota,
-            int replayAttemptQuota)
-        {
-            ArgumentOutOfRangeException.ThrowIfNegative(semanticFinalQuota);
-            ArgumentOutOfRangeException.ThrowIfNegative(materializedOccurrenceFinalQuota);
-            ArgumentOutOfRangeException.ThrowIfNegative(replayAttemptQuota);
-            _parent = parent;
-            _semanticFinalQuota = semanticFinalQuota;
-            _materializedOccurrenceFinalQuota = materializedOccurrenceFinalQuota;
-            _replayAttemptQuota = replayAttemptQuota;
-        }
-
-        public int SemanticFinalQuota => Math.Min(
-            _semanticFinalQuota,
-            _parent?.SemanticFinalQuota ?? int.MaxValue);
-
-        public int MaterializedOccurrenceFinalQuota => Math.Min(
-            _materializedOccurrenceFinalQuota,
-            _parent?.MaterializedOccurrenceFinalQuota ?? int.MaxValue);
-
-        public int ReplayAttemptQuota => Math.Min(
-            _replayAttemptQuota,
-            _parent?.ReplayAttemptQuota ?? int.MaxValue);
-
-        public int ActiveFinalQuota => SaturatingQuotaSum(
-            SemanticFinalQuota,
-            MaterializedOccurrenceFinalQuota);
-
-        public bool HasWork => ActiveFinalQuota > 0 && ReplayAttemptQuota > 0;
-
-        public ChoiceSearchBudget CreateChildLease(
-            int activeFinalQuota,
-            int replayAttemptQuota)
-        {
-            ArgumentOutOfRangeException.ThrowIfNegative(activeFinalQuota);
-            ArgumentOutOfRangeException.ThrowIfNegative(replayAttemptQuota);
-            int semanticFinalQuota = Math.Min(SemanticFinalQuota, activeFinalQuota);
-            int occurrenceFinalQuota = Math.Min(
-                MaterializedOccurrenceFinalQuota,
-                activeFinalQuota - semanticFinalQuota);
-            return new ChoiceSearchBudget(
-                this,
-                semanticFinalQuota,
-                occurrenceFinalQuota,
-                Math.Min(ReplayAttemptQuota, replayAttemptQuota));
-        }
-
-        public bool TrySpendReplayAttempt()
-        {
-            if (_replayAttemptQuota <= 0)
-                return false;
-            if (_parent != null && !_parent.TrySpendReplayAttempt())
-                return false;
-            _replayAttemptQuota--;
-            return true;
-        }
-
-        public bool TryConsumeFinal()
-        {
-            if (SemanticFinalQuota > 0 && TryConsumeSemanticFinal())
-                return true;
-            return MaterializedOccurrenceFinalQuota > 0
-                && TryConsumeOccurrenceFinal();
-        }
-
-        private bool TryConsumeSemanticFinal()
-        {
-            if (_semanticFinalQuota <= 0)
-                return false;
-            if (_parent != null && !_parent.TryConsumeSemanticFinal())
-                return false;
-            _semanticFinalQuota--;
-            return true;
-        }
-
-        private bool TryConsumeOccurrenceFinal()
-        {
-            if (_materializedOccurrenceFinalQuota <= 0)
-                return false;
-            if (_parent != null && !_parent.TryConsumeOccurrenceFinal())
-                return false;
-            _materializedOccurrenceFinalQuota--;
-            return true;
-        }
-
-        private static int SaturatingQuotaSum(int left, int right)
-            => left > int.MaxValue - right ? int.MaxValue : left + right;
-    }
-
-    private readonly record struct WholeActionChoiceBudget(
-        ChoiceSearchBudget SemanticSearchBudget,
-        int OccurrenceFinalReserve,
-        int OccurrenceReplayAttemptQuota);
-
     private readonly record struct DeferredOccurrenceChoiceBranch(
         PendingChoiceReplayBranch Branch,
         PrimaryChoiceMatch? UnresolvedPrimaryChoice);
-
-    /// <summary>
-    /// Collects physical-identity supplements across the whole action. Non-identity layers share
-    /// this coordinator instead of pre-assigning its two slots to outer branches: a later stable
-    /// semantic branch can therefore still expose the first actual identity-sensitive frontier.
-    /// Supplements are replayed only after the semantic pass, so they can never replace a distinct
-    /// semantic decision. The collector is action-local and has one ordered consumer; workers never race
-    /// on a shared counter.
-    /// </summary>
-    private sealed class ChoiceOccurrenceCollector<TCandidate>(
-        int finalReserve,
-        int replayAttemptQuota)
-    {
-        private readonly List<TCandidate> _branches = [];
-        private bool _sealed;
-
-        public int FinalReserve { get; } = finalReserve is >= 0 and
-            <= CardChoiceSupport.MaximumIdentityOccurrenceReservedBranches
-                ? finalReserve
-                : throw new ArgumentOutOfRangeException(nameof(finalReserve));
-
-        public int ReplayAttemptQuota { get; } = replayAttemptQuota >= 0
-            ? replayAttemptQuota
-            : throw new ArgumentOutOfRangeException(nameof(replayAttemptQuota));
-
-        public int RemainingFinalReserve => _sealed
-            ? 0
-            : Math.Max(0, FinalReserve - _branches.Count);
-
-        public IReadOnlyList<TCandidate> Seal()
-        {
-            _sealed = true;
-            return _branches;
-        }
-
-        public void Collect(TCandidate candidate)
-        {
-            if (_sealed
-                || RemainingFinalReserve <= 0
-                || ReplayAttemptQuota <= _branches.Count)
-            {
-                return;
-            }
-            _branches.Add(candidate);
-        }
-    }
 
     private IEnumerable<(PlanAction Action, SimulationSnapshot Snapshot)> ResolvePrimaryCardChoiceBranches(
         SearchNode node,
@@ -489,122 +311,37 @@ internal sealed partial class CombatBeamSolver
     }
 
     private int ResolveConfiguredWholeActionChoiceBranchLimit(CardChoiceSpec? primaryChoiceSpec)
-        => primaryChoiceSpec?.SourcePile == PileType.Hand
-            ? _profile.MaxHandChoiceBranchesPerAction
-            : primaryChoiceSpec == null
-                ? Math.Max(
-                    _profile.MaxPileChoiceBranchesPerAction,
-                    _profile.MaxHandChoiceBranchesPerAction)
-                : _profile.MaxPileChoiceBranchesPerAction;
+        => SearchChoiceBudgetPolicy.ResolveConfiguredWholeActionChoiceBranchLimit(
+            _profile, primaryChoiceSpec);
 
     private WholeActionChoiceBudget CreateWholeActionChoiceBudget(
         CardChoiceSpec? primaryChoiceSpec,
         int minimumSemanticFinalQuota = 1,
         PendingChoiceBudgetSeed? currentPendingChoice = null)
-    {
-        int configuredFinalQuota = ResolveConfiguredWholeActionChoiceBranchLimit(
-            primaryChoiceSpec);
-        if (currentPendingChoice != null)
-        {
-            configuredFinalQuota = Math.Max(
-                configuredFinalQuota,
-                ResolveConfiguredWholeActionChoiceBranchLimit(currentPendingChoice.Spec));
-        }
-        return ResolveSeededWholeActionChoiceBudgetCore(
-            configuredFinalQuota,
-            minimumSemanticFinalQuota,
-            currentPendingChoice?.SemanticBranchCount ?? 0);
-    }
+        => SearchChoiceBudgetPolicy.CreateWholeActionChoiceBudget(
+            _profile, primaryChoiceSpec, minimumSemanticFinalQuota, currentPendingChoice);
 
     private static WholeActionChoiceBudget ResolveSeededWholeActionChoiceBudgetCore(
         int configuredFinalQuota,
         int primarySemanticBranchCount,
         int pendingSemanticBranchCount)
-    {
-        if (configuredFinalQuota < 1)
-            throw new ArgumentOutOfRangeException(nameof(configuredFinalQuota));
-        if (primarySemanticBranchCount < 0)
-            throw new ArgumentOutOfRangeException(nameof(primarySemanticBranchCount));
-        if (pendingSemanticBranchCount < 0)
-            throw new ArgumentOutOfRangeException(nameof(pendingSemanticBranchCount));
-        return ResolveWholeActionChoiceBudgetCore(Math.Max(
-            configuredFinalQuota,
-            Math.Max(primarySemanticBranchCount, pendingSemanticBranchCount)));
-    }
+        => SearchChoiceBudgetPolicy.ResolveSeededWholeActionChoiceBudgetCore(
+            configuredFinalQuota, primarySemanticBranchCount, pendingSemanticBranchCount);
 
     private static WholeActionChoiceBudget ResolveWholeActionChoiceBudgetCore(
         int semanticFinalQuota)
-    {
-        if (semanticFinalQuota < 1)
-            throw new ArgumentOutOfRangeException(nameof(semanticFinalQuota));
-        int maximumFinalQuota = semanticFinalQuota
-            > int.MaxValue - CardChoiceSupport.MaximumIdentityOccurrenceReservedBranches
-                ? int.MaxValue
-                : semanticFinalQuota
-                    + CardChoiceSupport.MaximumIdentityOccurrenceReservedBranches;
-        int totalReplayAttemptQuota = ResolveFiniteChoiceReplayAttemptLimit(maximumFinalQuota);
-
-        // Semantic decisions always receive the capped attempt budget first. Only genuine cap
-        // headroom is reserved for the later physical-occurrence pass, so a 600-way semantic
-        // layer under the 512 hard cap keeps 512 different decisions and zero supplements.
-        int minimumSemanticAttempts = Math.Min(
-            semanticFinalQuota,
-            totalReplayAttemptQuota);
-        int occurrenceReplayAttemptQuota = Math.Min(
-            CardChoiceSupport.MaximumIdentityOccurrenceReservedBranches * 4,
-            totalReplayAttemptQuota - minimumSemanticAttempts);
-        int occurrenceFinalReserve = Math.Min(
-            CardChoiceSupport.MaximumIdentityOccurrenceReservedBranches,
-            occurrenceReplayAttemptQuota);
-        return new WholeActionChoiceBudget(
-            new ChoiceSearchBudget(
-                semanticFinalQuota,
-                materializedOccurrenceFinalQuota: 0,
-                totalReplayAttemptQuota - occurrenceReplayAttemptQuota),
-            occurrenceFinalReserve,
-            occurrenceReplayAttemptQuota);
-    }
+        => SearchChoiceBudgetPolicy.ResolveWholeActionChoiceBudgetCore(semanticFinalQuota);
 
     private static ChoiceSearchBudget? CreateChoiceBranchBudgetCore(
         ChoiceSearchBudget parentBudget,
         int laterSiblingCount)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegative(laterSiblingCount);
-        int effectiveFinalQuota = Math.Min(
-            parentBudget.ActiveFinalQuota,
-            parentBudget.ReplayAttemptQuota);
-        if (effectiveFinalQuota <= 0)
-            return null;
-
-        // Divide the live remainder fairly among this branch and its later stable siblings. This
-        // reproduces the old 4/3/3 breadth when every branch uses its share, but a shallow or
-        // invalid branch leaves its unspent quota in the parent; the next branch then receives a
-        // larger share of the new remainder instead of losing that work permanently.
-        int remainingSiblingCount = checked(laterSiblingCount + 1);
-        int finalQuota = DivideRoundUp(effectiveFinalQuota, remainingSiblingCount);
-        int attemptQuota = DivideRoundUp(
-            parentBudget.ReplayAttemptQuota,
-            remainingSiblingCount);
-        return parentBudget.CreateChildLease(
-            finalQuota,
-            attemptQuota);
-    }
+        => SearchChoiceBudgetPolicy.CreateChoiceBranchBudgetCore(parentBudget, laterSiblingCount);
 
     private static int DivideRoundUp(int value, int divisor)
-    {
-        if (value < 0)
-            throw new ArgumentOutOfRangeException(nameof(value));
-        if (divisor < 1)
-            throw new ArgumentOutOfRangeException(nameof(divisor));
-        return value == 0 ? 0 : 1 + (value - 1) / divisor;
-    }
+        => SearchChoiceBudgetPolicy.DivideRoundUp(value, divisor);
 
     private static int ResolveFiniteChoiceReplayAttemptLimit(int finiteFinalBranches)
-    {
-        // Four replay attempts per retained leaf covers ordinary primary + nested chains while
-        // keeping a hard ceiling for recursive generators. Custom profiles remain bounded too.
-        return (int)Math.Min(512L, Math.Max(1L, finiteFinalBranches * 4L));
-    }
+        => SearchChoiceBudgetPolicy.ResolveFiniteChoiceReplayAttemptLimit(finiteFinalBranches);
 
     internal static void VerifyChoiceReplayBranchBudgetPolicyForTesting()
     {
@@ -874,43 +611,8 @@ internal sealed partial class CombatBeamSolver
     /// </summary>
     private PendingChoiceBudgetSeed? BuildCurrentPendingChoiceBudgetSeed(
         SimulationSnapshot snapshot)
-    {
-        if (snapshot.BoundaryReason != SearchBoundaryReason.PendingChoice)
-            return null;
-
-        SimulatedCombatState combat =
-            (SimulatedCombatState)snapshot.Simulator.State.CombatState;
-        if (combat.PendingKnowledgeDemonChoice is { } knowledgeRequest)
-        {
-            IReadOnlyList<PlanCardChoice> knowledgeBranches =
-                KnowledgeDemonChoiceSupport.BuildChoices(knowledgeRequest, displayNames);
-            return new PendingChoiceBudgetSeed(
-                Spec: null,
-                SemanticBranchCount: knowledgeBranches.Count,
-                TurnSetupLayer: null);
-        }
-
-        if (combat.PendingTurnStartChoice is not { } request)
-            return null;
-
-        CombatPredictionSimulator simulator =
-            (CombatPredictionSimulator)snapshot.Simulator;
-        CardChoiceSpec spec =
-            TurnStartChoiceSupport.BuildPendingSpec(simulator, combat, _player);
-        IReadOnlyList<PlanCardChoice> branches = CardChoiceSupport.BuildChoices(
-            spec,
-            displayNames,
-            _profile.MaxPileChoiceBranchesPerAction,
-            _profile.MaxHandChoiceBranchesPerAction);
-        int semanticBranchCount =
-            CardChoiceSupport.IsIdentityChangingPersistentChoiceEffect(spec.Effect)
-                ? CardChoiceSupport.CountSemanticChoices(branches)
-                : branches.Count;
-        return new PendingChoiceBudgetSeed(
-            spec,
-            semanticBranchCount,
-            new TurnSetupChoiceLayer(request, spec, branches));
-    }
+        => SearchChoicePlanning.BuildCurrentPendingChoiceBudgetSeed(
+            _profile, displayNames, _player, snapshot);
 
     private int BuildChoiceSpecSemanticBranchCount(CardChoiceSpec? spec)
     {

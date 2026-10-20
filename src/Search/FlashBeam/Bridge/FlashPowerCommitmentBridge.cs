@@ -5,7 +5,7 @@ namespace CombatSolver.FlashBeam;
 /// <summary>
 /// Compiles the existing per-card power-commitment descriptors into the FlashBeam route-metadata
 /// tables. The existing solver gates the lane on the root holding at least one registered power card
-/// (<c>CombatBeamSolver._hasRegisteredPowerCards</c>); the same gate is frozen here.
+/// (<c>the existing search's _hasRegisteredPowerCards</c>); the same gate is frozen here.
 /// </summary>
 internal static class FlashPowerCommitmentBridge
 {

@@ -6,12 +6,12 @@ namespace CombatSolver.FlashBeam;
 /// <summary>
 /// Replays a Flash action, choices included, through the existing engine. Each Flash selection is
 /// a bit set over the request's options; the existing engine's pending request supplies the same
-/// options in the same order, and <see cref="CombatBeamSolver.ReplayWithChoicesForFlash"/> turns the
+/// options in the same order, and <see cref="SearchReplayCore.ReplayWithChoicesForFlash"/> turns the
 /// selection into plan tokens and places it as the existing search would.
 /// </summary>
 internal static class FlashChoiceTranslator
 {
-    public static SimulationSnapshot Replay(CombatBeamSolver replay, SimulationSnapshot parent, Player player,
+    public static SimulationSnapshot Replay(SearchReplayCore replay, SimulationSnapshot parent, Player player,
         in FlashAction action, out PlanAction planned,
         Action<int, TurnStartChoiceRequest, CardChoiceSpec>? inspect = null,
         Action<int, KnowledgeDemonChoiceRequest>? inspectKnowledge = null)

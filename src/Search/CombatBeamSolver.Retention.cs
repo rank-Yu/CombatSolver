@@ -40,13 +40,12 @@ internal sealed partial class CombatBeamSolver
         => ResourceIncumbentPolicy.IsPrimaryHpBucket(bucket, _strictHpBoundWithRelicTargets);
 
     internal static bool CanUseStrictHpRelicBound(CombatRootSnapshot root, SearchPolicySnapshot policy)
-        => CanUseStrictHpRelicBound(root.CanCertifyRemainingHealing || root.UsesKnownNativeHealingPolicy,
-            policy.EffectiveHasGrowthTargets, policy.RelicTargets);
+        => SmartPotionBoundPolicy.CanUseStrictHpRelicBound(root, policy);
 
     internal static bool CanUseStrictHpRelicBound(bool hasRemainingHealingBound,
         bool hasGrowthTargets, IReadOnlyList<RelicCounterTarget> targets)
-        => hasRemainingHealingBound && !hasGrowthTargets && targets.Count > 0
-            && targets.All(target => target.HpAllowance == 0);
+        => SmartPotionBoundPolicy.CanUseStrictHpRelicBound(
+            hasRemainingHealingBound, hasGrowthTargets, targets);
 
     private readonly record struct CycleProbeFamilyKey(
         int Turn,
@@ -572,10 +571,8 @@ internal sealed partial class CombatBeamSolver
         PrimarySearchIncumbent incumbent,
         bool allowTurnTieBound = true,
         bool pruneEqualHp = false)
-        => strategicHpLowerBound > incumbent.StrategicHpDeficit
-            || pruneEqualHp && strategicHpLowerBound == incumbent.StrategicHpDeficit
-            || allowTurnTieBound && strategicHpLowerBound == incumbent.StrategicHpDeficit
-                && turn > incumbent.CombatEndedTurn;
+        => PrimaryIncumbentPolicy.ShouldPruneByPrimaryIncumbent(
+            strategicHpLowerBound, turn, incumbent, allowTurnTieBound, pruneEqualHp);
 
     internal static bool TryTightenPrimarySearchIncumbent(
         PotionFreePolicyBaseline? auditedPotionFreeBaseline,
@@ -590,57 +587,12 @@ internal sealed partial class CombatBeamSolver
         SolverPotionPolicy? effectivePotionPolicy = null,
         int candidateDeathSaveUseCount = 0,
         int? candidateExplicitPotionStrategicCost = null)
-    {
-        if (!candidateCompleteVictory
-            || !candidateSatisfiesHardRules
-            || candidateDeathSaveUseCount > 0
-            || candidateExplicitPotionUses != minimumPotionUses
-            || candidateCombatEndedTurn is not { } combatEndedTurn)
-        {
-            return false;
-        }
-
-        // A complete, hard-policy-compliant victory without explicit potion use is
-        // already eligible under Disabled/Smart. It needs no separate potion audit.
-        // Positive exact layers retain their stricter, audited eligibility proof.
-        bool eligiblePotionFreeVictory = minimumPotionUses == 0
-            && effectivePotionPolicy is SolverPotionPolicy.Disabled or SolverPotionPolicy.Smart;
-        bool eligibleExactPotionVictory = auditedPotionFreeBaseline is { } baseline
-            && minimumPotionUses > 0
-            && maximumPotionUses == minimumPotionUses
-            && SolverInterimResultOrdering.ComparePrimaryQuality(
-                candidateCompleteVictory: true,
-                candidateStrategicHpDeficit,
-                candidateCombatEndedTurn,
-                currentCompleteVictory: baseline.Won,
-                currentStrategicHpDeficit: baseline.HpDeficit,
-                currentCombatEndedTurn: baseline.CombatEndedTurn,
-                candidateDeathSaveUseCount: candidateDeathSaveUseCount,
-                currentDeathSaveUseCount: baseline.DeathSaveUseCount) < 0;
-        if (!eligiblePotionFreeVictory && !eligibleExactPotionVictory)
-        {
-            return false;
-        }
-
-        PrimarySearchIncumbent candidate = new(
-            candidateStrategicHpDeficit,
-            combatEndedTurn,
-            minimumPotionUses == 0 ? 0 : candidateExplicitPotionStrategicCost);
-        if (incumbent is { } current
-            && SolverInterimResultOrdering.ComparePrimaryQuality(
-                candidateCompleteVictory: true,
-                candidate.StrategicHpDeficit,
-                candidate.CombatEndedTurn,
-                currentCompleteVictory: true,
-                currentStrategicHpDeficit: current.StrategicHpDeficit,
-                currentCombatEndedTurn: current.CombatEndedTurn) >= 0)
-        {
-            return false;
-        }
-
-        incumbent = candidate;
-        return true;
-    }
+        => PrimaryIncumbentPolicy.TryTightenPrimarySearchIncumbent(
+            auditedPotionFreeBaseline, minimumPotionUses, maximumPotionUses,
+            candidateCompleteVictory, candidateSatisfiesHardRules,
+            candidateExplicitPotionUses, candidateStrategicHpDeficit,
+            candidateCombatEndedTurn, ref incumbent, effectivePotionPolicy,
+            candidateDeathSaveUseCount, candidateExplicitPotionStrategicCost);
 
     private bool TightenPrimarySearchIncumbentAtTurnLayer(
         IReadOnlyList<SearchNode> retained,
@@ -2180,19 +2132,6 @@ internal sealed partial class CombatBeamSolver
             end.ReleaseSimulator();
         }
     }
-
-    private static int PolicyBoundaryRank(SearchBoundaryReason reason)
-        => reason switch
-        {
-            SearchBoundaryReason.None => 0,
-            SearchBoundaryReason.NoCards or SearchBoundaryReason.Shuffle
-                or SearchBoundaryReason.TurnLimit or SearchBoundaryReason.NodeLimit
-                or SearchBoundaryReason.TimeLimit => 1,
-            SearchBoundaryReason.PendingChoice => 2,
-            SearchBoundaryReason.UnsupportedEffect => 3,
-            SearchBoundaryReason.EventDefeat => 4,
-            _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, null),
-        };
 
     private static string PolicyActionIdentityToken(PlanAction action)
     {

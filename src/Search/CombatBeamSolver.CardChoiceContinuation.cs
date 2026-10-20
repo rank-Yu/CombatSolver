@@ -6,7 +6,6 @@ using static CombatSolver.SearchProbeHelpers;
 
 internal sealed partial class CombatBeamSolver
 {
-    private CardChoiceReplayCheckpoint? _cardChoiceReplayCheckpoint;
     private bool _disableCardChoiceContinuationsForTesting;
     internal bool DisableCardChoiceContinuationsForTesting
     { init => _disableCardChoiceContinuationsForTesting = value; }
@@ -81,56 +80,6 @@ internal sealed partial class CombatBeamSolver
             return null;
         _run.CardChoicePrefixAttempts++;
         return new CardChoiceReplayCapture(parent, action);
-    }
-
-    private sealed class CardChoiceReplayCapture(SearchNode parent, PlanAction action) : IDisposable
-    {
-        private CardChoiceReplayCheckpoint? _checkpoint;
-        public void Receive(CombatBeamSolver owner, CombatPredictionSimulator simulator, ForkableSet<uint> deaths)
-        {
-            if (_checkpoint != null) throw new InvalidOperationException("Card choice capture received twice.");
-            CardChoiceContinuation? continuation = CardChoiceContinuation.Take(simulator, deaths);
-            if (continuation is null) return;
-            try { _checkpoint = new CardChoiceReplayCheckpoint(parent, action, continuation); }
-            catch { continuation.Dispose(); throw; }
-            owner._run.CardChoicePrefixCaptures++;
-        }
-        public CardChoiceReplayCheckpoint? Take()
-        {
-            CardChoiceReplayCheckpoint? result = _checkpoint;
-            _checkpoint = null;
-            return result;
-        }
-        public void Dispose() { _checkpoint?.Dispose(); _checkpoint = null; }
-    }
-
-    // A checkpoint is scoped to exactly one parent/action. The original primary-choice frontier
-    // owns it across all producers and its single ordered consumer; serial traversal owns it locally.
-    private sealed class CardChoiceReplayCheckpoint(SearchNode parent, PlanAction action,
-        CardChoiceContinuation continuation) : IDisposable
-    {
-        private SearchNode? _parent = parent;
-        private PlanAction? _action = action;
-        private CardChoiceContinuation? _continuation = continuation;
-        public bool Matches(SearchNode candidate, PlanAction resolved)
-            => ReferenceEquals(_parent, candidate) && _action != null && resolved.Choice != null
-                && resolved == (_action with { Choice = resolved.Choice });
-
-        public ReplayForkSeed Fork(CombatBeamSolver owner, out ManualCardChoiceFrame frame)
-        {
-            owner._run.ForkCount++;
-            owner._run.CardChoicePrefixReuses++;
-            using var measure = owner._run.Performance.Measure(SearchMetricPhase.Fork);
-            var child = (_continuation ?? throw new ObjectDisposedException(nameof(CardChoiceReplayCheckpoint)))
-                .Fork(owner.SearchCancellationToken);
-            frame = child.Frame;
-            return new ReplayForkSeed(child.Simulator, child.Deaths);
-        }
-        public void Dispose()
-        {
-            _continuation?.Dispose();
-            _continuation = null; _parent = null; _action = null;
-        }
     }
 
     private IEnumerable<(PlanAction Action, SimulationSnapshot Snapshot)> WithCardChoiceCheckpoint(

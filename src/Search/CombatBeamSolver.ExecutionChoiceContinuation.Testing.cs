@@ -62,7 +62,6 @@ internal sealed partial class CombatBeamSolver
         finally { initial.ReleaseSimulator(); }
     }
 
-    private bool _verifyChoiceContinuationStepsForTesting;
     internal bool VerifyChoiceContinuationStepsForTesting
     { init => _verifyChoiceContinuationStepsForTesting = value; }
 

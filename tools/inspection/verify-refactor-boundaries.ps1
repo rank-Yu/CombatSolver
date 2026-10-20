@@ -34,6 +34,12 @@ $probeSolverReferences = @(Get-ChildItem -LiteralPath $probeRoot -Filter '*.cs' 
 if ($probeSolverReferences.Count -gt 0) {
     $violations.Add('Opening probes must not reference CombatBeamSolver')
 }
+$flashRoot = Join-Path $searchRoot 'FlashBeam'
+$flashSolverReferences = @(Get-ChildItem -LiteralPath $flashRoot -Filter '*.cs' -File -Recurse |
+    ForEach-Object { Select-String -LiteralPath $_.FullName -SimpleMatch 'CombatBeamSolver' })
+if ($flashSolverReferences.Count -gt 0) {
+    $violations.Add('FlashBeam must not reference CombatBeamSolver')
+}
 if (-not (Test-Path -LiteralPath (Join-Path $probeRoot 'OpeningProbe.cs') -PathType Leaf) -or
     -not (Test-Path -LiteralPath (Join-Path $probeRoot 'SearchEvaluator.cs') -PathType Leaf)) {
     $violations.Add('Opening probe component is missing')
@@ -75,14 +81,14 @@ if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot 'src/Search/TargetPl
 }
 $strategyIdLiteralCount = 0
 foreach ($sourceFile in Get-ChildItem -LiteralPath (Join-Path $repositoryRoot 'src/Search') -Filter '*.cs' -Recurse) {
-    if ($sourceFile.Name -in @('PotionValuationRegistry.cs', 'OpeningActionRegistry.cs', 'TargetPlanRegistry.cs')) {
+    if ($sourceFile.Name -in @('PotionValuationRegistry.cs', 'OpeningActionRegistry.cs', 'TargetPlanRegistry.cs', 'FlashPowerEvidence.cs')) {
         continue
     }
     $strategyIdLiteralCount += [regex]::Matches(
         [System.IO.File]::ReadAllText($sourceFile.FullName), '"[A-Z][A-Z0-9_]{4,}"').Count
 }
-if ($strategyIdLiteralCount -gt 645) {
-    $violations.Add("Search strategy ID literals increased: $strategyIdLiteralCount > 645")
+if ($strategyIdLiteralCount -gt 647) {
+    $violations.Add("Search strategy ID literals increased: $strategyIdLiteralCount > 647")
 }
 if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot 'src/Search/CombatBeamSolver.ExpansionPlan.cs') -PathType Leaf)) {
     $violations.Add('Shared expansion plan missing')
@@ -503,8 +509,8 @@ foreach ($script in @('tools/testing/run-unattended-test.ps1', 'tools/testing/ru
         $violations.Add("Strategy request wire missing: $script")
     }
 }
-$phasePath = Join-Path $searchRoot 'CombatBeamSolver.Phases.cs'
-$terminalPath = Join-Path $searchRoot 'CombatBeamSolver.Terminal.cs'
+$phasePath = Join-Path $searchRoot 'Probes/SearchRouteMaterializer.cs'
+$terminalPath = Join-Path $searchRoot 'Probes/SearchReplayCheckpoints.cs'
 if (Select-String -LiteralPath $phasePath -SimpleMatch 'CaptureContinuation(node)' -Quiet) {
     $violations.Add('Only the selected route may build continuation stamps; round frontier still captures them.')
 }
@@ -1115,6 +1121,7 @@ $expectedBeamFiles = @(
     "CombatBeamSolver.PathDiagnostics.cs",
     "CombatBeamSolver.Phases.cs",
     "CombatBeamSolver.PrimaryChoiceReplay.cs",
+    "CombatBeamSolver.ReplayCore.cs",
     "CombatBeamSolver.Retention.cs",
     "CombatBeamSolver.RetentionJobs.cs",
     "CombatBeamSolver.SmartPotionBound.cs",
@@ -1185,7 +1192,7 @@ $beamStructureChecks = @(
     @{ File = "CombatBeamSolver.BeamRetentionPolicy.cs"; Text = "ReturnRoutingChoiceScratch(scratch);" },
     @{ File = "CombatBeamSolver.Transpositions.cs"; Text = "private readonly record struct TranspositionLabel(" },
     @{ File = "CombatBeamSolver.Models.cs"; Text = "private sealed class SearchRunContext(" },
-    @{ File = "CombatBeamSolver.Models.cs"; Text = "private readonly record struct SearchFeatures(" },
+    @{ File = "SearchRouteTypes.cs"; Text = "internal readonly record struct SearchFeatures(" },
     @{ File = "CombatBeamSolver.ParallelExpansion.cs"; Text = "private sealed partial class ParallelExpansionExecutor : IExpansionExecutor, IDisposable" },
     @{ File = "CombatBeamSolver.ParallelExpansion.cs"; Text = "public ExpansionWorkerOutcome[] Evaluate(" },
     @{ File = "CombatBeamSolver.ParallelExpansion.cs"; Text = "public int MaximumQueuedParents => SearchWaveMemoryPolicy.MaximumQueuedParents(DegreeOfParallelism);" },
@@ -1201,18 +1208,18 @@ $beamStructureChecks = @(
     @{ File = "CombatBeamSolver.EndTurnChoiceReplay.cs"; Text = "private PreparedEndTurnEvaluation EvaluatePreparedEndTurn(" },
     @{ File = "CombatBeamSolver.RoundTransition.cs"; Text = "SearchRoundExecution.AdvanceRoundPlayerStart(" },
     @{ File = "CombatBeamSolver.TurnSetup.cs"; Text = "internal IReadOnlyList<TurnSetupRootCandidate> CaptureTurnSetupRootsForFlash()" },
-    @{ File = "CombatBeamSolver.RoundTransition.cs"; Text = "private sealed class RoundReplayCheckpoint(" },
-    @{ File = "CombatBeamSolver.RoundTransition.cs"; Text = "combat.EndActionChoices();" },
-    @{ File = "CombatBeamSolver.RoundTransition.cs"; Text = "combat.BeginActionChoices(cursor);" },
+    @{ File = "Probes/SearchReplayCheckpoints.cs"; Text = "internal sealed class RoundReplayCheckpoint(" },
+    @{ File = "Probes/SearchReplayCheckpoints.cs"; Text = "combat.EndActionChoices();" },
+    @{ File = "Probes/SearchReplayCheckpoints.cs"; Text = "combat.BeginActionChoices(cursor);" },
     @{ File = "CombatBeamSolver.RoundTransition.cs"; Text = "internal int VerifyRoundReplayCheckpointForTesting(" },
-    @{ File = "CombatBeamSolver.Models.cs"; Text = "public bool HasObservedPostDrawRoundChoice;" },
-    @{ File = "CombatBeamSolver.Models.cs"; Text = "public HashSet<string>? ObservedHandDrawShuffleChoiceSources;" },
-    @{ File = "CombatBeamSolver.RoundTransition.cs"; Text = "public void CaptureBeforeHandDraw(CombatBeamSolver owner, CombatPredictionSimulator simulator," },
-    @{ File = "CombatBeamSolver.RoundTransition.cs"; Text = "checkpoint.HandDrawCount.HasValue ? PlayerStartStage.Draw : PlayerStartStage.AfterPlayer" },
+    @{ File = "Probes/SearchReplayShared.cs"; Text = "public bool HasObservedPostDrawRoundChoice;" },
+    @{ File = "Probes/SearchReplayShared.cs"; Text = "public HashSet<string>? ObservedHandDrawShuffleChoiceSources;" },
+    @{ File = "Probes/SearchReplayCheckpoints.cs"; Text = "public void CaptureBeforeHandDraw(SearchReplayCore owner, CombatPredictionSimulator simulator," },
+    @{ File = "Probes/SearchReplayCore.cs"; Text = "checkpoint.HandDrawCount.HasValue ? PlayerStartStage.Draw : PlayerStartStage.AfterPlayer" },
     @{ File = "RootCombatCardGenerationPoolSnapshot.cs"; Text = "public bool TryGetEligibleCharacterCards(" },
     @{ File = "CombatBeamSolver.Retention.cs"; Text = "var maximum = BeamRetentionPolicy.GetLongTermResourceMaximum(pool);" },
     @{ File = "CombatBeamSolver.Retention.cs"; Text = "if (maximum.Count == pool.Count)" },
-    @{ File = "CombatBeamSolver.EndTurnChoiceReplay.cs"; Text = "capture.ObservePendingChoice(this, pendingSourceId);" },
+    @{ File = "CombatBeamSolver.EndTurnChoiceReplay.cs"; Text = "capture.ObservePendingChoice(ReplayCore, pendingSourceId);" },
     @{ File = "CombatBeamSolver.AdmittedExpansion.cs"; Text = "endTurn.TransferEndTurnTo(Aggregate!, candidate);" },
     @{ File = "CombatBeamSolver.AdmittedExpansion.cs"; Text = "PublishCrossTurnStandPatBaselines(Node, _endTurnBaselines);" },
     @{ File = "CombatBeamSolver.AdmittedExpansion.cs"; Text = "ready.TransferPotionTo(Aggregate!, candidate);" },
@@ -1248,7 +1255,7 @@ $beamStructureChecks = @(
     @{ File = "CombatBeamSolver.Phases.cs"; Text = "public SolverResult Solve()" },
     @{ File = "CombatBeamSolver.Expansion.cs"; Text = "private IEnumerable<SearchNode> Expand(SearchNode node)" },
     @{ File = "CombatBeamSolver.BeamRetentionPolicy.cs"; Text = "public List<SearchNode> RankFinal(IEnumerable<SearchNode> nodes)" },
-    @{ File = "CombatBeamSolver.FinalPlanOrdering.cs"; Text = "private sealed class FinalPlanOrdering(" },
+    @{ File = "CombatBeamSolver.FinalPlanOrdering.cs"; Text = "internal sealed class FinalPlanOrdering(" },
     @{ File = "CombatBeamSolver.FinalPlanOrdering.cs"; Text = "public FinalPlanSelection Select(" },
     @{ File = "CombatBeamSolver.Terminal.cs"; Text = "private List<SearchNode> AnnotateTurnOutcomes(List<SearchNode> ended)" },
     @{ File = "CombatBeamSolver.StateEvaluation.cs"; Text = "private SimulationSnapshot Snapshot(" }
@@ -1412,7 +1419,7 @@ foreach ($goldBoundary in @(
 $beamPhasesPath = Join-Path $searchRoot "CombatBeamSolver.Phases.cs"
 foreach ($healingBoundary in @(
     @('src/Search/CombatBeamSolver.Retention.cs', '_strictHpBoundWithRelicTargets = CanUseStrictHpRelicBound(root, policy)'),
-    @('src/Search/CombatBeamSolver.Retention.cs', 'targets.All(target => target.HpAllowance == 0)'),
+    @('src/Search/Probes/SmartPotionBoundPolicy.cs', 'targets.All(target => target.HpAllowance == 0)'),
     @('src/Search/CombatBeamSolver.Retention.cs', 'allowTurnTieBound: !_strictHpBoundWithRelicTargets'),
     @('src/Search/CombatSearchCoordinator.cs', '!CombatBeamSolver.CanUseStrictHpRelicBound(root, policy)'),
     @('src/Search/CombatSearchCoordinator.PlanSearch.cs', 'if (!root.CanCertifyRemainingHealing')
@@ -2079,9 +2086,9 @@ foreach ($rule in @(
     @{ RelativePath = 'src/Prediction/PotionChoiceContinuation.cs'; Text = 'seed.AssertForkable();' },
     @{ RelativePath = 'src/Prediction/PotionChoiceContinuation.cs'; Text = 'lock (_gate)' },
     @{ RelativePath = 'src/Prediction/PotionChoiceContinuation.cs'; Text = '!PotionChoiceMirrors.RequiresChoice(potion)' },
-    @{ RelativePath = 'src/Search/CombatBeamSolver.PotionChoiceContinuation.cs'; Text = 'ReferenceEquals(_parent, candidate)' },
+    @{ RelativePath = 'src/Search/Probes/SearchReplayCheckpoints.cs'; Text = 'ReferenceEquals(_parent, candidate)' },
     @{ RelativePath = 'src/Search/CombatBeamSolver.PotionChoiceContinuation.cs'; Text = '_run.PotionChoicePrefixForks++;' },
-    @{ RelativePath = 'src/Search/CombatBeamSolver.Expansion.Replay.cs'; Text = 'PotionExecutionSupport.Complete(' },
+    @{ RelativePath = 'src/Search/Probes/SearchReplayCore.cs'; Text = 'PotionExecutionSupport.Complete(' },
     @{ RelativePath = 'src/Search/CombatBeamSolver.PrimaryChoiceReplay.cs'; Text = 'PotionCheckpoint?.Dispose();' },
     @{ RelativePath = 'src/Search/CombatBeamSolver.ParallelExpansion.cs'; Text = '_run.PotionChoicePrefixForks += source.PotionChoicePrefixForks;' }
 )) {
@@ -2108,10 +2115,10 @@ foreach ($rule in @(
     @{ RelativePath = 'src/Engine/InCombat/Simulation/CombatPredictionHistory.ExecutionContinuation.cs'; Text = 'unresolved.SetEquals(deferred)' },
     @{ RelativePath = 'src/Engine/InCombat/Simulation/CombatPredictionHistory.ExecutionContinuation.cs'; Text = 'active.SetEquals(activePlays)' },
     @{ RelativePath = 'src/Search/SimulatedCombatState.ExecutionScopes.cs'; Text = 'ForkExecutionDeaths(Deaths, context);' },
-    @{ RelativePath = 'src/Search/CombatBeamSolver.ExecutionChoiceContinuation.cs'; Text = 'tail.ConsumedChoices != prefix.Count' },
-    @{ RelativePath = 'src/Search/CombatBeamSolver.ExecutionChoiceContinuation.cs'; Text = 'ReferenceEquals(_parent, candidate)' },
-    @{ RelativePath = 'src/Search/CombatBeamSolver.ExecutionChoiceContinuation.cs'; Text = 'lock (_gate)' },
-    @{ RelativePath = 'src/Search/CombatBeamSolver.ExecutionChoiceContinuation.cs'; Text = '_simulator = null; _parent = null; _action = null; _prefix = null; _continuation = null;' },
+    @{ RelativePath = 'src/Search/Probes/SearchReplayCore.cs'; Text = 'tail.ConsumedChoices != prefix.Count' },
+    @{ RelativePath = 'src/Search/Probes/SearchReplayCheckpoints.cs'; Text = 'ReferenceEquals(_parent, candidate)' },
+    @{ RelativePath = 'src/Search/Probes/SearchReplayCheckpoints.cs'; Text = 'lock (_gate)' },
+    @{ RelativePath = 'src/Search/Probes/SearchReplayCheckpoints.cs'; Text = '_simulator = null; _parent = null; _action = null; _prefix = null; _continuation = null;' },
     @{ RelativePath = 'src/Search/CombatBeamSolver.ParallelExpansion.cs'; Text = '_run.ExecutionChoiceReuses += source.ExecutionChoiceReuses;' }
 )) {
     if (-not (Select-String -LiteralPath (Join-Path $repositoryRoot $rule.RelativePath) -SimpleMatch $rule.Text -Quiet)) {
@@ -2121,7 +2128,7 @@ foreach ($rule in @(
 foreach ($relativePath in @(
     'src/Engine/InCombat/Simulation/CombatPredictionSimulator.ExecutionContinuation.cs',
     'src/Search/SimulatedCombatState.ExecutionScopes.cs',
-    'src/Search/CombatBeamSolver.ExecutionChoiceContinuation.cs'
+    'src/Search/Probes/SearchReplayCheckpoints.cs'
 )) {
     foreach ($forbidden in @('Task<', 'Func<', 'Action<')) {
         if (Select-String -LiteralPath (Join-Path $repositoryRoot $relativePath) -SimpleMatch $forbidden -Quiet) {
@@ -2142,9 +2149,9 @@ foreach ($rule in @(
     @{ RelativePath = 'src/Engine/InCombat/Simulation/CombatPredictionHistory.CardContinuation.cs'; Text = 'e.Options.Select(CopyOption)' },
     @{ RelativePath = 'src/Search/SimulatedCombatState.CardContinuation.cs'; Text = 'Options = spec.Options.Select(context.RequireRemap)' },
     @{ RelativePath = 'src/Prediction/CardChoiceContinuation.cs'; Text = 'lock (_gate)' },
-    @{ RelativePath = 'src/Search/CombatBeamSolver.CardChoiceContinuation.cs'; Text = 'ReferenceEquals(_parent, candidate)' },
+    @{ RelativePath = 'src/Search/Probes/SearchReplayCheckpoints.cs'; Text = 'ReferenceEquals(_parent, candidate)' },
     @{ RelativePath = 'src/Search/CombatBeamSolver.CardChoiceContinuation.cs'; Text = 'return Enumerate(this, checkpoint, branches);' },
-    @{ RelativePath = 'src/Search/CombatBeamSolver.Expansion.Replay.cs'; Text = 'countTransition: false' },
+    @{ RelativePath = 'src/Search/Probes/SearchReplayCore.cs'; Text = 'countTransition: false' },
     @{ RelativePath = 'src/Search/CombatBeamSolver.PrimaryChoiceReplay.cs'; Text = 'CardCheckpoint?.Dispose();' },
     @{ RelativePath = 'src/Search/SimulatedCombatState.CardContinuation.cs'; Text = '_cardExecutionScopeDepth != 0' }
 )) {

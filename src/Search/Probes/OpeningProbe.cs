@@ -87,7 +87,7 @@ internal sealed partial class OpeningProbe(
         _player,
         _startTurnNumber,
         _run.Performance,
-        recordExecutionFrames: false,
+        recordExecutionFrames: true,
         captureBeforeHandDraw: null,
         capture: null);
 
@@ -107,7 +107,27 @@ internal sealed partial class OpeningProbe(
         _strategicBossHpRelief,
         _theftPolicy);
 
-    internal static SearchNode CreateOpeningSearchSeed(SimulationSnapshot rootSnapshot)
+    internal SearchReplayCore ReplayCoreForBridge => ReplayCore;
+    internal SearchReplayAccounting AccountingForBridge => _run.Replay;
+    internal SearchExpansionContext ExpansionContextForBridge => ExpansionContext;
+    internal SearchEvaluator EvaluatorForBridge => Evaluator;
+    internal SolverSearchProfile ProfileForBridge => _profile;
+    internal SolverPotionPolicy PotionPolicyForBridge => _potionPolicy;
+    internal bool ForceAllPotionsDisabledForBridge => _forceAllPotionsDisabled;
+    internal PotionStrategySnapshot PotionStrategyForBridge => _potionStrategy;
+    internal SolverTheftPolicy? TheftPolicyForBridge => _theftPolicy;
+    internal int? MaximumPotionUsesForBridge => _maximumPotionUses;
+    internal int? EarliestPotionTurnForBridge => _earliestPotionTurn;
+    internal int MinimumPotionUsesForBridge => 0;
+    internal BossHpRelief StrategicBossHpReliefForBridge =>
+        ActEndingBossPolicy.ResolveStrategicHpRelief(
+            root.BossHpRelief,
+            policy.ActTransitionBossHpStrategy,
+            policy.FinalBossHpStrategy);
+
+    internal static SearchNode CreateOpeningSearchSeed(SimulationSnapshot rootSnapshot,
+        IReadOnlyList<PlanCardChoice>? turnSetupChoices = null,
+        ContinuationStamp? turnSetupPlayState = null)
         => new(
             null,
             0,
@@ -123,7 +143,9 @@ internal sealed partial class OpeningProbe(
             false,
             null,
             rootSnapshot,
-            CombatProgressState.Capture(rootSnapshot));
+            CombatProgressState.Capture(rootSnapshot),
+            TurnSetupChoices: turnSetupChoices,
+            TurnSetupPlayState: turnSetupPlayState);
 
     private SearchNode CreateOpeningFollowUpSeed(
         IReadOnlyList<PlanAction> prefix,

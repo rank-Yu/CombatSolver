@@ -49,7 +49,7 @@ internal sealed partial class CombatBeamSolver
                 EndTurnChoiceLayer? layer = PrepareEndTurnChoiceLayer(parent, action, snapshot);
                 if (layer != null)
                 {
-                    capture.ObservePendingChoice(this, pendingSourceId);
+                    capture.ObservePendingChoice(ReplayCore, pendingSourceId);
                     ownedCheckpoint = capture.Take();
                     layer = layer with { Checkpoint = ownedCheckpoint };
                     _roundReplayCheckpoint = ownedCheckpoint;

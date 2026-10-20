@@ -621,7 +621,7 @@ internal static class FlashDifferentialProbe
         SimulationSnapshot oldChild;
         try
         {
-            oldChild = FlashChoiceTranslator.Replay(solver, parent, player, completion.Action, out _,
+            oldChild = FlashChoiceTranslator.Replay(solver.ReplayCoreForTesting, parent, player, completion.Action, out _,
                 (index, request, spec) =>
                 {
                     (FlashChoiceRequest flash, FlashBattle partial) = completion.Requests[index];

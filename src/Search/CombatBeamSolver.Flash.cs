@@ -15,7 +15,7 @@ internal sealed partial class CombatBeamSolver
     /// differential checks and route materialization.
     /// </summary>
     internal SimulationSnapshot ReplayForFlash(IReadOnlyList<PlanAction> actions, SimulationSnapshot? parent)
-        => Replay(actions, parent, parent?.Turn ?? 0, countTransition: false, allowExecutionCapture: false);
+        => ReplayCore.ReplayForFlash(actions, parent);
 
     /// <summary>
     /// Replays this solver's fixed prefix from <paramref name="rootSnapshot"/> through the existing
@@ -49,24 +49,9 @@ internal sealed partial class CombatBeamSolver
     /// (<c>node.Turn</c> units) and the maximum number of explicit uses.
     /// </summary>
     internal (bool[] Allowed, int[] Costs, int? EarliestTurn, int? MaximumUses) CapturePotionPolicyForFlash(SimulationSnapshot snapshot)
-    {
-        SimulatedCombatState combat = (SimulatedCombatState)snapshot.Simulator.State.CombatState;
-        bool[] allowed = new bool[root.PotionSlotCount];
-        int[] costs = new int[root.PotionSlotCount];
-        for (int slot = 0; slot < allowed.Length; slot++)
-        {
-            MegaCrit.Sts2.Core.Models.PotionModel? potion = combat.GetPotionAtSlot(_player, slot);
-            if (potion == null)
-                continue;
-            allowed[slot] = combat.IsPotionAvailable(_player, slot)
-                && PotionOnUseSupport.CanSearch(potion)
-                && AllowsPotionUse(slot, potion.Id.Entry);
-            bool renewable = potion is MegaCrit.Sts2.Core.Models.Potions.PotionShapedRock
-                && combat.RelicsOf(_player).OfType<MegaCrit.Sts2.Core.Models.Relics.PetrifiedToad>().Any(static relic => !relic.IsMelted);
-            costs[slot] = combat.IsFreeEntropicPotionAtSlot(_player, slot) ? 0 : PotionUsePolicy.StrategicHpCost(potion, renewable);
-        }
-        return (allowed, costs, _earliestPotionTurn, _maximumPotionUses);
-    }
+        => FlashBridgeFacts.CapturePotionPolicy(
+            root, _player, _potionStrategy, _potionPolicy, _forceAllPotionsDisabled,
+            snapshot, _earliestPotionTurn, _maximumPotionUses);
 
     /// <summary>
     /// Replays one action from <paramref name="parent"/>, answering each card choice the existing
@@ -228,28 +213,16 @@ internal sealed partial class CombatBeamSolver
     /// snapshot's cumulative values instead of restarting at the prefix end.
     /// </summary>
     internal static FlashPotionUsageForBridge CapturePotionUsageForFlash(SimulationSnapshot snapshot)
-    {
-        SimulatedCombatState combat = (SimulatedCombatState)snapshot.Simulator.State.CombatState;
-        int automatic = 0;
-        foreach (PredictedPotionUse use in combat.PotionUses)
-        {
-            if (use.Automatic)
-                automatic = checked(automatic + 1);
-        }
-        return new FlashPotionUsageForBridge(
-            snapshot.PotionUseCount,
-            checked(snapshot.PotionUseCount - automatic),
-            snapshot.PotionStrategicCost,
-            snapshot.ExplicitPotionStrategicCost);
-    }
+        => FlashBridgeFacts.CapturePotionUsage(snapshot);
 
     /// <summary>
     /// The existing primary member's incumbent settings, frozen for the Flash bound. The Flash bridge uses the
     /// same values so its lower bound and potion-cost gate are evaluated with the existing search's semantics.
     /// </summary>
     internal FlashPruningRequest CapturePruningRequestForFlash()
-        => new(_potionPolicy, _forceAllPotionsDisabled, _maximumPotionUses, _minimumPotionUses,
-            _strategicBossHpRelief);
+        => FlashBridgeFacts.CapturePruningRequest(
+            root, policy, potionPolicyOverride, _maximumPotionUses,
+            _minimumPotionUses, battleDamage);
 
     /// <summary>
     /// <c>RemainingHealingPotential</c> as the primary member applies it, or null when the existing solver
@@ -333,18 +306,3 @@ internal sealed partial class CombatBeamSolver
         return _profile.ContextualRanking?.Adjustment(node) ?? 0;
     }
 }
-
-/// <summary>The cumulative potion counters of an existing-engine snapshot, frozen for a Flash search root.</summary>
-internal readonly record struct FlashPotionUsageForBridge(
-    int PotionUseCount,
-    int ExplicitPotionUseCount,
-    int PotionStrategicCost,
-    int ExplicitPotionStrategicCost);
-
-/// <summary>The existing primary member's incumbent policy, frozen for the Flash bound.</summary>
-internal readonly record struct FlashPruningRequest(
-    SolverPotionPolicy EffectivePotionPolicy,
-    bool ForceAllPotionsDisabled,
-    int? MaximumPotionUses,
-    int MinimumPotionUses,
-    BossHpRelief StrategicBossHpRelief);

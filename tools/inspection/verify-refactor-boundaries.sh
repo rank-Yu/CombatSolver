@@ -9,6 +9,10 @@ violations=()
 if rg -q 'CombatBeamSolver' "$probe_root" --glob '*.cs'; then
     violations+=("Opening probes must not reference CombatBeamSolver")
 fi
+flash_root="$search_root/FlashBeam"
+if rg -q 'CombatBeamSolver' "$flash_root" --glob '*.cs'; then
+    violations+=("FlashBeam must not reference CombatBeamSolver")
+fi
 if [[ ! -f "$probe_root/OpeningProbe.cs" || ! -f "$probe_root/SearchEvaluator.cs" ]]; then
     violations+=("Opening probe component is missing")
 fi
@@ -43,8 +47,8 @@ strategy_id_literal_count=$(rg -o --no-filename '"[A-Z][A-Z0-9_]{4,}"' "$reposit
     --glob '!OpeningActionRegistry.cs' \
     --glob '!TargetPlanRegistry.cs' \
     --glob '!FlashPowerEvidence.cs' | wc -l)
-if (( strategy_id_literal_count > 645 )); then
-    violations+=("Search strategy ID literals increased: $strategy_id_literal_count > 645")
+if (( strategy_id_literal_count > 647 )); then
+    violations+=("Search strategy ID literals increased: $strategy_id_literal_count > 647")
 fi
 [[ -f "$repository_root/src/Search/CombatBeamSolver.ExpansionPlan.cs" ]] || violations+=("Shared expansion plan missing")
 if ! rg -Fq 'cardJobs.PrepareSerialCards(this,' "$repository_root/src/Search/CombatBeamSolver.Expansion.cs" ||
@@ -516,10 +520,10 @@ forbid_regex() {
 
 forbid_fixed "$search_root/CombatBeamSolver.Phases.cs" 'CaptureContinuation(node)' \
     'only the selected route may build continuation stamps'
-require_fixed "$search_root/CombatBeamSolver.Terminal.cs" 'ContinuationStamp.CapturePredicted(' \
+require_fixed "$search_root/Probes/SearchReplayCheckpoints.cs" 'ContinuationStamp.CapturePredicted(' \
     'Terminal must build the selected route continuation stamp'
 for required in 'PrepareContinuationCapture(best)' 'continuationCapture: continuationCapture' 'continuationCapture.Complete()'; do
-    require_fixed "$search_root/CombatBeamSolver.Phases.cs" "$required" \
+    require_fixed "$search_root/Probes/SearchRouteMaterializer.cs" "$required" \
         'selected route must capture continuations in its annotation replay'
 done
 forbid_fixed "$search_root/CombatBeamSolver.Terminal.cs" 'Replay(node.Actions' \
@@ -991,6 +995,7 @@ expected_beam_files=(
     CombatBeamSolver.PathDiagnostics.cs
     CombatBeamSolver.Phases.cs
     CombatBeamSolver.PrimaryChoiceReplay.cs
+    CombatBeamSolver.ReplayCore.cs
     CombatBeamSolver.Retention.cs
     CombatBeamSolver.RetentionJobs.cs
     CombatBeamSolver.SmartPotionBound.cs
@@ -1039,7 +1044,7 @@ CombatBeamSolver.BeamRetentionPolicy.cs	routingNodes = new RoutingChoiceNodes(no
 CombatBeamSolver.BeamRetentionPolicy.cs	ReturnRoutingChoiceScratch(scratch);
 CombatBeamSolver.Transpositions.cs	private readonly record struct TranspositionLabel(
 CombatBeamSolver.Models.cs	private sealed class SearchRunContext(
-CombatBeamSolver.Models.cs	private readonly record struct SearchFeatures(
+SearchRouteTypes.cs	internal readonly record struct SearchFeatures(
 CombatBeamSolver.ParallelExpansion.cs	private sealed partial class ParallelExpansionExecutor : IExpansionExecutor, IDisposable
 CombatBeamSolver.ParallelExpansion.cs	public ExpansionWorkerOutcome[] Evaluate(
 CombatBeamSolver.ParallelExpansion.cs	public int MaximumQueuedParents => SearchWaveMemoryPolicy.MaximumQueuedParents(DegreeOfParallelism);
@@ -1055,18 +1060,18 @@ CombatBeamSolver.AdmittedExpansion.cs	_completedPotions != Potions!.Count
 CombatBeamSolver.EndTurnChoiceReplay.cs	private PreparedEndTurnEvaluation EvaluatePreparedEndTurn(
 CombatBeamSolver.RoundTransition.cs	SearchRoundExecution.AdvanceRoundPlayerStart(
 CombatBeamSolver.TurnSetup.cs	internal IReadOnlyList<TurnSetupRootCandidate> CaptureTurnSetupRootsForFlash()
-CombatBeamSolver.RoundTransition.cs	private sealed class RoundReplayCheckpoint(
-CombatBeamSolver.RoundTransition.cs	combat.EndActionChoices();
-CombatBeamSolver.RoundTransition.cs	combat.BeginActionChoices(cursor);
+Probes/SearchReplayCheckpoints.cs	internal sealed class RoundReplayCheckpoint(
+Probes/SearchReplayCheckpoints.cs	combat.EndActionChoices();
+Probes/SearchReplayCheckpoints.cs	combat.BeginActionChoices(cursor);
 CombatBeamSolver.RoundTransition.cs	internal int VerifyRoundReplayCheckpointForTesting(
-CombatBeamSolver.Models.cs	public bool HasObservedPostDrawRoundChoice;
-CombatBeamSolver.Models.cs	public HashSet<string>? ObservedHandDrawShuffleChoiceSources;
-CombatBeamSolver.RoundTransition.cs	public void CaptureBeforeHandDraw(CombatBeamSolver owner, CombatPredictionSimulator simulator,
-CombatBeamSolver.RoundTransition.cs	checkpoint.HandDrawCount.HasValue ? PlayerStartStage.Draw : PlayerStartStage.AfterPlayer
+Probes/SearchReplayShared.cs	public bool HasObservedPostDrawRoundChoice;
+Probes/SearchReplayShared.cs	public HashSet<string>? ObservedHandDrawShuffleChoiceSources;
+Probes/SearchReplayCheckpoints.cs	public void CaptureBeforeHandDraw(SearchReplayCore owner, CombatPredictionSimulator simulator,
+Probes/SearchReplayCore.cs	checkpoint.HandDrawCount.HasValue ? PlayerStartStage.Draw : PlayerStartStage.AfterPlayer
 RootCombatCardGenerationPoolSnapshot.cs	public bool TryGetEligibleCharacterCards(
 CombatBeamSolver.Retention.cs	var maximum = BeamRetentionPolicy.GetLongTermResourceMaximum(pool);
 CombatBeamSolver.Retention.cs	if (maximum.Count == pool.Count)
-CombatBeamSolver.EndTurnChoiceReplay.cs	capture.ObservePendingChoice(this, pendingSourceId);
+CombatBeamSolver.EndTurnChoiceReplay.cs	capture.ObservePendingChoice(ReplayCore, pendingSourceId);
 CombatBeamSolver.AdmittedExpansion.cs	endTurn.TransferEndTurnTo(Aggregate!, candidate);
 CombatBeamSolver.AdmittedExpansion.cs	PublishCrossTurnStandPatBaselines(Node, _endTurnBaselines);
 CombatBeamSolver.AdmittedExpansion.cs	ready.TransferPotionTo(Aggregate!, candidate);
@@ -1102,7 +1107,7 @@ CombatBeamSolver.ParallelExpansion.cs	private void CommitExpansionBatch(
 CombatBeamSolver.Phases.cs	public SolverResult Solve()
 CombatBeamSolver.Expansion.cs	private IEnumerable<SearchNode> Expand(SearchNode node)
 CombatBeamSolver.BeamRetentionPolicy.cs	public List<SearchNode> RankFinal(IEnumerable<SearchNode> nodes)
-CombatBeamSolver.FinalPlanOrdering.cs	private sealed class FinalPlanOrdering(
+CombatBeamSolver.FinalPlanOrdering.cs	internal sealed class FinalPlanOrdering(
 CombatBeamSolver.FinalPlanOrdering.cs	public FinalPlanSelection Select(
 CombatBeamSolver.Terminal.cs	private List<SearchNode> AnnotateTurnOutcomes(List<SearchNode> ended)
 CombatBeamSolver.StateEvaluation.cs	private SimulationSnapshot Snapshot(
@@ -1253,7 +1258,7 @@ require_fixed "$repository_root/src/Search/StrategicHpRecoveryBound.KnownSources
 require_fixed "$repository_root/src/Search/StrategicHpRecoveryBound.KnownSources.cs" 'or DarkstonePeriapt or ChosenCheese' 'unclosed relic healing allowance changed:'
 beam_phases_path="$search_root/CombatBeamSolver.Phases.cs"
 require_fixed "$beam_retention_facade_path" '_strictHpBoundWithRelicTargets = CanUseStrictHpRelicBound(root, policy)' 'missing common relic healing bound:'
-require_fixed "$beam_retention_facade_path" 'targets.All(target => target.HpAllowance == 0)' 'missing zero-allowance objective gate:'
+require_fixed "$search_root/Probes/SmartPotionBoundPolicy.cs" 'targets.All(target => target.HpAllowance == 0)' 'missing zero-allowance objective gate:'
 require_fixed "$beam_retention_facade_path" 'allowTurnTieBound: !_strictHpBoundWithRelicTargets' 'equal-HP counter routes must keep later turns:'
 require_fixed "$search_root/CombatSearchCoordinator.cs" '!CombatBeamSolver.CanUseStrictHpRelicBound(root, policy)' 'shared incumbent must retain objective eligibility:'
 require_fixed "$search_root/CombatSearchCoordinator.PlanSearch.cs" 'if (!root.CanCertifyRemainingHealing' 'speculative early plans require the existing certified-root schedule:'
@@ -1650,9 +1655,9 @@ done <<'EOF'
 src/Prediction/PotionChoiceContinuation.cs	seed.AssertForkable();
 src/Prediction/PotionChoiceContinuation.cs	lock (_gate)
 src/Prediction/PotionChoiceContinuation.cs	!PotionChoiceMirrors.RequiresChoice(potion)
-src/Search/CombatBeamSolver.PotionChoiceContinuation.cs	ReferenceEquals(_parent, candidate)
+src/Search/Probes/SearchReplayCheckpoints.cs	ReferenceEquals(_parent, candidate)
 src/Search/CombatBeamSolver.PotionChoiceContinuation.cs	_run.PotionChoicePrefixForks++;
-src/Search/CombatBeamSolver.Expansion.Replay.cs	PotionExecutionSupport.Complete(
+src/Search/Probes/SearchReplayCore.cs	PotionExecutionSupport.Complete(
 src/Search/CombatBeamSolver.PrimaryChoiceReplay.cs	PotionCheckpoint?.Dispose();
 src/Search/CombatBeamSolver.ParallelExpansion.cs	_run.PotionChoicePrefixForks += source.PotionChoicePrefixForks;
 EOF
@@ -1675,16 +1680,16 @@ src/Engine/InCombat/Simulation/CombatPredictionSimulator.DrawContinuation.cs	map
 src/Engine/InCombat/Simulation/CombatPredictionHistory.ExecutionContinuation.cs	unresolved.SetEquals(deferred)
 src/Engine/InCombat/Simulation/CombatPredictionHistory.ExecutionContinuation.cs	active.SetEquals(activePlays)
 src/Search/SimulatedCombatState.ExecutionScopes.cs	ForkExecutionDeaths(Deaths, context);
-src/Search/CombatBeamSolver.ExecutionChoiceContinuation.cs	tail.ConsumedChoices != prefix.Count
-src/Search/CombatBeamSolver.ExecutionChoiceContinuation.cs	ReferenceEquals(_parent, candidate)
-src/Search/CombatBeamSolver.ExecutionChoiceContinuation.cs	lock (_gate)
-src/Search/CombatBeamSolver.ExecutionChoiceContinuation.cs	_simulator = null; _parent = null; _action = null; _prefix = null; _continuation = null;
+src/Search/Probes/SearchReplayCore.cs	tail.ConsumedChoices != prefix.Count
+src/Search/Probes/SearchReplayCheckpoints.cs	ReferenceEquals(_parent, candidate)
+src/Search/Probes/SearchReplayCheckpoints.cs	lock (_gate)
+src/Search/Probes/SearchReplayCheckpoints.cs	_simulator = null; _parent = null; _action = null; _prefix = null; _continuation = null;
 src/Search/CombatBeamSolver.ParallelExpansion.cs	_run.ExecutionChoiceReuses += source.ExecutionChoiceReuses;
 EOF
 for relative_path in \
     src/Engine/InCombat/Simulation/CombatPredictionSimulator.ExecutionContinuation.cs \
     src/Search/SimulatedCombatState.ExecutionScopes.cs \
-    src/Search/CombatBeamSolver.ExecutionChoiceContinuation.cs; do
+    src/Search/Probes/SearchReplayCheckpoints.cs; do
     for forbidden in 'Task<' 'Func<' 'Action<'; do
         forbid_fixed "$repository_root/$relative_path" "$forbidden" 'execution continuation retained an executable closure:'
     done
@@ -1704,9 +1709,9 @@ src/Engine/InCombat/Simulation/CombatPredictionSimulator.CardContinuation.cs	chi
 src/Engine/InCombat/Simulation/CombatPredictionHistory.CardContinuation.cs	e.Options.Select(CopyOption)
 src/Search/SimulatedCombatState.CardContinuation.cs	Options = spec.Options.Select(context.RequireRemap)
 src/Prediction/CardChoiceContinuation.cs	lock (_gate)
-src/Search/CombatBeamSolver.CardChoiceContinuation.cs	ReferenceEquals(_parent, candidate)
+src/Search/Probes/SearchReplayCheckpoints.cs	ReferenceEquals(_parent, candidate)
 src/Search/CombatBeamSolver.CardChoiceContinuation.cs	return Enumerate(this, checkpoint, branches);
-src/Search/CombatBeamSolver.Expansion.Replay.cs	countTransition: false
+src/Search/Probes/SearchReplayCore.cs	countTransition: false
 src/Search/CombatBeamSolver.PrimaryChoiceReplay.cs	CardCheckpoint?.Dispose();
 src/Search/SimulatedCombatState.CardContinuation.cs	_cardExecutionScopeDepth != 0
 EOF

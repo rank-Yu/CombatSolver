@@ -90,8 +90,10 @@ internal sealed partial class CombatBeamSolver
         public int PowerCommitmentsExpired;
         public int PowerCommitmentsRealized;
         public int PowerCommitmentSeatsPeak;
-        public readonly SearchPerformanceMetrics Performance = new(measurePhasePerformance);
-        public readonly SearchWorkPacer WorkPacer = new(framePressureSignal);
+        public readonly SearchReplayAccounting Replay = new(measurePhasePerformance, framePressureSignal);
+        public SearchPerformanceMetrics Performance => Replay.Performance;
+        public SearchWorkPacer WorkPacer => Replay.WorkPacer
+            ?? throw new InvalidOperationException("Search run has no frame pressure signal.");
         public readonly OwnedExpansionBatch<SimulationSnapshot, RawCardCandidate, SearchNode>.Pool
             ExpansionBatchPool = new(static snapshot => snapshot.ReleaseSimulator());
         public readonly SnapshotListBuffer<PredictedCard> SnapshotLiveCards = new();
@@ -159,33 +161,30 @@ internal sealed partial class CombatBeamSolver
         public int TopQueueActionsDropped;
         public int ActionAdmissionRepresentativesProtected;
         public int DuplicateCardBranchesPruned;
-        public int ChoiceBranchesEvaluated;
-        public int ChoiceReplayAttempts;
-        public int ChoiceReplayBudgetExhaustions;
-        public int ChoiceBranchesDroppedByBudget;
-        public int ShuffleBranchesPruned = 0;
+        public int ShuffleBranchesPruned;
         public int SoldHpBranchesPruned;
         public int HpInvestmentBranchesProtected;
-        public int ReplayCount;
-        public int ForkCount;
-        public int RoundReplayPrefixCaptures;
-        public int RoundReplayPrefixReuses;
-        public int ExecutionChoiceCaptures;
-        public int ExecutionChoiceReuses;
-        public int CardChoicePrefixAttempts;
-        public int CardChoicePrefixCaptures;
-        public int CardChoicePrefixReuses;
-        public int CardChoicePrefixFallbacks;
-        public int PotionChoicePrefixForks;
-        public int PotionChoicePrefixCaptures;
-        public int PotionChoicePrefixReuses;
-        public int PotionChoicePrefixFallbacks;
-        // Lane-local scheduling hint, never combat state or candidate policy. Learn only
-        // after an initial EndTurn probe reached the stable post-draw boundary and
-        // produced a choice layer.
-        public bool HasObservedPostDrawRoundChoice;
-        public HashSet<string>? ObservedHandDrawShuffleChoiceSources;
-        public int TransitionCount;
+        public int ChoiceReplayAttempts { get => Replay.ChoiceReplayAttempts; set => Replay.ChoiceReplayAttempts = value; }
+        public int ChoiceBranchesEvaluated { get => Replay.ChoiceBranchesEvaluated; set => Replay.ChoiceBranchesEvaluated = value; }
+        public int ChoiceReplayBudgetExhaustions { get => Replay.ChoiceReplayBudgetExhaustions; set => Replay.ChoiceReplayBudgetExhaustions = value; }
+        public int ChoiceBranchesDroppedByBudget { get => Replay.ChoiceBranchesDroppedByBudget; set => Replay.ChoiceBranchesDroppedByBudget = value; }
+        public int ReplayCount { get => Replay.ReplayCount; set => Replay.ReplayCount = value; }
+        public int ForkCount { get => Replay.ForkCount; set => Replay.ForkCount = value; }
+        public int RoundReplayPrefixCaptures { get => Replay.RoundReplayPrefixCaptures; set => Replay.RoundReplayPrefixCaptures = value; }
+        public int RoundReplayPrefixReuses { get => Replay.RoundReplayPrefixReuses; set => Replay.RoundReplayPrefixReuses = value; }
+        public int ExecutionChoiceCaptures { get => Replay.ExecutionChoiceCaptures; set => Replay.ExecutionChoiceCaptures = value; }
+        public int ExecutionChoiceReuses { get => Replay.ExecutionChoiceReuses; set => Replay.ExecutionChoiceReuses = value; }
+        public int CardChoicePrefixAttempts { get => Replay.CardChoicePrefixAttempts; set => Replay.CardChoicePrefixAttempts = value; }
+        public int CardChoicePrefixCaptures { get => Replay.CardChoicePrefixCaptures; set => Replay.CardChoicePrefixCaptures = value; }
+        public int CardChoicePrefixReuses { get => Replay.CardChoicePrefixReuses; set => Replay.CardChoicePrefixReuses = value; }
+        public int CardChoicePrefixFallbacks { get => Replay.CardChoicePrefixFallbacks; set => Replay.CardChoicePrefixFallbacks = value; }
+        public int PotionChoicePrefixForks { get => Replay.PotionChoicePrefixForks; set => Replay.PotionChoicePrefixForks = value; }
+        public int PotionChoicePrefixCaptures { get => Replay.PotionChoicePrefixCaptures; set => Replay.PotionChoicePrefixCaptures = value; }
+        public int PotionChoicePrefixReuses { get => Replay.PotionChoicePrefixReuses; set => Replay.PotionChoicePrefixReuses = value; }
+        public int PotionChoicePrefixFallbacks { get => Replay.PotionChoicePrefixFallbacks; set => Replay.PotionChoicePrefixFallbacks = value; }
+        public bool HasObservedPostDrawRoundChoice { get => Replay.HasObservedPostDrawRoundChoice; set => Replay.HasObservedPostDrawRoundChoice = value; }
+        public HashSet<string>? ObservedHandDrawShuffleChoiceSources { get => Replay.ObservedHandDrawShuffleChoiceSources; set => Replay.ObservedHandDrawShuffleChoiceSources = value; }
+        public int TransitionCount { get => Replay.TransitionCount; set => Replay.TransitionCount = value; }
         public int ReusedNodeSnapshots;
         public int TranspositionBranchesPruned;
         public int RepeatableNoProgressBranchesPruned;
@@ -237,10 +236,108 @@ internal sealed partial class CombatBeamSolver
         public int ParallelRoundChoiceReplayWorkItems = 0;
         public int MaxParallelRoundChoiceReplayConcurrency = 0;
         public int NodeLimitSnapshotsReleased;
-        public int InitialPersistentBuffValue;
-        public int InitialEnemyStrengthSuppression;
-        public int InitialEnemyWeakTurns;
-        public int InitialRetainedAttackValue;
+        public int InitialPersistentBuffValue { get => Replay.InitialPersistentBuffValue; set => Replay.InitialPersistentBuffValue = value; }
+        public int InitialEnemyStrengthSuppression { get => Replay.InitialEnemyStrengthSuppression; set => Replay.InitialEnemyStrengthSuppression = value; }
+        public int InitialEnemyWeakTurns { get => Replay.InitialEnemyWeakTurns; set => Replay.InitialEnemyWeakTurns = value; }
+        public int InitialRetainedAttackValue { get => Replay.InitialRetainedAttackValue; set => Replay.InitialRetainedAttackValue = value; }
+
+        public SearchMaterializationMetrics CaptureMaterializationMetrics()
+            => new(Performance)
+            {
+                WorkPacer = WorkPacer,
+                Expanded = Expanded,
+                TransitionCount = TransitionCount,
+                ReplayCount = ReplayCount,
+                ForkCount = ForkCount,
+                ActionAdmissionRepresentativesProtected = ActionAdmissionRepresentativesProtected,
+                CardChoicePrefixAttempts = CardChoicePrefixAttempts,
+                CardChoicePrefixCaptures = CardChoicePrefixCaptures,
+                CardChoicePrefixFallbacks = CardChoicePrefixFallbacks,
+                CardChoicePrefixReuses = CardChoicePrefixReuses,
+                ChoiceBranchesDroppedByBudget = ChoiceBranchesDroppedByBudget,
+                ChoiceBranchesEvaluated = ChoiceBranchesEvaluated,
+                ChoiceReplayAttempts = ChoiceReplayAttempts,
+                ChoiceReplayBudgetExhaustions = ChoiceReplayBudgetExhaustions,
+                CrossTurnCandidatesProtected = CrossTurnCandidatesProtected,
+                CrossTurnContinuationsStopped = CrossTurnContinuationsStopped,
+                CycleCandidatesProtected = CycleCandidatesProtected,
+                CycleContinuationsStopped = CycleContinuationsStopped,
+                CycleProbeContinuationsExpanded = CycleProbeContinuationsExpanded,
+                CycleRegionCandidatesAdmitted = CycleRegionCandidatesAdmitted,
+                CycleRegionCandidatesConsidered = CycleRegionCandidatesConsidered,
+                CycleRegionCandidatesDropped = CycleRegionCandidatesDropped,
+                CycleRegionMaxActionFamilies = CycleRegionMaxActionFamilies,
+                CycleRegionProbeCandidatesAdmitted = CycleRegionProbeCandidatesAdmitted,
+                CycleRegionProgressCandidatesAdmitted = CycleRegionProgressCandidatesAdmitted,
+                CycleRegionProgressEpochs = CycleRegionProgressEpochs,
+                CycleRegionsDetected = CycleRegionsDetected,
+                CycleReplayActions = CycleReplayActions,
+                CycleReplayAttempts = CycleReplayAttempts,
+                CycleReplayContinuations = CycleReplayContinuations,
+                CycleReplayVictories = CycleReplayVictories,
+                CycleShapesDetected = CycleShapesDetected,
+                CycleStoppedExitBudget = CycleStoppedExitBudget,
+                CycleStoppedFamilyBudget = CycleStoppedFamilyBudget,
+                CycleStoppedRepetitionBudget = CycleStoppedRepetitionBudget,
+                CycleStoppedUnproductive = CycleStoppedUnproductive,
+                DeferredRoundChoiceActions = DeferredRoundChoiceActions,
+                DeferredRoundChoiceFinitePendingFallbacks = DeferredRoundChoiceFinitePendingFallbacks,
+                DeferredRoundChoiceFinitePrimaryLayers = DeferredRoundChoiceFinitePrimaryLayers,
+                DeferredRoundChoiceFiniteQuotaFallbacks = DeferredRoundChoiceFiniteQuotaFallbacks,
+                DeferredRoundChoiceLayerWidthTotal = DeferredRoundChoiceLayerWidthTotal,
+                DominatedActionsPruned = DominatedActionsPruned,
+                DuplicateCardBranchesPruned = DuplicateCardBranchesPruned,
+                ExecutionChoiceCaptures = ExecutionChoiceCaptures,
+                ExecutionChoiceReuses = ExecutionChoiceReuses,
+                HpInvestmentBranchesProtected = HpInvestmentBranchesProtected,
+                MaxDeferredRoundChoiceLayerWidth = MaxDeferredRoundChoiceLayerWidth,
+                MaxParallelActionReplayConcurrency = MaxParallelActionReplayConcurrency,
+                MaxParallelExpansionConcurrency = MaxParallelExpansionConcurrency,
+                MaxParallelRoundChoiceReplayConcurrency = MaxParallelRoundChoiceReplayConcurrency,
+                NodeLimitSnapshotsReleased = NodeLimitSnapshotsReleased,
+                OrderedMutationColdAtomicCommitted = OrderedMutationColdAtomicCommitted,
+                OrderedMutationColdAtomicRejected = OrderedMutationColdAtomicRejected,
+                OrderedMutationLeaseExpiredBudget = OrderedMutationLeaseExpiredBudget,
+                OrderedMutationOrdinaryFallbacks = OrderedMutationOrdinaryFallbacks,
+                OrderedMutationPortfolioNodesConsumed = OrderedMutationPortfolioNodesConsumed,
+                ParallelActionReplayWaves = ParallelActionReplayWaves,
+                ParallelActionReplayWorkItems = ParallelActionReplayWorkItems,
+                ParallelExpansionWaves = ParallelExpansionWaves,
+                ParallelExpansionWorkItems = ParallelExpansionWorkItems,
+                ParallelRoundChoiceReplayWaves = ParallelRoundChoiceReplayWaves,
+                ParallelRoundChoiceReplayWorkItems = ParallelRoundChoiceReplayWorkItems,
+                PotionChoicePrefixCaptures = PotionChoicePrefixCaptures,
+                PotionChoicePrefixFallbacks = PotionChoicePrefixFallbacks,
+                PotionChoicePrefixForks = PotionChoicePrefixForks,
+                PotionChoicePrefixReuses = PotionChoicePrefixReuses,
+                PrimaryIncumbentBranchesPruned = PrimaryIncumbentBranchesPruned,
+                PrimaryIncumbentCertifiedHealingBoundBranchesPruned = PrimaryIncumbentCertifiedHealingBoundBranchesPruned,
+                PrimaryIncumbentUpdates = PrimaryIncumbentUpdates,
+                RepeatableNoProgressBranchesPruned = RepeatableNoProgressBranchesPruned,
+                ReusedNodeSnapshots = ReusedNodeSnapshots,
+                RoundReplayPrefixCaptures = RoundReplayPrefixCaptures,
+                RoundReplayPrefixReuses = RoundReplayPrefixReuses,
+                ShuffleBranchesPruned = ShuffleBranchesPruned,
+                SoldHpBranchesPruned = SoldHpBranchesPruned,
+                StandPatProbes = StandPatProbes,
+                TopQueueActionsDropped = TopQueueActionsDropped,
+                TranspositionBranchesPruned = TranspositionBranchesPruned,
+                TranspositionLimitBypasses = TranspositionLimitBypasses,
+                TurnLayerBudgetStops = TurnLayerBudgetStops,
+                TurnLayerNodeBudgetStops = TurnLayerNodeBudgetStops,
+                TurnLayerTimeBudgetStops = TurnLayerTimeBudgetStops,
+                TranspositionCount = Transpositions.Count,
+                ExpandedTranspositionCount = ExpandedTranspositions.Count,
+                StandPatCacheCount = StandPatCache.Count,
+                ThreatProjectionCacheCount = ThreatProjectionCache.Count,
+                CoverageCacheCount = CoverageCache.Count,
+                MaxObservedGcPause = WorkPacer.MaxObservedGcPause,
+                WorkerYieldCount = WorkPacer.YieldCount,
+                FrameRecoveryWaitCount = WorkPacer.FrameRecoveryWaitCount,
+                FrameRecoveryWaitDuration = WorkPacer.FrameRecoveryWaitDuration,
+                OffThreadAllocatedBytes = OffThreadAllocatedBytes,
+                NoveltySearch = Novelty?.Describe(),
+            };
 
         public void ResetRebuildableCaches(IReadOnlyList<SearchNode> frontier)
         {
@@ -282,116 +379,6 @@ internal sealed partial class CombatBeamSolver
     {
         private StateFingerprint _element0;
     }
-
-    private sealed record RouteAnnotations(
-        IReadOnlyDictionary<int, int> HpLostByTurn,
-        IReadOnlyDictionary<int, int> HpRecoveredByTurn,
-        IReadOnlyDictionary<int, int> EnemyHpLostByTurn,
-        IReadOnlyDictionary<int, int> SoldHpByTurn,
-        IReadOnlyDictionary<int, int> MaxBlockByTurn,
-        IReadOnlyDictionary<int, int> ActualBlockByTurn,
-        IReadOnlyDictionary<int, int> EnergyLeftByTurn,
-        IReadOnlyDictionary<int, int> PotionCountByTurn,
-        IReadOnlyDictionary<int, int> PotionStrategicCostByTurn,
-        IReadOnlyDictionary<int, IReadOnlyList<string>> KillsAfterAction,
-        int? CombatEndedTurn,
-        int? DeathTurn);
-
-    private readonly record struct SearchFeatures(
-        bool AllEnemiesDead,
-        int ProjectedPlayerHp,
-        int PlayerHp,
-        int PlayerMaxHp,
-        int CumulativePlayerHpLost,
-        int RecoveredPlayerHp,
-        int DeathSaveHpRestored,
-        int LongTermResourceValue,
-        int AngerCopiesGenerated,
-        int PlayerBlock,
-        int AliveEnemyCount,
-        int EnemyHp,
-        int RawEnemyHp,
-        int MaxCurrentEnemyHp,
-        int OutstandingStolenResource,
-        int PersistentBuffValue,
-        int LatentSetupValue,
-        int FutureResourceValue,
-        int RetainedAttackValue,
-        int DelayedDamageValue,
-        int ReactiveDamageValue,
-        int SandpitRemaining,
-        int LiveDeckClutter,
-        int Energy,
-        int Stars,
-        int HandCount,
-        int RevivingEnemyCount,
-        int FocusTargetPressure,
-        int FocusTargetRemainingHp,
-        int FocusTargetCurrentThreat,
-        int PotionCount,
-        int FutureSoldHp,
-        int ActionCount,
-        double Score,
-        SearchRouteTraits Traits,
-        SearchBoundaryReason BoundaryReason)
-    {
-        public static SearchFeatures Capture(SearchNode node)
-        {
-            SimulationSnapshot snapshot = node.Snapshot;
-            return new SearchFeatures(
-                snapshot.AllEnemiesDead,
-                snapshot.ProjectedPlayerHp,
-                snapshot.PlayerHp,
-                snapshot.PlayerMaxHp,
-                snapshot.CumulativePlayerHpLost,
-                snapshot.RecoveredPlayerHp,
-                snapshot.DeathSaveHpRestored,
-                snapshot.LongTermResourceValue,
-                snapshot.AngerCopiesGenerated,
-                snapshot.PlayerBlock,
-                snapshot.AliveEnemyCount,
-                snapshot.EnemyHp,
-                snapshot.RawEnemyHp,
-                snapshot.MaxCurrentEnemyHp,
-                snapshot.OutstandingStolenResource,
-                snapshot.PersistentBuffValue,
-                snapshot.LatentSetupValue,
-                snapshot.FutureResourceValue,
-                snapshot.RetainedAttackValue,
-                snapshot.DelayedDamageValue,
-                snapshot.ReactiveDamageValue,
-                snapshot.SandpitRemaining,
-                snapshot.LiveDeckClutter,
-                snapshot.Energy,
-                snapshot.Stars,
-                snapshot.HandCount,
-                snapshot.RevivingEnemyCount,
-                snapshot.FocusTargetPressure,
-                snapshot.FocusTargetRemainingHp,
-                snapshot.FocusTargetCurrentThreat,
-                node.PotionCount,
-                node.FutureSoldHp,
-                node.ActionCount,
-                node.Score,
-                node.Traits,
-                snapshot.BoundaryReason);
-        }
-    }
-
-    private sealed record FinalPlanCandidate(
-        SearchNode Node,
-        SimulationSnapshot Snapshot,
-        SearchFeatures Features,
-        int FutureSold,
-        int BattleSold,
-        int PotionCount,
-        double Score);
-
-    private sealed record FinalPlanSelection(
-        FinalPlanCandidate Candidate,
-        int PotionBranchesRejected,
-        int PotionHpSaved,
-        int PotionHpRequired);
 
     private sealed record PendingTurnOutcome(
         SearchNode Node,

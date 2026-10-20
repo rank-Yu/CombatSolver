@@ -7,7 +7,6 @@ using static CombatSolver.SearchProbeHelpers;
 
 internal sealed partial class CombatBeamSolver
 {
-    private PotionChoiceReplayCheckpoint? _potionChoiceReplayCheckpoint;
     private bool _disablePotionChoiceContinuationsForTesting;
     internal bool DisablePotionChoiceContinuationsForTesting
     { init => _disablePotionChoiceContinuationsForTesting = value; }
@@ -153,34 +152,6 @@ internal sealed partial class CombatBeamSolver
         });
     }
 
-    private sealed class PotionChoiceReplayCheckpoint(SearchNode parent, PlanAction action,
-        PotionChoiceContinuation continuation) : IDisposable
-    {
-        private SearchNode? _parent = parent;
-        private PlanAction? _action = action;
-        private PotionChoiceContinuation? _continuation = continuation;
-
-        // The original no-selection probe is also resumed, so its existing after-use hooks
-        // still run before generated options are read by the unchanged choice builder.
-        public bool Matches(SearchNode candidate, PlanAction resolved)
-            => ReferenceEquals(_parent, candidate) && _action != null
-                && resolved == (_action with { Choice = resolved.Choice });
-
-        public ReplayForkSeed Fork(CombatBeamSolver owner, out PotionChoiceFrame frame)
-        {
-            owner._run.ForkCount++; owner._run.PotionChoicePrefixReuses++;
-            using var measure = owner._run.Performance.Measure(SearchMetricPhase.Fork);
-            var child = (_continuation ?? throw new ObjectDisposedException(nameof(PotionChoiceReplayCheckpoint)))
-                .Fork(owner.SearchCancellationToken);
-            frame = child.Frame;
-            return new ReplayForkSeed(child.Simulator, child.Deaths);
-        }
-
-        public void Dispose()
-        {
-            _continuation?.Dispose(); _continuation = null; _parent = null; _action = null;
-        }
-    }
     private IEnumerable<(PlanAction Action, SimulationSnapshot Snapshot)> WithPotionChoiceCheckpoint(
         PotionChoiceReplayCheckpoint? checkpoint,
         IEnumerable<(PlanAction Action, SimulationSnapshot Snapshot)> branches)

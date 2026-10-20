@@ -101,12 +101,12 @@ internal sealed partial class CombatBeamSolver(
         captureBeforeHandDraw: (capture, simulator, combat, cursor, deaths, shuffles,
             takingExtraTurn, sideStarted, drawCount, willShuffle) =>
             ((RoundReplayCheckpointCapture?)capture)?.CaptureBeforeHandDraw(
-                this, simulator, combat, cursor, deaths, shuffles,
+                ReplayCore, simulator, combat, cursor, deaths, shuffles,
                 takingExtraTurn, sideStarted, drawCount, willShuffle),
         capture: (capture, simulator, combat, cursor, deaths, shuffles,
             takingExtraTurn, sideStarted) =>
             ((RoundReplayCheckpointCapture?)capture)?.Capture(
-                this, simulator, combat, cursor, deaths, shuffles,
+                ReplayCore, simulator, combat, cursor, deaths, shuffles,
                 takingExtraTurn, sideStarted));
     private SearchEvaluator Evaluator => _evaluator ??= new SearchEvaluator(
         root,
