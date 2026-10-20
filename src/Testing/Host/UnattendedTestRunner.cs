@@ -256,6 +256,19 @@ internal sealed partial class UnattendedTestRunner
             combatState ??= _scenarioBuilder.CombatState;
             if (startedTurn == 0)
                 startedTurn = _scenarioBuilder.StartedTurn;
+            if (_request.ExportBugReportAfterCombat
+                && ex.GetBaseException() is FlashSearchFailedException)
+            {
+                // A Flash refusal stops deployment before combat ends, so the normal post-combat
+                // export never runs. Export here while the stopped combat is still the current
+                // session; the issue ledger already carries FlashSearchFailed + SearchFailure.
+                SetStage("export_bug_report_after_search_failure");
+                string directory = ProjectSettings.GlobalizePath("user://combat-solver-test-bug-reports");
+                string archivePath = await CombatBugReportExporter.ExportCurrentAsync(directory);
+                using ZipArchive archive = ZipFile.OpenRead(archivePath);
+                AssertBugReportArchive(archive, "current", _request.ExpectedBugReportControlMode);
+                _completedChecks.Add($"BugReportAfterSearchFailure:{Path.GetFileName(archivePath)}");
+            }
             _writer.Write(
                 "Failed",
                 _stage,
