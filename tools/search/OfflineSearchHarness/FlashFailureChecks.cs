@@ -188,6 +188,63 @@ internal static class FlashFailureChecks
         }
 
         {
+            // The Smart potion gradient only runs when the root has a searchable potion and the
+            // potion-free primary is not already acceptable. This is the layer where the N15
+            // coordinator evidence emitted FLASH_SEARCH_FAILED while the request still returned a
+            // result; the coordinator must propagate it to the top.
+            if (root.SearchablePotionCount > 0)
+            {
+                List<string> lines = [];
+                SearchPolicySnapshot gradientPolicy = basePolicy with
+                {
+                    FlashMode = FlashSearchMode.On,
+                    PotionPolicy = SolverPotionPolicy.Smart,
+                    PotionStrategy = new PotionStrategySnapshot(SolverPotionPolicy.Smart, []),
+                    FixedBudget = true,
+                    AcceptableBattleHpLoss = -1,
+                    UseBeamWidthPortfolio = false,
+                    UseNoveltyPortfolio = false,
+                    DisableSharedPrimaryIncumbentsForTesting = true,
+                    Diagnostics = new SearchDiagnosticsSink(
+                        message => { lock (lines) lines.Add(message); }, static _ => { }),
+                    Profile = basePolicy.Profile with
+                    {
+                        BeamWidth = 24,
+                        MaxExpandedNodes = 12_000,
+                        SoftTimeBudgetMilliseconds = 6_000,
+                    },
+                };
+                bool threw = false;
+                FlashFailureInjectionForTesting.Arm(
+                    FlashFailureInjection.VerificationMismatch,
+                    DirectSearchPurpose.SmartPotionGradient);
+                try
+                {
+                    CombatSearchCoordinator.Solve(root, names, damage, gradientPolicy,
+                        CancellationToken.None, progressCallback: null);
+                }
+                catch (FlashSearchFailedException failure)
+                {
+                    threw = true;
+                    Require(failure.Reason == FlashSearchFailureReason.VerifyMismatch,
+                        $"gradient-failure: reason={failure.Reason}");
+                    Require(failure.Detail.Contains("FLASH_VERIFY_MISMATCH", StringComparison.Ordinal),
+                        $"gradient-failure: detail={failure.Detail}");
+                }
+                finally
+                {
+                    FlashFailureInjectionForTesting.Reset();
+                }
+                Require(threw,
+                    "gradient-failure: coordinator swallowed FlashSearchFailedException from SmartPotionGradient; diagnostics="
+                    + string.Join(" | ", lines.Take(12)));
+                Require(lines.Count(line => line.Contains("FLASH_SEARCH_FAILED", StringComparison.Ordinal)) == 1,
+                    $"gradient-failure: expected one FLASH_SEARCH_FAILED, got {lines.Count}");
+            }
+        }
+
+        if (root.SearchablePotionCount == 0)
+        {
             Require(root.SearchablePotionCount == 0,
                 "potion-no-route: the fixture root must not carry searchable potions");
             List<string> lines = Capture(out SearchPolicySnapshot policy);

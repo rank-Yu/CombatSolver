@@ -191,8 +191,25 @@ internal static class FlashRulesCompiler
         builder.RootLostHpMask = rootLostHpMask;
         List<ushort> spawnClosure = SpawnClosure(known);
         builder.HasInfiniteHpDisplayMonster = HasInfiniteHpDisplayMonster(known, spawnClosure);
+        // Detached power state (Nightmare's selected clone, Swipe's stolen card) can reference a card
+        // that no longer lives in any combat pile: a Power card leaves combat when played, and a stolen
+        // card is removed. A continuation root still imports that value into FlashBattle.DetachedCards,
+        // so its stats and generated-card closure must be in the rule table even when no pile holds it.
+        List<(string CardId, int Upgrade)> detachedCards = [];
+        foreach (PowerModel power in contentCombat.EffectivePowers())
+        {
+            if (power is NightmarePower nightmare)
+            {
+                if (contentCombat.NightmareSelectionForFlash(nightmare) is { } selected)
+                    detachedCards.Add((selected.Preview.Id.Entry, selected.Preview.CurrentUpgradeLevel));
+            }
+            else if (power is SwipePower { StolenCard: { } stolen })
+            {
+                detachedCards.Add((stolen.Id.Entry, stolen.CurrentUpgradeLevel));
+            }
+        }
         AddGeneratedCardClosure(builder, contentSimulator ?? simulator, contentCombat, combat,
-            player, spawnClosure);
+            player, spawnClosure, detachedCards);
         builder.RootEnemyCount = known.Count;
         builder.HasEncounter = combat.Encounter != null;
         builder.EncounterSlots = combat.EncounterSlotsForFlash.ToArray();
@@ -406,12 +423,18 @@ internal static class FlashRulesCompiler
     /// </summary>
     private static void AddGeneratedCardClosure(FlashRulesBuilder builder,
         CombatPredictionSimulator contentSimulator, SimulatedCombatState contentCombat,
-        SimulatedCombatState rootCombat, Player player, IReadOnlyList<ushort> spawnClosure)
+        SimulatedCombatState rootCombat, Player player, IReadOnlyList<ushort> spawnClosure,
+        IReadOnlyList<(string CardId, int Upgrade)> detachedCards)
     {
         Queue<(string CardId, int Upgrade)> pendingCards = new();
         Queue<string> pendingPools = new();
         Queue<string> pendingPowers = new();
         HashSet<(string, int)> seenCards = [];
+        foreach ((string cardId, int upgrade) in detachedCards)
+        {
+            if (seenCards.Add((cardId, upgrade)))
+                pendingCards.Enqueue((cardId, upgrade));
+        }
         HashSet<string> seenPools = new(StringComparer.Ordinal);
         HashSet<string> seenPowerDefs = new(StringComparer.Ordinal);
         HashSet<ushort> seenPotionDefs = [];

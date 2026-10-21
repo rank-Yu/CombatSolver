@@ -24,7 +24,7 @@
 # Release 模组 + OfflineSearchHarness + K0 纯内核合同
 python3 -B tools/search/FlashRegression/flash_regression.py build
 
-# 全量差分回归（493 根，默认 4 并发；输出 .local/flash-regression/diff）
+# 全量差分回归（600 根，默认 4 并发；输出 .local/flash-regression/diff）
 python3 -B tools/search/FlashRegression/flash_regression.py diff --label diff --walks 32
 
 # 只跑一个固定根和一个牌组
@@ -64,11 +64,13 @@ K1 单步穷举与 K2 随机游走的差分回归。根集合与旧 `regress.sh`
 | --- | --- | --- |
 | 自然遭遇 | 156 | 五个角色的初始牌组、三幕已实现遭遇的 `FLASHM1`/`FLASHM2`（铁甲战士另有 `FLASH1`） |
 | 第三幕首领 | 6 | `AEONGLASS_BOSS`、`QUEEN_BOSS`、`TEST_SUBJECT_BOSS`，`--act-index 2` |
-| 固定根 | 267 | `coverage/fixtures/cards/flash-*.json` |
+| 固定根 | 274 | `coverage/fixtures/cards/flash-*.json` |
 | 生成牌组 | 64 | `coverage/corpora/flash-decks/*/request.json` |
+| 质量语料（默认包含） | 100 | `coverage/corpora/flash-quality/*/request.json`；默认每根 48 条游走 |
 | 第三幕语料（可选） | 150 | `--include-act3` 或 `--only act3`；默认每根 48 条游走 |
 
-完整默认集合为 493 根；加入第三幕语料后为 643 根。每根运行
+完整默认集合为 600 根；加入第三幕语料后为 750 根。`--only all`（默认）已经包含
+`coverage/corpora/flash-quality` 的 100 根；`--only quality` 只跑这组质量语料。每根运行
 `OFFLINE_HARNESS_FLASH_DIFF=1 OFFLINE_HARNESS_FLASH_DIFF_WALKS=<walks>`，单根超时 600 秒，
 结果写入 `<out>/<root>/`。`SUMMARY.txt` 每行是
 `<root> exit=<code> <flash-diff.txt 首行>`，末行 `DONE`。`--baseline previous/SUMMARY.txt`

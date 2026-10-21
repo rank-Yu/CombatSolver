@@ -178,7 +178,7 @@ def resolve_roots(args: argparse.Namespace) -> list[Root]:
         roots += deck_roots(args.walks)
     if only == 'act3' or args.include_act3:
         roots += act3_roots(args.act3_walks)
-    if only == 'quality' or args.include_quality:
+    if only in ('all', 'quality'):
         roots += quality_roots(args.act3_walks)
     shards = max(1, args.shards)
     for root in roots:
@@ -266,12 +266,20 @@ def harness_command(harness: Path, root: Root, outdir: Path, *, dotnet: str = DO
     return command
 
 
+def fresh_dir(path: Path) -> Path:
+    """Recreate a per-root output directory. The harness appends one log folder per process, so a reused
+    directory would mix an earlier run's diagnostics into this run's evidence."""
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True)
+    return path
+
+
 def run_roots(roots: list[Root], out: Path, jobs: int, command_for, *, env_for, timeout: float) -> list[str]:
     results: dict[str, str] = {}
 
     def work(root: Root) -> tuple[str, str]:
-        outdir = out / root.name
-        outdir.mkdir(parents=True, exist_ok=True)
+        outdir = fresh_dir(out / root.name)
         env = env_for(root)
         code = run_command(command_for(root, outdir), cwd=ROOT, env=env, timeout=timeout,
                            log=outdir / 'stdout.txt')
@@ -379,11 +387,9 @@ def output_dir(args: argparse.Namespace, suffix: str) -> Path:
 
 def add_root_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--walks', type=int, default=32, help='random walks per root (default 32)')
-    parser.add_argument('--act3-walks', type=int, default=48, help='walks for --include-act3/--include-quality roots (default 48)')
+    parser.add_argument('--act3-walks', type=int, default=48, help='walks for act3 and quality roots (default 48)')
     parser.add_argument('--only', choices=('all', 'encounters', 'fixtures', 'decks', 'act3', 'quality'), default='all')
     parser.add_argument('--include-act3', action='store_true', help='add coverage/corpora/flash-act3')
-    parser.add_argument('--include-quality', action='store_true',
-                        help='add coverage/corpora/flash-quality (walks from --act3-walks)')
     parser.add_argument('--shards', type=int, default=1, help='split roots into this many shards')
     parser.add_argument('--shard', type=int, default=None, help='run only this shard (0-based)')
     parser.add_argument('--root', action='append', default=[], help='substring/name filter; repeatable')
@@ -484,8 +490,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     started = time.time()
 
     def work(root: Root) -> tuple[str, str]:
-        outdir = out / root.name
-        outdir.mkdir(parents=True, exist_ok=True)
+        outdir = fresh_dir(out / root.name)
         code = run_command(command(root, outdir), cwd=ROOT, env=env_for(root), timeout=300,
                            log=outdir / 'stdout.txt')
         return root.name, f'{root.name} exit={code} {scan_row(outdir / "harness-result.json")}'
@@ -645,8 +650,7 @@ def cmd_coordinator(args: argparse.Namespace) -> int:
     started = time.time()
 
     def run_one(name: str, request: Path, mode: str) -> None:
-        outdir = out / name / mode
-        outdir.mkdir(parents=True, exist_ok=True)
+        outdir = fresh_dir(out / name / mode)
         command = [args.dotnet, str(args.harness), '--request', str(request), '--milestone', 'M2',
                    '--search-mode', 'Coordinator', '--use-portfolio', '--profile', 'Medium',
                    '--budget-ms', str(args.budget_ms), '--out', str(outdir)]

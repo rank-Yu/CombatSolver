@@ -399,7 +399,7 @@ internal static class BeamSolveDispatch
     {
         try
         {
-            if (TakeInjectedAttempt() is { } injected)
+            if (TakeInjectedAttempt(request.Purpose) is { } injected)
                 return injected;
             FlashSolveOutcome outcome = FlashRouteMaterializer.Solve(
                 request.Root,
@@ -443,9 +443,9 @@ internal static class BeamSolveDispatch
     /// Test-only single-shot fault. It throws the real exception types inside the same try block as a
     /// real Flash solve so the production catch/mapping paths are what the contract exercises.
     /// </summary>
-    private static FlashAttempt? TakeInjectedAttempt()
+    private static FlashAttempt? TakeInjectedAttempt(DirectSearchPurpose? purpose = null)
     {
-        FlashFailureInjection injection = FlashFailureInjectionForTesting.Take();
+        FlashFailureInjection injection = FlashFailureInjectionForTesting.Take(purpose);
         if (injection == FlashFailureInjection.PotionPolicyMismatch)
         {
             const string detail = "route-minimum-potions explicit_uses=0 minimum=1";

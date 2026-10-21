@@ -31,13 +31,27 @@ internal enum FlashFailureInjection
 internal static class FlashFailureInjectionForTesting
 {
     private static int _next;
+    private static int _purpose = -1;
 
-    internal static void Arm(FlashFailureInjection injection)
-        => Interlocked.Exchange(ref _next, (int)injection);
+    internal static void Arm(FlashFailureInjection injection, DirectSearchPurpose? purpose = null)
+    {
+        Volatile.Write(ref _purpose, purpose is { } value ? (int)value : -1);
+        Interlocked.Exchange(ref _next, (int)injection);
+    }
 
-    /// <summary>Reads and clears the armed injection.</summary>
-    internal static FlashFailureInjection Take()
-        => (FlashFailureInjection)Interlocked.Exchange(ref _next, (int)FlashFailureInjection.None);
+    /// <summary>Reads and clears the armed injection when its optional purpose matches.</summary>
+    internal static FlashFailureInjection Take(DirectSearchPurpose? purpose = null)
+    {
+        int expected = Volatile.Read(ref _purpose);
+        if (expected >= 0 && (purpose is not { } actual || expected != (int)actual))
+            return FlashFailureInjection.None;
+        Volatile.Write(ref _purpose, -1);
+        return (FlashFailureInjection)Interlocked.Exchange(ref _next, (int)FlashFailureInjection.None);
+    }
 
-    internal static void Reset() => Interlocked.Exchange(ref _next, (int)FlashFailureInjection.None);
+    internal static void Reset()
+    {
+        Volatile.Write(ref _purpose, -1);
+        Interlocked.Exchange(ref _next, (int)FlashFailureInjection.None);
+    }
 }
