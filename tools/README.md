@@ -8,7 +8,7 @@
 | [release](release/) | `publish-release.ps1`：渠道发布；[WorkshopMetadata](release/WorkshopMetadata/README.md)：工坊标题与介绍成对维护；连接元数据与夸克包检查 |
 | [testing](testing/) | 无人启动、实例所有权、矩阵及 `checks/` 中的生产回归检查 |
 | [replay](replay/) | 检查点批量恢复、CheckpointTool、常驻会话及开发监控 |
-| [search](search/) | 离线宿主、固定根语料、生成场景、排序与组合模型分析 |
+| [search](search/) | 离线宿主、固定根语料、生成场景、排序与组合模型分析、Flash 批量回归（[FlashRegression](search/FlashRegression/README.md)） |
 | [performance](performance/) | trace 分析、录制、固定条件 A/B、GC 启动配置 |
 | [inspection](inspection/) | 覆盖目录、原版调用扫描、本地化、代码审计及结构检查 |
 | [community](community/) | 问题归类、代表包导出与清理、认领同步 |

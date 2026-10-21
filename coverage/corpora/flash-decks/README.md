@@ -1,12 +1,12 @@
 # 生成牌组语料
 
-本目录保存 `.local/tool-tasks/flash-search/deck-survey.sh` 生成、经 Flash 准入并在 48 条随机游走上做过严格差分的各角色中期牌组。每个子目录是一份 `spec.json` + `request.json`，`request.json` 的 `generatedScenarioPath` 指向本目录内的规格。
+本目录保存按 `tools/search/FlashRegression/flash_regression.py survey` 口径生成、经 Flash 准入并在 48 条随机游走上做过严格差分的各角色中期牌组。每个子目录是一份 `spec.json` + `request.json`，`request.json` 的 `generatedScenarioPath` 指向本目录内的规格。
 
-- 来源：`deck-survey.sh` 对 `FLASH-DECK-IRONCLAD-<NN>` 种子生成；每个场景固定进阶 10、`includeStartingDeck`/`includeStartingRelics`/`includeAscendersBane` 为真，`characterCards.count = 6 + (i % 7)`、`colorlessCards.count = i % 3`、`relics.count = 2 + (i % 4)`、`potions.count = i % 3`，按 `i % 2` 选第一/二幕、按 `i % 3` 选普通/精英/首领。
+- 来源：`flash_regression.py survey` 对 `FLASH-DECK-IRONCLAD-<NN>` 种子生成；每个场景固定进阶 10、`includeStartingDeck`/`includeStartingRelics`/`includeAscendersBane` 为真，`characterCards.count = 6 + (i % 7)`、`colorlessCards.count = i % 3`、`relics.count = 2 + (i % 4)`、`potions.count = i % 3`，按 `i % 2` 选第一/二幕、按 `i % 3` 选普通/精英/首领。
 - 收录范围：`deck-ironclad4` 调查中准入的 32 个牌组，加上任务表保留的 `IRONCLAD-46`（SecondWind 与 BurningSticks 回归）；它在本目录建立时尚未生成旧调查的 `flash-diff.txt`，修复后已与其余牌组同样准入。
-- 用途：`.local/tool-tasks/flash-search/regress.sh` 对每个 `request.json` 跑 32 条随机游走的 K1/K2/K4/K5 差分；这是固定根之外的内容组合回归，不替代 `coverage/fixtures/` 的单机制 fixture。
+- 用途：`flash_regression.py diff --only decks` 对每个 `request.json` 跑 32 条随机游走的 K1/K2/K4/K5 差分；这是固定根之外的内容组合回归，不替代 `coverage/fixtures/` 的单机制 fixture。
 - 复跑：`OFFLINE_HARNESS_FLASH_DIFF=1 OFFLINE_HARNESS_FLASH_DIFF_WALKS=32 dotnet <OfflineSearchHarness.dll> --request coverage/corpora/flash-decks/<ID>/request.json --milestone M1 --out <输出目录>`。
-- 记录：结果写入 `.local/`；本目录只保留输入。新增或替换牌组时同步 `request.json` 内的仓库相对路径。
+- 记录：结果写入 `.local/flash-regression/`；本目录只保留输入。新增或替换牌组时同步 `request.json` 内的仓库相对路径。
 - 边界：`IRONCLAD-02` 与 `IRONCLAD-18` 含 Thrash；它的 `ModifyDamage` 小数结果在现有引擎里写入卡牌 `DynamicVars.Damage`，Flash 的整数卡牌变量无法精确表示，差分汇总会把该路径记作 `unsupported`，不是分歧。其余牌组在 32 条游走上为零差异。
 
 ## 多角色补充（LS 批次）
@@ -18,7 +18,7 @@ LS 批次在 `ls-silent-v4`、`ls-necrobinder-v3`、`ls-defect-v3` 三份随机�
 - `DEFECT-05/08/19/26/27/28`：五个是 LS 修复根（Scrape 重复牌弃置、Slippery 的 `AmountOnTurnStart`、MiniatureCannon/HandOfGreed 致命判定、Plasma 球评估、Omnislice 召唤死亡顺序），`DEFECT-19` 覆盖 EssenceOfDarkness。
 - `REGENT-07`：既有储君准入组合，保持跨角色覆盖。
 
-这些牌组与铁甲战士语料使用同一 `request.json` 格式；全量回归对每个请求跑 32 条随机游走，LS 批次另外对三份调查中全部准入牌组跑过 48 条游走（见 `.local/tool-tasks/flash-search/LS-report.md`）。
+这些牌组与铁甲战士语料使用同一 `request.json` 格式；全量回归对每个请求跑 32 条随机游走，LS 批次另外对三份调查中全部准入牌组跑过 48 条游走（归档见 [覆盖补齐与协调器接管批次测试记录](../../../docs/archive/flash-search/testing-batches-2026-10-20.md)）。
 
 ## 铁甲战士之外的角色（CX 批次）
 
@@ -32,7 +32,7 @@ CX 批次对五个角色各跑了一次同格式调查（`cx0-*` 为改动前，
 
 ## 第三幕随机牌组（DX3 批次）
 
-DX3 批次用 `ACT_OVERRIDE=2 deck-survey.sh act3-<角色> <角色> 30` 为五个角色各生成 30 个第三幕牌组（`actIndex = 2`，普通/精英/首领），并用 48 条随机游走对 150 个根做差分。修复前有 33 个根不干净：16 个因 Dampen 把升级牌降为 0 级后规则表缺少基础等级而报 `UnsupportedClosure`，其余是下列内核语义分歧。修复后 150 个根除第三幕首领的 `score=rejected`（A3B 批次负责 `Act3BossStrategy` 评估移植）外全部零差异。
+DX3 批次用 `flash_regression.py survey --act 2` 的口径为五个角色各生成 30 个第三幕牌组（`actIndex = 2`，普通/精英/首领），并用 48 条随机游走对 150 个根做差分。修复前有 33 个根不干净：16 个因 Dampen 把升级牌降为 0 级后规则表缺少基础等级而报 `UnsupportedClosure`，其余是下列内核语义分歧。修复后 150 个根除第三幕首领的 `score=rejected`（A3B 批次负责 `Act3BossStrategy` 评估移植）外全部零差异。
 
 新增代表牌组（每个角色 2 个，48 条游走 K1/K2/K4/K5 零差异，`unsupported=0`）：
 
@@ -42,7 +42,7 @@ DX3 批次用 `ACT_OVERRIDE=2 deck-survey.sh act3-<角色> <角色> 30` 为五�
 - `REGENT-00`（普通）：Living Shield 离场后 RampartPower 仍给 Turret Operator 格挡；`REGENT-02`（首领）：ChainsOfBindingPower 对克隆牌的束缚标记。
 - `SILENT-23`（首领）：Envenom/不宁提灯/蛇骷髅的施加来源（`cardSource: null` 不翻倍）；`SILENT-29`（首领）：Vambrace 在 Sly 嵌套自动打出后的锁存。
 
-这些牌组与既有语料使用同一 `request.json` 格式；`regress.sh` 对每个请求跑 K1/K2/K4/K5 差分。
+这些牌组与既有语料使用同一 `request.json` 格式；`flash_regression.py diff --only decks` 对每个请求跑 K1/K2/K4/K5 差分。
 
 ## 评估杂质与 HexPower（K4C 批次）
 

@@ -1,13 +1,13 @@
 ---
 name: flash-search
-description: 修改 Flash 搜索后端：src/Engine/InCombat/Flash 内核与内容定义、src/Search/FlashBeam 的准入/导入/搜索/物化、BeamSolveDispatch 与 Flash 模式，以及 Flash 差分测试。
+description: 修改 Flash 搜索后端：src/Engine/InCombat/Flash 内核与内容定义、src/Search/FlashBeam 的准入/导入/搜索/物化、BeamSolveDispatch 与 Flash 模式，以及 Flash 差分测试与批量回归。
 ---
 
 # Flash 搜索后端
 
 ## 适用边界
 
-先读 [Flash 入口](../../../docs/flash-search/README.md) 和与任务相关的子文档。Flash 是受校验的派生实现，语义权威是现有引擎：
+先读 [Flash 入口](../../../docs/flash-search/README.md) 和与任务相关的子文档；批量回归入口见 [Flash 回归工具](../../../tools/search/FlashRegression/README.md)。Flash 是受校验的派生实现，语义权威是现有引擎：
 
 - Flash 与现有引擎不一致时，修 Flash。
 - 发现现有引擎与原版不一致时，停下来转 `combat-semantic-change` 修现有引擎，Flash 再跟随；不要让 Flash "更正确"。
@@ -34,7 +34,8 @@ description: 修改 Flash 搜索后端：src/Engine/InCombat/Flash 内核与内�
 ## 验证
 
 - 纯内核：编译并运行 `tools/testing/checks/FlashKernelChecks/`。
-- 差分：先构建模组与离线搜索宿主，再设置 `OFFLINE_HARNESS_FLASH_DIFF=1` 运行宿主到 `--milestone M1`，对相关根跑单步穷举与随机游走，要求 `flash-diff.txt` 首行 `failed=0 walkFailed=0`。完整命令见 [Flash 测试记录](../../../docs/flash-search/testing.md)。
+- 差分：`python3 -B tools/search/FlashRegression/flash_regression.py diff --label <标签> --only fixtures --root <fixture>`（或 `--only decks --root <牌组>`），工具负责 Release 构建、离线宿主与 K0，并运行到 `--milestone M1`；要求 `flash-diff.txt` 首行 `failed=0 walkFailed=0`。全量根集合用 `diff --walks 32`，第三幕语料用 `--only act3`。
+- 批量回归：`scan`（候选路线扫描）、`bench`（48 根基准）与 `coordinator`（79 根 Off/On 对照）同样经该入口；口径、输出与验收条件见 [Flash 回归工具](../../../tools/search/FlashRegression/README.md)。直接设置 `OFFLINE_HARNESS_FLASH_DIFF=1` 只用于调试单根。
 - 结构门禁：`./tools/inspection/verify-refactor-boundaries.sh`（Windows 用同名 `.ps1`）。
 - 文档改动：`python3 -B tools/inspection/verify-documentation.py`。
 
