@@ -1,6 +1,6 @@
 ---
 name: flash-search
-description: 修改 Flash 搜索后端：src/Engine/InCombat/Flash 内核与内容定义、src/Search/FlashBeam 的准入/导入/搜索/物化、BeamSolveDispatch 与 Flash 模式，以及 Flash 差分测试与批量回归。
+description: 修改 Flash 搜索后端：src/Flash 的内核与内容定义（Kernel/Content）、准入/导入/搜索/物化（Search/Bridge）、BeamSolveDispatch 与 Flash 模式，以及 Flash 差分测试与批量回归。
 ---
 
 # Flash 搜索后端
@@ -15,7 +15,7 @@ description: 修改 Flash 搜索后端：src/Engine/InCombat/Flash 内核与内�
 
 ## 硬约束
 
-- 内核（`src/Engine/InCombat/Flash/`）只依赖 BCL：不写 `using MegaCrit`、`using Godot`、`using HarmonyLib`，不引用 `CombatSolver.*` 其他命名空间。
+- 内核与内容（`src/Flash/Kernel/`、`src/Flash/Content/`）只依赖 BCL：不写 `using MegaCrit`、`using Godot`、`using HarmonyLib`，不引用 `CombatSolver.*` 其他命名空间。
 - 内核热路径不分配托管对象：不用 LINQ、`List<T>`、闭包、装箱、字符串拼接、`params` 数组。临时数据用 `stackalloc` 或 `FlashBattle` 内的槽位。
 - 内容定义无字段状态；可变值只存在 `FlashBattle`。
 - 原版数据里已有的数值从 `FlashRules` 读取，不硬编码；原版代码中的常量写进定义时注释出处（反编译文件路径与方法名）。

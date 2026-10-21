@@ -1,8 +1,10 @@
-using CombatSolver.Engine.InCombat.Flash;
+using CombatSolver.Flash.Kernel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
-using CombatSolver.FlashBeam;
+using CombatSolver.Flash.Search;
+using CombatSolver.Flash.Search.Scoring;
+using CombatSolver.Flash.Bridge;
 using MegaCrit.Sts2.Core.Combat;
 
 namespace CombatSolver;

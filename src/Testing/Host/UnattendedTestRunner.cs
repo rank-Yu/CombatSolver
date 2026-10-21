@@ -34,6 +34,7 @@ using MegaCrit.Sts2.Core.ValueProps;
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Mirrors.Orbs;
 using CombatSolver.Engine.InCombat.Simulation;
+using CombatSolver.Flash.Bridge;
 
 namespace CombatSolver;
 

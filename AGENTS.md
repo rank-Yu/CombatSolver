@@ -38,7 +38,7 @@ CombatSolver 是《杀戮尖塔 2》的单人战斗路线求解器 Mod，使用 
 - 批量回放“找到更优世界线”报告、筛选有效策略缺口并做小批次策略迭代：`.agents/skills/strategy-replay-iteration/SKILL.md`。
 - 卡牌、Power、遗物、药水、球、怪物、死亡/召唤、选牌、RNG、Fork 或跨回合语义：`.agents/skills/combat-semantic-change/SKILL.md`。
 - Beam、评分、剪枝、Pareto、转置、预算、分配、GC 或实机卡顿：`.agents/skills/search-performance-optimization/SKILL.md`。
-- Flash 搜索后端（`src/Engine/InCombat/Flash/`、`src/Search/FlashBeam/`、`BeamSolveDispatch`、Flash 批量回归工具 `tools/search/FlashRegression/`）：`.agents/skills/flash-search/SKILL.md`。
+- Flash 搜索后端（`src/Flash/`、`BeamSolveDispatch`、Flash 批量回归工具 `tools/search/FlashRegression/`）：`.agents/skills/flash-search/SKILL.md`。
 - Search/Runtime/UI/Testing/registry 的职责迁移、结构拆分和依赖边界：`.agents/skills/architecture-boundary-refactor/SKILL.md`。
 - 玩家可见 UI 文案、胶囊附加信息和中英本地化：`.agents/skills/ui-localization/SKILL.md`；新增文案同时维护中文与英文。
 - 版本提升、发布 ZIP、版本标签、创意工坊上传、GitHub 同步、干净安装或“可发布”结论：`.agents/skills/release-gate/SKILL.md`。
@@ -100,7 +100,7 @@ CombatSolver 是《杀戮尖塔 2》的单人战斗路线求解器 Mod，使用 
 - gameplay mod subscriber 在主线程分段捕获。已适配来源消费根/分支状态；未知 gameplay subscriber 显式拒绝，不浅拷贝 live 所有权。
 - Search 不得引用 `SolverSettings.Current`、`Entry.Logger`、`SolverController`、UI 或无人测试 runner；通过 `SearchPolicySnapshot`、`SearchDiagnosticsSink` 和 `SearchFramePressureSignal` 注入。
 - 同一战斗语义只能有一个权威实现。新增效果前沿完整调用链检查 mirror、spec、support 与 `SimulatedCombatState`，避免双结算。
-- Flash 内核（`src/Engine/InCombat/Flash/`）是受校验的派生实现，不是第二个权威：语义以现有引擎为准，每项语义必须通过与现有引擎的严格差分；Flash 搜出的路线部署前由现有引擎从同一根完整回放核对。两者不一致时修正 Flash；现有引擎与原版不一致时先修现有引擎，Flash 再跟随。
+- Flash 内核（`src/Flash/Kernel/` 与 `src/Flash/Content/`）是受校验的派生实现，不是第二个权威：语义以现有引擎为准，每项语义必须通过与现有引擎的严格差分；Flash 搜出的路线部署前由现有引擎从同一根完整回放核对。两者不一致时修正 Flash；现有引擎与原版不一致时先修现有引擎，Flash 再跟随。
 
 ## 7. 错误处理
 

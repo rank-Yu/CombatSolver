@@ -15,6 +15,7 @@ using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Settings;
+using CombatSolver.Flash.Bridge;
 
 namespace CombatSolver;
 

@@ -52,9 +52,7 @@
 | `Probes/SearchEvaluator.cs` | 原搜索与探针共用的状态评分、指纹与威胁投影；不持有搜索前沿 |
 | `PrimaryIncumbentTable` / `ResourceIncumbentPolicy` | 同根同政策的资源桶见证、未来收益上界与认证回退 |
 | `BeamSolveDispatch` | 协调器主搜索成员与固定前缀续接的后端分发（Off/Shadow/On）与 Shadow 隔离。Off/Shadow 的现有侧构造原求解器；On 只跑 Flash，只有 `flash-potion-policy-no-route` 返回 `PotionPolicyUnsatisfiedException`；物化后两侧药水约束不一致（`potion-policy-mismatch`）、准入/容量/内核/核对/根阶段/开发策略拒绝写稳定 `FLASH_SEARCH_FAILED` 事件并抛 `FlashSearchFailedException`，不回落 |
-| `FlashSearchFailure.cs` | 开启模式专属的稳定失败类别、`FLASH_SEARCH_FAILED` 事件与 `FlashSearchFailedException`；只经 `SearchDiagnosticsSink` 与搜索任务异常上报 |
-| `FlashBeam/Bridge/` / `CardChoiceSupport.Flash.cs` | Flash 准入、规则编译、旧引擎状态投影、动作与选择翻译、固定前缀回放；桥接与物化只依赖 `SearchReplayCore`、`OpeningProbe` 与 `SearchRouteMaterializer`（[Flash 规格](flash-search/README.md)） |
-| `FlashBeam/FlashBeamSolver.cs` / `FlashBeam/Scoring/` | FlashBeam 搜索；从 `FlashBattle` 计算的状态评估（移植 `Snapshot` 与 `BeamRankScore`，逐内容数值表由 `Bridge/FlashScoreBridge` 在根上编译），Scoring 不引用原版模型类型；搜索中的进度、接管、取消与工作量记账在 `FlashBeamSolver.Progress.cs` 与 `Bridge/FlashRouteMaterializer.Progress.cs` |
+| `CardChoiceSupport.Flash.cs` / `CombatBeamSolver.Flash.cs` / `SimulatedCombatState.FlashProjection.cs` / `StrategicHpRecoveryBound.Flash.cs` | 原搜索类给 Flash 桥接开放的读取接口：分部文件，用到原类的私有成员，随原类维护；协调器只经 `BeamSolveDispatch` 进入 [Flash 模块](#flash-模块srcflash) |
 
 Flash 的批量回归入口在 `tools/search/FlashRegression/`：全量差分、候选扫描、100 根协调器 Off/On 质量对照与牌组生成都调用 `OfflineSearchHarness`，不进入生产搜索路径；用法见 [工具入口](../tools/README.md) 与 [回归工具](../tools/search/FlashRegression/README.md)。
 
@@ -80,6 +78,19 @@ Flash 的批量回归入口在 `tools/search/FlashRegression/`：全量差分、
 
 Smart 药水梯度在主成员耗尽时间时拥有一个独立成员时间：仅对无强制指令、无显式用药的完整搜索结果和可搜索药水启用，首个可选层使用软预算的 1/5（1–30 秒）及 1/6 收尾窗口。梯度显式限制层数；后置开局前缀仍按请求账本准入。该成员的工作进入原请求总账本。
 
+### Flash 模块（src/Flash）
+
+可选的 Flash 搜索后端，依赖方向为 `Bridge → Search → Kernel/Content`；目录规则见 `src/Flash/AGENTS.md`，规格见 [Flash 入口](flash-search/README.md)。
+
+| 位置 | 命名空间 | 职责 |
+| --- | --- | --- |
+| `src/Flash/Kernel/` | `CombatSolver.Flash.Kernel` | 结构体状态 `FlashBattle`、回合与出牌管线、伤害/格挡/Power 结算、Hook 派发、选择协议、规则表；只依赖 BCL，语义镜像现有引擎，是逐项差分校验的派生实现 |
+| `src/Flash/Content/` | `CombatSolver.Flash.Content.*` | 卡牌、Power、遗物、药水、球、附魔与怪物定义；只依赖 BCL 与内核 |
+| `src/Flash/Search/` | `CombatSolver.Flash.Search` | FlashBeam 搜索；从 `FlashBattle` 计算的状态评估（移植 `Snapshot` 与 `BeamRankScore`，逐内容数值表由 `Bridge/FlashScoreBridge` 在根上编译），Scoring 不引用原版模型类型；搜索中的进度、接管、取消与工作量记账在 `FlashBeamSolver.Progress.cs` 与 `Bridge/FlashRouteMaterializer.Progress.cs` |
+| `src/Flash/Bridge/` | `CombatSolver.Flash.Bridge` | 准入、规则编译、旧引擎状态投影、动作与选择翻译、固定前缀回放、部署前逐步核对与物化（只依赖 `SearchReplayCore`、`OpeningProbe` 与 `SearchRouteMaterializer`）；`FlashSearchFailure.cs` 是开启模式专属的稳定失败类别、`FLASH_SEARCH_FAILED` 事件与 `FlashSearchFailedException`，只经 `SearchDiagnosticsSink` 与搜索任务异常上报 |
+
+`Search/` 与 `Bridge/` 遵守 Search 层规则（结构门禁把它们计入 Search 文件），且不引用 `CombatBeamSolver`、`BeamSolveDispatch` 或协调器；`Kernel/` 与 `Content/` 只依赖 BCL。
+
 ## 4. 模拟与 Prediction
 
 | 位置 | 职责 |
@@ -88,7 +99,6 @@ Smart 药水梯度在主成员耗尽时间时拥有一个独立成员时间：�
 | `src/Engine/InCombat/Mirrors/` | 原版 Hook / Model 方法镜像 |
 | `MethodMirrorRegistryDescriptor` | 向 CoverageCatalog 暴露 registry 支持元数据 |
 | `src/Prediction/` | 怪物 AI、隐藏状态、生命周期、死亡/召唤、选择与 subscriber 捕获 |
-| `src/Engine/InCombat/Flash/` | 可选 Flash 后端的纯内核与内容定义，只依赖 BCL，语义镜像现有引擎 |
 
 每项战斗语义只有一个权威结算实现；Flash 内核是逐项差分校验的派生实现，不是第二个权威。可变值由根快照、影子状态、克隆 Model 或 `PredictionStateStore` 持有。一次 Fork 共用 `PredictionForkContext`，引用随同一上下文重映射；COW 取得可写所有者后再写。
 

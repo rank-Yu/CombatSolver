@@ -3,8 +3,10 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using CombatSolver.Engine.InCombat.Simulation;
 using CombatSolver;
-using CombatSolver.Engine.InCombat.Flash;
-using CombatSolver.FlashBeam;
+using CombatSolver.Flash.Kernel;
+using CombatSolver.Flash.Search;
+using CombatSolver.Flash.Search.Scoring;
+using CombatSolver.Flash.Bridge;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Players;
 

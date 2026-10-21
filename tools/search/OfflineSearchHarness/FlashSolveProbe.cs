@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using CombatSolver;
-using CombatSolver.FlashBeam;
+using CombatSolver.Flash.Search;
+using CombatSolver.Flash.Search.Scoring;
+using CombatSolver.Flash.Bridge;
 using MegaCrit.Sts2.Core.Combat;
 
 namespace OfflineSearchHarness;

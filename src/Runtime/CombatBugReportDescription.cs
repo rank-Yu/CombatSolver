@@ -1,4 +1,5 @@
 using System.Text;
+using CombatSolver.Flash.Bridge;
 
 namespace CombatSolver;
 

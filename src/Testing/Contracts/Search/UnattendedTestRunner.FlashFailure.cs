@@ -4,6 +4,7 @@ using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Nodes;
+using CombatSolver.Flash.Bridge;
 
 namespace CombatSolver;
 

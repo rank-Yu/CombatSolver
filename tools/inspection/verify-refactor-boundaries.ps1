@@ -34,11 +34,12 @@ $probeSolverReferences = @(Get-ChildItem -LiteralPath $probeRoot -Filter '*.cs' 
 if ($probeSolverReferences.Count -gt 0) {
     $violations.Add('Opening probes must not reference CombatBeamSolver')
 }
-$flashRoot = Join-Path $searchRoot 'FlashBeam'
-$flashSolverReferences = @(Get-ChildItem -LiteralPath $flashRoot -Filter '*.cs' -File -Recurse |
+$flashRoot = Join-Path $repositoryRoot 'src/Flash'
+$flashSearchRoots = @((Join-Path $flashRoot 'Search'), (Join-Path $flashRoot 'Bridge'))
+$flashSolverReferences = @(Get-ChildItem -LiteralPath $flashSearchRoots -Filter '*.cs' -File -Recurse |
     ForEach-Object { Select-String -LiteralPath $_.FullName -SimpleMatch 'CombatBeamSolver' })
 if ($flashSolverReferences.Count -gt 0) {
-    $violations.Add('FlashBeam must not reference CombatBeamSolver')
+    $violations.Add('Flash search and bridge must not reference CombatBeamSolver')
 }
 if (-not (Test-Path -LiteralPath (Join-Path $probeRoot 'OpeningProbe.cs') -PathType Leaf) -or
     -not (Test-Path -LiteralPath (Join-Path $probeRoot 'SearchEvaluator.cs') -PathType Leaf)) {
@@ -80,7 +81,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot 'src/Search/TargetPl
     $violations.Add('Opening target plans are not registered')
 }
 $strategyIdLiteralCount = 0
-foreach ($sourceFile in Get-ChildItem -LiteralPath (Join-Path $repositoryRoot 'src/Search') -Filter '*.cs' -Recurse) {
+foreach ($sourceFile in Get-ChildItem -LiteralPath (@((Join-Path $repositoryRoot 'src/Search')) + $flashSearchRoots) -Filter '*.cs' -Recurse) {
     if ($sourceFile.Name -in @('PotionValuationRegistry.cs', 'OpeningActionRegistry.cs', 'TargetPlanRegistry.cs', 'FlashPowerEvidence.cs')) {
         continue
     }
@@ -556,7 +557,7 @@ foreach ($relativePath in $playerTurnEndCallers) {
         }
     }
 }
-$searchFiles = Get-ChildItem -LiteralPath $searchRoot -Filter *.cs -File -Recurse
+$searchFiles = Get-ChildItem -LiteralPath (@($searchRoot) + $flashSearchRoots) -Filter *.cs -File -Recurse
 $beamFiles = Get-ChildItem -LiteralPath $searchRoot -Filter "CombatBeamSolver*.cs" -File
 $beamPaths = @($beamFiles.FullName)
 $cyclePolicyPaths = @(
@@ -2300,24 +2301,24 @@ foreach ($member in @('private sealed record KnownRoutePrefix(', 'private static
         throw "Missing shared route snapshot helper: $member"
     }
 }
-# Flash kernel: BCL only. FlashBeam: no dispatch or coordinator dependency (Search rules also apply).
-$flashKernelRoot = Join-Path $repositoryRoot 'src/Engine/InCombat/Flash'
-foreach ($file in Get-ChildItem -LiteralPath $flashKernelRoot -Recurse -File -Filter '*.cs' | Sort-Object FullName) {
+# Flash kernel and content: BCL only. Flash search and bridge: Search rules apply ($searchFiles), plus no
+# dispatch or coordinator dependency.
+foreach ($file in Get-ChildItem -LiteralPath @((Join-Path $flashRoot 'Kernel'), (Join-Path $flashRoot 'Content')) -Recurse -File -Filter '*.cs' | Sort-Object FullName) {
     $lineNumber = 0
     foreach ($line in [IO.File]::ReadAllLines($file.FullName)) {
         $lineNumber++
         if ($line -match '^\s*using\s+(static\s+)?(MegaCrit|Godot|HarmonyLib)\b' -or $line -match '\b(MegaCrit|Godot|HarmonyLib)\.[A-Za-z]') {
             throw "$($file.FullName):${lineNumber}: Flash kernel must depend only on the BCL"
         }
-        if ($line -match '^\s*using\s+CombatSolver(;|\.(Search|Runtime|Prediction|UI|Testing|Api|Replay|Diagnostics|Strategy|FlashBeam|Engine\.Common|Engine\.InCombat\.(Simulation|Mirrors|Extensions))\b)') {
+        if ($line -match '^\s*using\s+CombatSolver(;|\.(Search|Runtime|Prediction|UI|Testing|Api|Replay|Diagnostics|Strategy|Engine|Flash\.(Search|Bridge))\b)') {
             throw "$($file.FullName):${lineNumber}: Flash kernel must not reference other CombatSolver namespaces"
         }
     }
 }
-foreach ($file in Get-ChildItem -LiteralPath (Join-Path $searchRoot 'FlashBeam') -Recurse -File -Filter '*.cs' | Sort-Object FullName) {
+foreach ($file in Get-ChildItem -LiteralPath $flashSearchRoots -Recurse -File -Filter '*.cs' | Sort-Object FullName) {
     foreach ($reference in @('BeamSolveDispatch', 'CombatSearchCoordinator')) {
         if (Select-String -LiteralPath $file.FullName -SimpleMatch $reference -Quiet) {
-            throw "$($file.FullName): FlashBeam must not depend on dispatch or the coordinator: $reference"
+            throw "$($file.FullName): Flash search and bridge must not depend on dispatch or the coordinator: $reference"
         }
     }
 }
