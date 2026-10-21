@@ -65,6 +65,7 @@ param(
     [int]$InitialRoundNumber = -1,
     [int]$InitialPlayerTurnNumber = -1,
     [string]$InitialEnemyStateLogsJson = "",
+    [string]$InitialEnemyIntegerMembersJson = "",
     [switch]$ReloadRunRngAfterStateInjection,
     [string]$CardId = "STRIKE_IRONCLAD",
     [string]$PowerId = "",
@@ -820,6 +821,7 @@ $request = [ordered]@{
     initialRoundNumber = if ($InitialRoundNumber -ge 0) { $InitialRoundNumber } else { $null }
     initialPlayerTurnNumber = if ($InitialPlayerTurnNumber -ge 0) { $InitialPlayerTurnNumber } else { $null }
     initialEnemyStateLogs = if ([string]::IsNullOrWhiteSpace($InitialEnemyStateLogsJson)) { @() } else { @($InitialEnemyStateLogsJson | ConvertFrom-Json -NoEnumerate) }
+    initialEnemyIntegerMembers = @()
     reloadRunRngAfterStateInjection = $ReloadRunRngAfterStateInjection.IsPresent
     cards = @()
     runCards = @()
@@ -1011,6 +1013,9 @@ if (-not [string]::IsNullOrWhiteSpace($InitialEnemyBlocksJson)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($InitialEnemyMoveIdsJson)) {
     $request.initialEnemyMoveIds = @($InitialEnemyMoveIdsJson | ConvertFrom-Json)
+}
+if (-not [string]::IsNullOrWhiteSpace($InitialEnemyIntegerMembersJson)) {
+    $request.initialEnemyIntegerMembers = @($InitialEnemyIntegerMembersJson | ConvertFrom-Json)
 }
 if (-not [string]::IsNullOrWhiteSpace($OrbsJson)) {
     $request.orbs = @($OrbsJson | ConvertFrom-Json)

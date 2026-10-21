@@ -65,6 +65,7 @@ internal sealed class UnattendedTestRequest
     public int? InitialRoundNumber { get; init; }
     public int? InitialPlayerTurnNumber { get; init; }
     public string[][] InitialEnemyStateLogs { get; init; } = [];
+    public Dictionary<string, int>[] InitialEnemyIntegerMembers { get; init; } = [];
     public bool ReloadRunRngAfterStateInjection { get; init; }
     public UnattendedCardInjection[] Cards { get; init; } =
     [

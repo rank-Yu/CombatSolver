@@ -1798,13 +1798,15 @@ internal sealed partial class UnattendedTestRunner
             int maximumUnexpectedReplans = 0;
             while (CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsOverOrEnding)
             {
-                // An On-mode Flash refusal stops deployment; report the real category instead of
+                // A failed search stops deployment; report the real category instead of
                 // waiting for the request deadline and losing the failure in a TimeoutException.
-                if (SolverController.LastSearchFailureForTesting is FlashSearchFailedException flashFailure
+                if (SolverController.LastSearchFailureForTesting is { } searchFailure
                     && !SolverController.IsSearching)
                 {
-                    throw new InvalidOperationException(
-                        $"Flash 快速搜索失败：{flashFailure.EventLine}", flashFailure);
+                    string detail = searchFailure is FlashSearchFailedException flashFailure
+                        ? flashFailure.EventLine
+                        : $"{searchFailure.GetType().Name}: {searchFailure.Message}";
+                    throw new InvalidOperationException($"搜索失败：{detail}", searchFailure);
                 }
                 expectedCardPlayed |= runner.WasExpectedCardPlayed();
                 expectedPotionUsed |= runner.WasExpectedPotionUsed();

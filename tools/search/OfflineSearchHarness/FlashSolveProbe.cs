@@ -31,12 +31,18 @@ internal static class FlashSolveProbe
 
         double widthScale = double.TryParse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_WIDTH_SCALE"), out double scale) ? scale : FlashRouteMaterializer.ProfileWidthScale;
         double offensiveShare = double.TryParse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_OFFENSIVE_SHARE"), out double share) ? share : 0.25d;
+        int candidateScan = int.TryParse(
+            Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_CANDIDATE_SCAN"), out int scan) ? scan : 0;
         FlashBeamOptions flashOptions = new(
             (int)(profile.BeamWidth * widthScale),
             (int)(profile.MaxExpandedNodes * widthScale),
             MaxTurns: 64,
             TimeSpan.FromMilliseconds(profile.SoftTimeBudgetMilliseconds),
-            root.InitialPlayerMaxHp) { OffensiveShare = offensiveShare };
+            root.InitialPlayerMaxHp)
+        {
+            OffensiveShare = offensiveShare,
+            CandidateScanCount = Math.Max(0, candidateScan),
+        };
         FlashSolveOutcome flash = default!;
         double flashMs = 0;
         List<double> warmRuns = [];
@@ -75,6 +81,12 @@ internal static class FlashSolveProbe
             return summary;
         }
         summary["flash"] = Describe(flash.Result!, flashMs);
+        summary["flashCandidateScan"] = new
+        {
+            routes = flash.CandidateRoutes,
+            mismatches = flash.CandidateMismatches,
+            details = flash.CandidateMismatchDetails.Take(8).ToArray(),
+        };
         summary["flashSearch"] = new
         {
             flash.Search!.ExpandedNodes,
@@ -92,18 +104,25 @@ internal static class FlashSolveProbe
         return summary;
     }
 
-    private static object Describe(SolverResult result, double wallMs) => new
+    private static object Describe(SolverResult? result, double wallMs)
     {
+        if (result?.Snapshot is null)
+            return new { wallMs, error = "no-result-snapshot" };
+        return new
+        {
         wallMs,
         won = result.Snapshot.AllEnemiesDead && !result.Snapshot.PlayerDead,
         dead = result.Snapshot.PlayerDead,
         playerHp = result.Snapshot.PlayerHp,
         projectedBattleHpLost = result.ProjectedBattleHpLost,
         combatEndedTurn = result.CombatEndedTurn,
-        actions = result.BestNode.ActionCount,
+        actions = result.BestNode?.ActionCount ?? 0,
         boundary = result.BoundaryReason.ToString(),
         expanded = result.ExpandedNodes,
-        route = string.Join(" > ", result.BestNode.Actions.Select(action =>
-            action.Kind == PlanActionKind.EndTurn ? "End" : $"{action.CardId}@{action.TargetIndex}")),
-    };
+        route = result.BestNode == null
+            ? string.Empty
+            : string.Join(" > ", result.BestNode.Actions.Select(action =>
+                action.Kind == PlanActionKind.EndTurn ? "End" : $"{action.CardId}@{action.TargetIndex}")),
+        };
+    }
 }

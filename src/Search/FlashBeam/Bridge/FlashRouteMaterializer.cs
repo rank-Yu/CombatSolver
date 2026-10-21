@@ -29,6 +29,15 @@ internal sealed record FlashSolveOutcome(
     /// existing solver without treating this as the existing search's potion-policy verdict.
     /// </summary>
     public string? ConstraintFailure { get; init; }
+
+    /// <summary>Final candidates replayed by the optional offline scan (0 when disabled).</summary>
+    public int CandidateRoutes { get; init; }
+
+    /// <summary>Final candidates whose existing-engine replay disagreed with Flash.</summary>
+    public int CandidateMismatches { get; init; }
+
+    /// <summary>First difference of each mismatching final candidate.</summary>
+    public IReadOnlyList<string> CandidateMismatchDetails { get; init; } = [];
 }
 
 /// <summary>
@@ -404,7 +413,8 @@ internal static partial class FlashRouteMaterializer
             watch.Restart();
             List<PlanAction> adoptedPlan = VerifyRoute(probe, player, adoptedRoot.Snapshot,
                 battles[search.BestRootIndex], rules, prefix, search.BestRoute,
-                potionUsage.PotionUseCount, ownsStartSnapshot: false);
+                potionUsage.PotionUseCount, ownsStartSnapshot: false,
+                diagnostics: policy.Diagnostics);
             TimeSpan adoptedVerification = watch.Elapsed;
             try
             {
@@ -448,8 +458,40 @@ internal static partial class FlashRouteMaterializer
         // whole plan from the request root and packages it.
         List<PlanAction> plan = VerifyRoute(probe, player, selectedRoot.Snapshot,
             battles[search.BestRootIndex], rules, prefix, search.BestRoute,
-            potionUsage.PotionUseCount, ownsStartSnapshot: false);
+            potionUsage.PotionUseCount, ownsStartSnapshot: false,
+            diagnostics: policy.Diagnostics);
         TimeSpan verification = watch.Elapsed;
+
+        int candidateRoutes = 0, candidateMismatches = 0;
+        List<string> candidateMismatchDetails = [];
+        if (search.TopRoutes.Count > 0)
+        {
+            for (int candidateIndex = 0; candidateIndex < search.TopRoutes.Count; candidateIndex++)
+            {
+                // The final ordering puts the selected route first; it was verified above.
+                if (candidateIndex == 0)
+                    continue;
+                FlashAction[] candidateRoute = search.TopRoutes[candidateIndex];
+                candidateRoutes++;
+                try
+                {
+                    VerifyRoute(probe, player, selectedRoot.Snapshot,
+                        battles[search.BestRootIndex], rules, prefix, candidateRoute,
+                        potionUsage.PotionUseCount, ownsStartSnapshot: false,
+                        diagnostics: policy.Diagnostics);
+                }
+                catch (FlashVerificationException ex)
+                {
+                    candidateMismatches++;
+                    candidateMismatchDetails.Add(ex.Message);
+                }
+                catch (FlashChoiceMismatchException ex)
+                {
+                    candidateMismatches++;
+                    candidateMismatchDetails.Add(ex.Message);
+                }
+            }
+        }
 
         watch.Restart();
         SolverResult result;
@@ -534,7 +576,12 @@ internal static partial class FlashRouteMaterializer
             foreach ((int turns, IReadOnlyList<EarlyTurnFrontierCandidate> candidates) in layers)
                 earlyTurnScoutObserver(turns, candidates);
         }
-        return new FlashSolveOutcome(result, FlashRejection.None, "", search, plan, admission, verification, watch.Elapsed);
+        return new FlashSolveOutcome(result, FlashRejection.None, "", search, plan, admission, verification, watch.Elapsed)
+        {
+            CandidateRoutes = candidateRoutes,
+            CandidateMismatches = candidateMismatches,
+            CandidateMismatchDetails = candidateMismatchDetails,
+        };
     }
 
     /// <summary>

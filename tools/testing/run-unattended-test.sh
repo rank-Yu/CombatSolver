@@ -95,6 +95,7 @@ for name in initial-player-block initial-player-energy initial-player-stars init
     add_option "$name" -1 int nonnegative_int
 done
 add_option initial-enemy-state-logs-json "" string none
+add_option initial-enemy-integer-members-json "" string none
 add_option reload-run-rng-after-state-injection 0 switch bool
 
 add_option card-id "STRIKE_IRONCLAD" string none
@@ -693,6 +694,14 @@ if ! is_blank "${option_value[initial-enemy-state-logs-json]}"; then
         ' <<<"${option_value[initial-enemy-state-logs-json]}")" || \
         runtime_error "--initial-enemy-state-logs-json must be a JSON array of string arrays"
 fi
+initial_enemy_integer_members='[]'
+if ! is_blank "${option_value[initial-enemy-integer-members-json]}"; then
+    initial_enemy_integer_members="$(jq -ce '
+        if type == "array" and all(.[]; type == "object" and all(.[]; type == "number" and . == floor))
+        then . else error("expected an array of objects with integer values") end
+        ' <<<"${option_value[initial-enemy-integer-members-json]}")" || \
+        runtime_error "--initial-enemy-integer-members-json must be a JSON array of objects with integer values"
+fi
 orbs='[]'
 if ! is_blank "${option_value[orbs-json]}"; then
     orbs="$(json_array_from_text --orbs-json "${option_value[orbs-json]}")"
@@ -814,6 +823,7 @@ request="$(jq -cn \
     --argjson initialEnemyBlocks "$initial_enemy_blocks" \
     --argjson initialEnemyMoveIds "$initial_enemy_move_ids" \
     --argjson initialEnemyStateLogs "$initial_enemy_state_logs" \
+    --argjson initialEnemyIntegerMembers "$initial_enemy_integer_members" \
     --argjson preCombatInterveningMapPoints "$pre_combat_intervening_map_points" \
     --argjson cards "$cards" \
     --argjson runCards "$run_cards" \
@@ -856,6 +866,7 @@ request="$(jq -cn \
         initialEnemyBlocks: $initialEnemyBlocks,
         initialEnemyMoveIds: $initialEnemyMoveIds,
         initialEnemyStateLogs: $initialEnemyStateLogs,
+        initialEnemyIntegerMembers: $initialEnemyIntegerMembers,
         preCombatInterveningMapPoints: $preCombatInterveningMapPoints,
         cards: $cards,
         runCards: $runCards,

@@ -929,6 +929,25 @@ internal sealed partial class UnattendedTestRunner
         }
     }
 
+    private void ApplyInitialEnemyIntegerMembers(CombatState combatState)
+    {
+        if (_request.InitialEnemyIntegerMembers.Length == 0)
+            return;
+        if (_request.InitialEnemyIntegerMembers.Length != combatState.Enemies.Count)
+        {
+            throw new InvalidOperationException(
+                $"怪物整数成员表数量 {_request.InitialEnemyIntegerMembers.Length} " +
+                $"与敌人数 {combatState.Enemies.Count} 不同。");
+        }
+        for (int enemyIndex = 0; enemyIndex < combatState.Enemies.Count; enemyIndex++)
+        {
+            MonsterModel monster = combatState.Enemies[enemyIndex].Monster
+                ?? throw new InvalidOperationException($"敌人 {enemyIndex} 没有 MonsterModel。");
+            foreach ((string memberName, int value) in _request.InitialEnemyIntegerMembers[enemyIndex])
+                SetObjectStateMember(monster, monster.Id.Entry, memberName, value);
+        }
+    }
+
     private void ForceInitialEnemyStateLogs(CombatState combatState)
     {
         if (_request.InitialEnemyStateLogs is not { Length: > 0 } logs)

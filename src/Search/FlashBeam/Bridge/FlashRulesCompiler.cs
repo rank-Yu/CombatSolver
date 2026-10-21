@@ -874,13 +874,20 @@ internal static class FlashRulesCompiler
     {
         string? followUp = move.FollowUpState?.Id ?? move.FollowUpStateId;
         IReadOnlyList<BranchMonsterAttack> attacks = statics.AttacksByMove.TryGetValue(move.Id, out var captured) ? captured : [];
+        // MULTI_CLAW's intent repeats are dynamic (BaseMultiClawCount + _extraMultiClawCount at
+        // capture time). The kernel adds the live extra count in TestSubject.ModifyAttackRepeats,
+        // so compiling the captured total would add it twice (N08: 5 hits instead of 4).
+        bool fixedTestSubjectMultiClaw = statics.TestSubjectBaseMultiClawCount > 0
+            && move.Id == CombatSolver.Engine.InCombat.Flash.Content.Monsters.Act3.TestSubject.MultiClawMoveId;
         return new FlashMonsterNode
         {
             NativeId = move.Id,
             Kind = FlashMonsterNodeKind.Move,
             FollowUp = followUp != null && index.TryGetValue(followUp, out int target) ? target : -1,
             MustPerformOnceBeforeTransitioning = move.MustPerformOnceBeforeTransitioning,
-            Attacks = attacks.Select(attack => new FlashMonsterAttack(attack.BaseDamage, attack.Repeats)).ToArray(),
+            Attacks = attacks.Select(attack => new FlashMonsterAttack(
+                attack.BaseDamage,
+                fixedTestSubjectMultiClaw ? statics.TestSubjectBaseMultiClawCount : attack.Repeats)).ToArray(),
         };
     }
 }

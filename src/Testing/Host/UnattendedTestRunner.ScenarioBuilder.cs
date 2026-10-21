@@ -476,6 +476,7 @@ internal sealed partial class UnattendedTestRunner
             }
             runner.ForceInitialEnemyMoves(CombatState);
             runner.ForceInitialEnemyStateLogs(CombatState);
+            runner.ApplyInitialEnemyIntegerMembers(CombatState);
             if (request.InitialPlayerMaxHp is { } initialPlayerMaxHp)
                 await CreatureCmd.SetMaxHp(player.Creature, initialPlayerMaxHp);
             if (request.InitialPlayerHp is { } initialPlayerHp)

@@ -97,6 +97,7 @@ internal static partial class FlashRouteMaterializer
                     $"events={ProgressStats.ProgressEvents} " +
                     $"previews={ProgressStats.PreviewBuilds} " +
                     $"skips={ProgressStats.PreviewSkips} " +
+                    $"mismatches={ProgressStats.PreviewMismatches} " +
                     $"preview_ms={ProgressStats.PreviewMilliseconds:0.0} " +
                     $"expanded={Expanded} transitions={physicalTransitions}");
             }
@@ -118,7 +119,8 @@ internal static partial class FlashRouteMaterializer
         IReadOnlyList<PlanAction> prefix,
         FlashAction[] route,
         int potionUseCount,
-        bool ownsStartSnapshot)
+        bool ownsStartSnapshot,
+        SearchDiagnosticsSink? diagnostics = null)
     {
         List<PlanAction> plan = new(prefix.Count + route.Length);
         plan.AddRange(prefix);
@@ -139,6 +141,9 @@ internal static partial class FlashRouteMaterializer
                 }
                 catch (FlashChoiceMismatchException ex)
                 {
+                    diagnostics?.Info(
+                        $"[CombatSolver/Flash] FLASH_VERIFY_STEP step={step} kind=translate " +
+                        $"action={action.Kind}:{action.HandIndex}:{action.Target} detail={ex.Message}");
                     throw new FlashVerificationException(step, [ex.Message]);
                 }
                 if (owns)
@@ -146,6 +151,7 @@ internal static partial class FlashRouteMaterializer
                 snapshot = child;
                 owns = true;
                 plan.Add(planned);
+                FlashBattle beforeFlash = diagnostics != null ? state : default;
                 if (FlashKernel.Step(ref state, action, rules, out _) != FlashStepResult.Completed)
                     throw new InvalidOperationException("已选路线的 Flash 动作缺少选择。");
                 FlashBattle projected;
@@ -160,8 +166,22 @@ internal static partial class FlashRouteMaterializer
                 }
                 if (!FlashFingerprint.Equal(projected, state))
                 {
+                    string actionText = $"{planned.Kind}:{planned.CardId}" +
+                        $"#{planned.CardOccurrence}->{planned.TargetCombatId}";
+                    string planText = string.Join(",", plan.Select(action =>
+                        $"{action.Turn}:{action.Kind}:{action.CardId}->{action.TargetCombatId}"));
+                    List<string> differences = FlashBattleDump.Diff(projected, state, "old", "flash");
+                    diagnostics?.Info(
+                        $"[CombatSolver/Flash] FLASH_VERIFY_STEP step={step} action={actionText} " +
+                        $"plan={planText} differences={string.Join(" | ", differences)}");
+                    if (diagnostics != null)
+                    {
+                        diagnostics.Info(
+                            $"[CombatSolver/Flash] FLASH_VERIFY_BEFORE step={step} " +
+                            string.Join(" | ", FlashBattleDump.Lines(beforeFlash)));
+                    }
                     throw new FlashVerificationException(step,
-                        FlashBattleDump.Diff(projected, state, "old", "flash"));
+                        [$"action={actionText}", $"plan={planText}", .. differences]);
                 }
             }
             return plan;
@@ -198,7 +218,6 @@ internal static partial class FlashRouteMaterializer
         private SolverRouteAdoptionSeed? _seed;
         private SolverRouteAdoptionSeed? _requestedSeed;
         private int _previewCandidateVersion = int.MinValue;
-        private int _skippedCandidateVersion = int.MinValue;
         private int _currentTurnVersion;
         private long _lastPreviewAt = long.MinValue / 2;
         private SolverInterimResult? _currentBest;
@@ -206,6 +225,8 @@ internal static partial class FlashRouteMaterializer
         private int _progressEvents;
         private int _previewBuilds;
         private int _previewSkips;
+        private int _previewMismatches;
+        private bool _previewMismatchLogged;
         private long _previewBuildTicks;
         private long _lastProgressLogAt = long.MinValue / 2;
         private SearchTakeoverRequest? _loggedTakeover;
@@ -350,10 +371,26 @@ internal static partial class FlashRouteMaterializer
             {
                 built = TryBuildPreview(snapshot, out preview, out currentTurn, out actions);
             }
-            catch (FlashChoiceMismatchException)
+            catch (FlashChoiceMismatchException ex)
             {
                 // A speculative route that the existing engine cannot replay is simply not displayed;
-                // the selected route is still verified before materialization.
+                // the selected route is still verified before materialization. One diagnostic per
+                // solve; non-exception skips must not suppress the first real mismatch.
+                _previewMismatches++;
+                if (!_previewMismatchLogged)
+                {
+                    _previewMismatchLogged = true;
+                    int step = ex.Data.Contains("step") && ex.Data["step"] is int value ? value : -1;
+                    string routeTrace = string.Join(" > ", snapshot.Route.Take(step + 1).Select((routeAction, index) =>
+                        $"{index}:{routeAction.Kind}" +
+                        (routeAction.Kind == FlashActionKind.PlayCard
+                            ? $"(hand={routeAction.HandIndex},target={routeAction.Target},choices={routeAction.ChoiceCount})"
+                            : string.Empty)));
+                    policy.Diagnostics.Info(
+                        $"[CombatSolver/Flash] FLASH_PREVIEW_MISMATCH step={step} " +
+                        $"detail={ex.Message} route={routeTrace} " +
+                        $"oldHand={ex.Data["oldHand"] ?? "-"} flashHandIndex={ex.Data["flashHandIndex"] ?? "-"}");
+                }
                 built = false;
                 preview = null!;
                 currentTurn = null;
@@ -363,13 +400,6 @@ internal static partial class FlashRouteMaterializer
             if (!built)
             {
                 _previewSkips++;
-                if (_skippedCandidateVersion != snapshot.CandidateVersion)
-                {
-                    _skippedCandidateVersion = snapshot.CandidateVersion;
-                    policy.Diagnostics.Info(
-                        $"[CombatSolver/Flash] FLASH_PROGRESS_PREVIEW skipped " +
-                        $"candidate={snapshot.CandidateVersion} reason=route-not-replayable");
-                }
                 return;
             }
             _preview = preview;
@@ -458,10 +488,21 @@ internal static partial class FlashRouteMaterializer
                     if (ownsBefore)
                         before.ReleaseSimulator();
                 }
-                foreach (FlashAction action in snapshot.Route)
+                for (int step = 0; step < snapshot.Route.Length; step++)
                 {
-                    SimulationSnapshot child = FlashChoiceTranslator.Replay(
-                        probe.ReplayCoreForBridge, current, player, action, out PlanAction planned);
+                    FlashAction action = snapshot.Route[step];
+                    SimulationSnapshot child;
+                    PlanAction planned;
+                    try
+                    {
+                        child = FlashChoiceTranslator.Replay(
+                            probe.ReplayCoreForBridge, current, player, action, out planned);
+                    }
+                    catch (FlashChoiceMismatchException ex)
+                    {
+                        ex.Data["step"] = step;
+                        throw;
+                    }
                     SimulationSnapshot before = current;
                     bool ownsBefore = ownsCurrent;
                     current = child;
@@ -559,7 +600,7 @@ internal static partial class FlashRouteMaterializer
             int ActionCount);
 
         public FlashProgressStats Stats => new(_progressEvents, _previewBuilds, _previewSkips,
-            _previewBuildTicks * 1000d / Stopwatch.Frequency);
+            _previewMismatches, _previewBuildTicks * 1000d / Stopwatch.Frequency);
 
         private PlanAction WithDisplayNames(PlanAction action)
             => action with
@@ -693,7 +734,7 @@ internal static partial class FlashRouteMaterializer
         TurnSetupRootCandidate selectedRoot = searchRoots[rootIndex];
         SimulationSnapshot start = selectedRoot.Snapshot;
         List<PlanAction> plan = VerifyRoute(probe, player, start, battles[rootIndex], rules, prefix,
-            route, potionUseCount, ownsStartSnapshot: false);
+            route, potionUseCount, ownsStartSnapshot: false, diagnostics: policy.Diagnostics);
         if (scope == SolverResultScope.RouteAdoption)
         {
             // The published seed's route tail must be exactly the route the existing engine just
@@ -729,4 +770,5 @@ internal readonly record struct FlashProgressStats(
     int ProgressEvents,
     int PreviewBuilds,
     int PreviewSkips,
+    int PreviewMismatches,
     double PreviewMilliseconds);

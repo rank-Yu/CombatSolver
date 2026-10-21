@@ -454,13 +454,43 @@ internal static partial class SolverController
             return false;
         }
         _combat.UploadPolicy.Observe(combat);
-        _combat.BugReportIssues.RecordFailure(
-            CombatBugReportIssueKind.TurnSetupFailure,
-            exception);
+        Exception failure = exception.GetBaseException();
+        if (failure is FlashSearchFailedException flashFailure)
+        {
+            // On-mode Flash uses the same failure contract during turn setup as during a
+            // controller search: stop deployment, leave the native choice to the player, and
+            // record SearchFailure + FlashSearchFailed so the issue bundle carries both.
+            _combat.BugReportIssues.RecordFailure(
+                CombatBugReportIssueKind.SearchFailure,
+                exception);
+        }
+        else
+        {
+            _combat.BugReportIssues.RecordFailure(
+                CombatBugReportIssueKind.TurnSetupFailure,
+                exception);
+        }
+        // The turn-setup search runs inside PlayerTurnSetupCoordinator, not the controller
+        // search session; surface its failure to the unattended host so it can fail the
+        // request instead of waiting for a native choice that no driver will complete.
+        LastSearchFailureForTesting = exception;
         Entry.Logger.Error(
-            $"[CombatSolver/Test] TURN_SETUP_FAILURE exception={exception.GetBaseException()}");
-        if (NGame.Instance is { } host)
+            $"[CombatSolver/Test] TURN_SETUP_FAILURE exception={failure}");
+        if (failure is FlashSearchFailedException flash)
+        {
+            CancelDeployment();
+            _combat.FullAutoEnabled = false;
+            SolverOverlay.RefreshControls();
+            Entry.Logger.Info(
+                "[CombatSolver/Test] FULL_AUTO enabled=false reason=flash_search_failure");
+            Entry.Logger.Error($"[CombatSolver/Flash] {flash.EventLine}");
+            if (NGame.Instance is { } flashHost)
+                SolverOverlay.Show(flashHost, FormatFlashSearchFailure(flash, parallelSearchWasEnabled));
+        }
+        else if (NGame.Instance is { } host)
+        {
             SolverOverlay.Show(host, FormatTurnSetupFailure(exception, parallelSearchWasEnabled));
+        }
         return true;
     }
 
@@ -2581,6 +2611,8 @@ internal static partial class SolverController
                 CancelDeployment();
                 _combat.FullAutoEnabled = false;
                 SolverOverlay.RefreshControls();
+                Entry.Logger.Info(
+                    "[CombatSolver/Test] FULL_AUTO enabled=false reason=flash_search_failure");
                 Entry.Logger.Error($"[CombatSolver/Flash] {flashFailure.EventLine}");
             }
             if (ex is PotionPolicyUnsatisfiedException)
@@ -3622,21 +3654,26 @@ internal static partial class SolverController
         if (failure is IncompatibleGameplayModException incompatible)
             return FormatIncompatibleModFailure(incompatible);
         if (failure is FlashSearchFailedException flash)
-        {
-            string headline = string.Format(CultureInfo.CurrentCulture,
-                SolverText.Get("Flash 快速搜索失败（{0}），已停止本回合部署。"), flash.ReasonToken);
-            string advice = SolverText.Get("请将「Flash 快速搜索」切换为关闭后重试，并反馈问题包。");
-            string detail = string.Format(CultureInfo.CurrentCulture,
-                SolverText.Get("失败详情：{0}"), flash.Detail);
-            return $"[color={SolverUiTokens.Palette.DangerHex}][b]{SolverText.Get("计算失败")}[/b]\n" +
-                $"{EscapeRichText(headline)}\n{EscapeRichText(advice)}\n{EscapeRichText(detail)}[/color]" +
-                (AllowsPlayerUploadGuidance
-                    ? "\n" + SolverUiTokens.SearchFailureInstructionRichText(parallelSearchWasEnabled)
-                    : string.Empty);
-        }
+            return FormatFlashSearchFailure(flash, parallelSearchWasEnabled);
         return $"[color={SolverUiTokens.Palette.DangerHex}][b]{SolverText.Get("计算失败")}[/b]\n" +
            $"{EscapeRichText(exception.Message)}[/color]" +
            (AllowsPlayerUploadGuidance ? "\n" + SolverUiTokens.SearchFailureInstructionRichText(parallelSearchWasEnabled) : string.Empty);
+    }
+
+    private static string FormatFlashSearchFailure(
+        FlashSearchFailedException flash,
+        bool parallelSearchWasEnabled)
+    {
+        string headline = string.Format(CultureInfo.CurrentCulture,
+            SolverText.Get("Flash 快速搜索失败（{0}），已停止本回合部署。"), flash.ReasonToken);
+        string advice = SolverText.Get("请将「Flash 快速搜索」切换为关闭后重试，并反馈问题包。");
+        string detail = string.Format(CultureInfo.CurrentCulture,
+            SolverText.Get("失败详情：{0}"), flash.Detail);
+        return $"[color={SolverUiTokens.Palette.DangerHex}][b]{SolverText.Get("计算失败")}[/b]\n" +
+            $"{EscapeRichText(headline)}\n{EscapeRichText(advice)}\n{EscapeRichText(detail)}[/color]" +
+            (AllowsPlayerUploadGuidance
+                ? "\n" + SolverUiTokens.SearchFailureInstructionRichText(parallelSearchWasEnabled)
+                : string.Empty);
     }
 
     internal static string FormatDeploymentFailure(Exception exception)

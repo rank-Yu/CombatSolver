@@ -286,7 +286,13 @@ internal sealed partial class UnattendedTestRunner
             Entry.Logger.Error($"[CombatSolver/Unattended] FAILED run_id={_request.RunId} scenario={_request.ScenarioId} stage={_stage} exception={ex}");
             try
             {
-                if (RunManager.Instance.IsInProgress)
+                // A failed turn-setup search intentionally leaves the native choice to the
+                // player. Tearing the combat down while NPlayerHand is still in card selection
+                // crashes the headless hand UI; failed requests are not reusable, so let the
+                // launcher stop the process instead of returning to the menu.
+                bool nativeChoicePending = CardSelectCmd.Selector != null
+                    || MegaCrit.Sts2.Core.Nodes.Combat.NPlayerHand.Instance?.IsInCardSelection == true;
+                if (RunManager.Instance.IsInProgress && !nativeChoicePending)
                     await _host.ReturnToMainMenu();
             }
             finally
@@ -300,6 +306,7 @@ internal sealed partial class UnattendedTestRunner
             try { ReleaseB015OriginalPrefix(); }
             finally
             {
+                FlashFailureInjectionForTesting.Reset();
                 if (monitor != null)
                     await monitor.DisposeAsync();
                 _releaseAdaptedOnPlayIntegration?.Invoke();
@@ -590,6 +597,14 @@ internal sealed partial class UnattendedTestRunner
         while (true)
         {
             EnsureWithinDeadline();
+            if (SolverController.LastSearchFailureForTesting is { } turnSetupFailure
+                && !SolverController.IsSearching
+                && !PlayerTurnSetupCoordinator.IsSearching)
+            {
+                throw new InvalidOperationException(
+                    $"回合准备搜索失败：{turnSetupFailure.GetType().Name}: {turnSetupFailure.Message}",
+                    turnSetupFailure);
+            }
             CombatState? state = CombatManager.Instance.DebugOnlyGetState();
             Player? player = state == null ? null : LocalContext.GetMe(state);
             if (_request.ScenarioId.StartsWith("TURN-SETUP-UI-", StringComparison.Ordinal))
@@ -838,6 +853,14 @@ internal sealed partial class UnattendedTestRunner
         while (true)
         {
             EnsureWithinDeadline();
+            if (SolverController.LastSearchFailureForTesting is { } turnSetupFailure
+                && !SolverController.IsSearching
+                && !PlayerTurnSetupCoordinator.IsSearching)
+            {
+                throw new InvalidOperationException(
+                    $"回合准备搜索失败：{turnSetupFailure.GetType().Name}: {turnSetupFailure.Message}",
+                    turnSetupFailure);
+            }
             CombatState? state = CombatManager.Instance.DebugOnlyGetState();
             if (state != null
                 && PlayerTurnSetupCoordinator.IsInitialChoiceSearchPendingForTesting(state)

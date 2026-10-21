@@ -1,5 +1,6 @@
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Flash;
+using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 
@@ -24,6 +25,15 @@ internal static class FlashActionTranslator
                 return new PlanAction(PlanActionKind.EndTurn, turn);
             case FlashActionKind.PlayCard:
                 IReadOnlyList<PredictedCard> hand = simulator.State.GetPlayerCombatState(player).Hand.Cards;
+                if ((uint)action.HandIndex >= (uint)hand.Count)
+                {
+                    FlashChoiceMismatchException mismatch = new(
+                        $"第 {turn} 回合的手牌下标 {action.HandIndex} 超出旧引擎手牌 {hand.Count}。" +
+                        $"路线动作无法在旧引擎上回放。");
+                    mismatch.Data["oldHand"] = string.Join(",", hand.Select(card => card.Preview.Id.Entry));
+                    mismatch.Data["flashHandIndex"] = action.HandIndex;
+                    throw mismatch;
+                }
                 PredictedCard card = hand[action.HandIndex];
                 string cardId = card.Preview.Id.Entry;
                 string stateKey = CardChoiceSupport.ChoiceCardKey(card);
@@ -37,6 +47,18 @@ internal static class FlashActionTranslator
                         stateOccurrence++;
                 }
                 (Creature? target, int targetIndex) = Target(snapshot, action.Target);
+                // Same dynamic rule the existing engine enumerates targets with (Shiv under Fan of Knives and
+                // Sovereign Blade under Seeking Edge hit all enemies), so a targetless Flash action only fails
+                // when the existing engine would actually need a target.
+                if (target == null && simulator.GetTargetType(card) == TargetType.AnyEnemy)
+                {
+                    FlashChoiceMismatchException mismatch = new(
+                        $"第 {turn} 回合的 {cardId}+{card.Preview.CurrentUpgradeLevel} 需要敌方目标，" +
+                        $"但 Flash 动作没有目标。路线动作无法在旧引擎上回放。");
+                    mismatch.Data["oldHand"] = string.Join(",", hand.Select(handCard => handCard.Preview.Id.Entry));
+                    mismatch.Data["flashHandIndex"] = action.HandIndex;
+                    throw mismatch;
+                }
                 return new PlanAction(
                     PlanActionKind.PlayCard,
                     turn,
