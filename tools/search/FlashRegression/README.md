@@ -41,6 +41,10 @@ python3 -B tools/search/FlashRegression/flash_regression.py coordinator --label 
 python3 -B tools/search/FlashRegression/flash_regression.py coordinator \
   --label coord-on --off-baseline .local/flash-regression/coord
 
+# 只读已有协调器结果的合计/按角色/按幕/按遭遇类型表（不重跑协调器）
+python3 -B tools/search/FlashRegression/flash_regression.py table \
+  .local/flash-regression/qf4m-q120 --corpus coverage/corpora/flash-quality
+
 # 按质量语料口径生成一个角色的牌组（只写 spec/request，不运行）
 python3 -B tools/search/FlashRegression/flash_regression.py survey \
   --character SILENT --out .local/flash-regression/survey-silent
@@ -107,13 +111,49 @@ python3 -B tools/search/FlashRegression/flash_regression.py trace \
 读取 [质量语料](../../../coverage/corpora/flash-quality/README.md) 的 120 个牌组（五个角色各 24，
 第一、二、三幕各 8）。每根在
 `--search-mode Coordinator --use-portfolio --profile Medium --budget-ms 120000` 下分别跑
-`Off` 与 `On`（`OFFLINE_HARNESS_WARMUP_SEARCHES=1`），单次超时 1800 秒。`TABLE.txt` 汇总
-`better/same/worse`、战略失血差、采用数与 Off/On 总耗时；`STRATEGIC.txt` 逐根列出
-`strategicHpDeficit` 变化。
+`Off` 与 `On`（`OFFLINE_HARNESS_WARMUP_SEARCHES=1`），单次超时 1800 秒。
+
+比较键与求解器的 `RouteQualityPolicy` 的 `PotionPolicy` 投影一致，依次为：
+
+1. 胜负（胜者优）；
+2. 存活（存活者优）；
+3. 死亡豁免次数（少者优）；
+4. `strategicHpDeficit + potionStrategicCost`（小者优）；
+5. 结束回合（早者优）。
+
+即药水路线不能靠 `strategicHpDeficit` 单独看起来更好，必须把 `potionStrategicCost` 计入。
+`TABLE.txt` 逐根列出 `cost`、`strategicHpDeficit`、`potionStrategicCost`、回合、墙钟和
+`better/same/worse`，末行给出 `cost_delta`（On−Off 的合计）、`potion_cost_diff`（药水成本
+不同的根数）、胜负合计与墙钟合计；`STRATEGIC.txt` 逐根列出同一键下的
+`strategic`/`potion`/`deathSaves`/`turn`/`lost` 变化；`TABLE-GROUPS.txt` 是 `table` 的
+按角色/按幕/按遭遇类型表。
 
 `--off-baseline <dir>` 复用旧结果的 `<id>/Off`（复制到新输出目录），此时默认只跑 `On`；
 `--ids` 限定根；`--modes Off,On` 可显式覆盖；`--quality-dir` 改用别的语料目录；
-`--compare <dir> --compare-mode On` 逐根比较两份输出的 `(won, strategicHpDeficit, combatEndedTurn)`。
+`--compare <dir> --compare-mode On` 逐根比较两份输出在同一 `PotionPolicy` 键下的结果。
+
+### `table`
+
+只读一个已有协调器输出目录（`<id>/{Off,On}/quality.json`、`harness-result.json` 与 On 日志），
+按求解器的 `PotionPolicy` 键输出：
+
+- 合计：根数、好/同/差、`cost_delta`（On−Off 的战略失血+药水成本合计）、
+  `potion_cost_diff`（药水成本不同的根数）、Off/On 胜场、两种模式墙钟合计、缺失根数、
+  `FLASH_SEARCH_FAILED` 根数；
+- 按 `spec.json` 的 `characterId`、`actIndex`、`encounterKind` 分组的同一组列；
+- 变差根列表（Off/On 键、成本、药水成本变化）。
+
+```bash
+python3 -B tools/search/FlashRegression/flash_regression.py table \
+  .local/flash-regression/qf4m-q120 --corpus coverage/corpora/flash-quality
+```
+
+`--corpus` 指向含 `<id>/spec.json` 的语料目录；省略时分组退化为 `unknown`。该子命令不构建、
+不运行宿主，也不改结果目录。`coordinator` 结束时调用同一个 `quality_table` 函数并把结果写入
+`TABLE-GROUPS.txt`。
+
+已用三个历史目录核对：120 根 `29/74/17`、`cost_delta=-17`；79 根 `19/50/10`、`-60`；
+100 根 `30/60/10`、`+226`（顺序为 好/同/差）。这些数字只用于口径核对，不是新的质量门禁。
 
 ### `survey`
 
@@ -135,8 +175,9 @@ python3 -B tools/search/FlashRegression/flash_regression.py trace \
 | --- | --- | --- |
 | `diff` | `SUMMARY.txt`、每根 `stdout.txt` / `flash-diff.txt`、可选 `BASELINE.txt` | 每根 `exit=0`，首行 `SUMMARY failed=0 walkFailed=0`，`actionSetFailed=0`，`unsupported=0`；有 `--baseline` 时 `bad=0` |
 | `scan` | `SUMMARY.txt`、每根 `harness-result.json` | 每根 `exit=0`，`mismatches=0` |
-| `coordinator` | `TABLE.txt`、`STRATEGIC.txt`、每根 `Off`/`On` | 每根 `FLASH_ADOPTED`，没有 `FLASH_SEARCH_FAILED`；数字按实际结果计入 |
-| `trace` | `flash-trace.txt`、`stdout.txt` | 目标路线可映射；映射失败会写首个不能映射的步骤 |
+| `coordinator` | `TABLE.txt`、`STRATEGIC.txt`、`TABLE-GROUPS.txt`、每根 `Off`/`On` | 每根 `FLASH_ADOPTED`，没有 `FLASH_SEARCH_FAILED`；数字按 `PotionPolicy` 键计入 |
+| `table` | 标准输出的合计/分组/变差列表 | 只读；缺 `spec.json` 时归入 `unknown`，不伪造分组 |
+| `trace` | `flash-trace.txt`、`stdout.txt` | 目标路线可映射；同指纹去重会 `re-anchored` 后继续，真正丢失点写 `cut`/`first-missing`（`seat replaced` 保持原语义） |
 | `survey` | 每根 `spec.json` / `request.json`、`SUMMARY.txt` | 路径可解析；`--run` 时探针输出可读 |
 
 默认输出根目录是 `.local/flash-regression/<label>/`；`--out` 可指定别处。结果、日志与构建

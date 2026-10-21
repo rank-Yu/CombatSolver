@@ -426,13 +426,184 @@ def load_quality(directory: Path) -> tuple[float, dict, str]:
     return result['wallSeconds'], quality, flash
 
 
+def solver_key(quality: dict) -> tuple:
+    """The coordinator's comparison key, in the order RouteQualityPolicy.PotionPolicy reads it.
+
+    Win -> survive -> fewer death-save uses -> smaller (strategic deficit + potion strategic cost)
+    -> earlier combat end. The old (won, strategicHpDeficit, turn) key omitted the potion cost and
+    the survival/death-save terms; a potion route could therefore look better while costing more.
+    """
+    turn = quality.get('combatEndedTurn')
+    return (
+        0 if quality.get('won') else 1,
+        0 if quality.get('survives', True) else 1,
+        int(quality.get('deathSaveUseCount') or 0),
+        solver_cost(quality),
+        turn if turn is not None else 99,
+    )
+
+
+def solver_cost(quality: dict) -> int:
+    return int(quality.get('strategicHpDeficit') or 0) + int(quality.get('potionStrategicCost') or 0)
+
+
+def flash_failed(run_dir: Path) -> bool:
+    """Whether the On run emitted the stable FLASH_SEARCH_FAILED event (log scan, read-only)."""
+    log_dir = run_dir / 'On' / 'logs'
+    if not log_dir.is_dir():
+        return False
+    needle = b'FLASH_SEARCH_FAILED'
+    for path in log_dir.rglob('process.jsonl'):
+        with path.open('rb') as stream:
+            while chunk := stream.read(1 << 20):
+                if needle in chunk:
+                    return True
+    return False
+
+
+def spec_metadata(corpus: Path | None, root_name: str) -> tuple[str, str, str]:
+    if corpus is None:
+        return 'unknown', 'unknown', 'unknown'
+    path = corpus / root_name / 'spec.json'
+    if not path.is_file():
+        return 'unknown', 'unknown', 'unknown'
+    spec = json.loads(path.read_text(encoding='utf-8-sig'))
+    character = str(spec.get('characterId') or 'unknown')
+    act = spec.get('actIndex')
+    act_label = f'Act {int(act) + 1}' if isinstance(act, int) else 'unknown'
+    kind = str(spec.get('encounterKind') or 'unknown')
+    return character, act_label, kind
+
+
+class _GroupRow:
+    __slots__ = ('roots', 'good', 'same', 'worse', 'cost_delta', 'off_wins', 'on_wins',
+                 'off_wall', 'on_wall', 'missing', 'failed')
+
+    def __init__(self) -> None:
+        self.roots = 0
+        self.good = self.same = self.worse = 0
+        self.cost_delta = 0
+        self.off_wins = self.on_wins = 0
+        self.off_wall = self.on_wall = 0.0
+        self.missing = self.failed = 0
+
+
+def _group_table(title: str, groups: dict[str, _GroupRow]) -> list[str]:
+    lines = [f'{title}']
+    lines.append(f'  {"key":20} {"roots":>5} {"good":>4} {"same":>4} {"worse":>5} '
+                 f'{"cost_delta":>10} {"off_won":>7} {"on_won":>6} '
+                 f'{"off_wall":>9} {"on_wall":>9} {"missing":>7} {"failed":>6}')
+    for key in sorted(groups):
+        row = groups[key]
+        lines.append(f'  {key:20} {row.roots:5d} {row.good:4d} {row.same:4d} {row.worse:5d} '
+                     f'{row.cost_delta:+10d} {row.off_wins:7d} {row.on_wins:6d} '
+                     f'{row.off_wall:9.2f} {row.on_wall:9.2f} {row.missing:7d} {row.failed:6d}')
+    return lines
+
+
+def quality_table(run_dir: Path, corpus: Path | None = None) -> str:
+    """Read-only Off/On quality table under the solver's own PotionPolicy comparison key.
+
+    Groups roots by the corpus spec.json fields (characterId, actIndex, encounterKind). The cost
+    delta is sum(On strategicHpDeficit + On potionStrategicCost - the same Off sum); negative means
+    On improved. Potion-cost-different roots are counted separately so a route that spends a potion
+    is not mistaken for a better route.
+    """
+    run_dir = Path(run_dir)
+    roots = sorted(path for path in run_dir.iterdir()
+                   if path.is_dir() and ((path / 'Off').is_dir() or (path / 'On').is_dir()))
+    by_character: dict[str, _GroupRow] = {}
+    by_act: dict[str, _GroupRow] = {}
+    by_kind: dict[str, _GroupRow] = {}
+    total = _GroupRow()
+    compared = 0
+    potion_cost_diff = 0
+    worse: list[str] = []
+    missing_roots: list[str] = []
+    failed_roots: list[str] = []
+
+    def add(group: dict[str, _GroupRow], key: str) -> _GroupRow:
+        return group.setdefault(key, _GroupRow())
+
+    for root in roots:
+        character, act, kind = spec_metadata(corpus, root.name)
+        row_char = add(by_character, character)
+        row_act = add(by_act, act)
+        row_kind = add(by_kind, kind)
+        for row in (row_char, row_act, row_kind, total):
+            row.roots += 1
+        try:
+            off_wall, off_q, _ = load_quality(root / 'Off')
+            on_wall, on_q, _ = load_quality(root / 'On')
+        except (OSError, ValueError, KeyError):
+            for row in (row_char, row_act, row_kind, total):
+                row.missing += 1
+            missing_roots.append(root.name)
+            continue
+        compared += 1
+        failed = flash_failed(root)
+        if failed:
+            failed_roots.append(root.name)
+        off_key = solver_key(off_q)
+        on_key = solver_key(on_q)
+        mark = '+' if on_key < off_key else ('-' if on_key > off_key else '=')
+        off_cost = solver_cost(off_q)
+        on_cost = solver_cost(on_q)
+        delta = on_cost - off_cost
+        potion_diff = int(off_q.get('potionStrategicCost') or 0) != int(
+            on_q.get('potionStrategicCost') or 0)
+        if potion_diff:
+            potion_cost_diff += 1
+        off_won = 1 if off_q.get('won') else 0
+        on_won = 1 if on_q.get('won') else 0
+        for row in (row_char, row_act, row_kind, total):
+            if mark == '+':
+                row.good += 1
+            elif mark == '-':
+                row.worse += 1
+            else:
+                row.same += 1
+            row.cost_delta += delta
+            row.off_wins += off_won
+            row.on_wins += on_won
+            row.off_wall += off_wall
+            row.on_wall += on_wall
+            if failed:
+                row.failed += 1
+        if mark == '-':
+            worse.append(f'{root.name}: off={off_key} cost={off_cost} -> on={on_key} '
+                         f'cost={on_cost} potion={int(off_q.get("potionStrategicCost") or 0)}'
+                         f'->{int(on_q.get("potionStrategicCost") or 0)}')
+
+    lines = [
+        f'run_dir={run_dir} corpus={corpus if corpus is not None else "unknown"}',
+        f'total roots={total.roots} compared={compared} good={total.good} same={total.same} '
+        f'worse={total.worse} cost_delta={total.cost_delta:+d} potion_cost_diff={potion_cost_diff} '
+        f'off_won={total.off_wins} on_won={total.on_wins} '
+        f'off_wall={total.off_wall:.2f}s on_wall={total.on_wall:.2f}s '
+        f'missing={total.missing} failed={total.failed}',
+        '',
+    ]
+    lines += _group_table('by character', by_character)
+    lines.append('')
+    lines += _group_table('by act', by_act)
+    lines.append('')
+    lines += _group_table('by encounter', by_kind)
+    lines.append('')
+    lines.append('worse roots:')
+    lines += [f'  {line}' for line in worse] or ['  (none)']
+    if missing_roots:
+        lines.append('missing roots: ' + ', '.join(missing_roots))
+    if failed_roots:
+        lines.append('FLASH_SEARCH_FAILED roots: ' + ', '.join(failed_roots))
+    return '\n'.join(lines)
+
+
 def coordinator_table(out: Path) -> str:
     rows: list[str] = []
     total = {'Off': 0.0, 'On': 0.0}
     better = same = worse = adopted = lost = 0
-
-    def key(quality: dict) -> tuple:
-        return (not quality['won'], quality['projectedBattleHpLost'], quality['combatEndedTurn'] or 99)
+    potion_cost_diff = 0
 
     for root in sorted(path for path in out.iterdir() if path.is_dir()):
         try:
@@ -441,19 +612,30 @@ def coordinator_table(out: Path) -> str:
         except (OSError, ValueError, KeyError) as error:
             rows.append(f'{root.name:40} ERROR {error}')
             continue
-        mark = '=' if key(off_quality) == key(on_quality) else ('+' if key(on_quality) < key(off_quality) else '-')
+        off_key = solver_key(off_quality)
+        on_key = solver_key(on_quality)
+        mark = '=' if off_key == on_key else ('+' if on_key < off_key else '-')
         better += mark == '+'
         same += mark == '='
         worse += mark == '-'
         adopted += flash.startswith('FLASH_ADOPTED')
         total['Off'] += off_wall
         total['On'] += on_wall
-        lost += on_quality['projectedBattleHpLost'] - off_quality['projectedBattleHpLost']
-        rows.append(f"{root.name:40} {mark} off lost={off_quality['projectedBattleHpLost']:>3} "
+        off_cost = solver_cost(off_quality)
+        on_cost = solver_cost(on_quality)
+        lost += on_cost - off_cost
+        if int(off_quality.get('potionStrategicCost') or 0) != int(
+                on_quality.get('potionStrategicCost') or 0):
+            potion_cost_diff += 1
+        rows.append(f"{root.name:40} {mark} off cost={off_cost:>3} "
+                    f"strategic={off_quality['strategicHpDeficit']:>3} "
+                    f"potion={int(off_quality.get('potionStrategicCost') or 0):>3} "
                     f"turn={off_quality['combatEndedTurn']!s:>3} wall={off_wall:6.2f}s | "
-                    f"on lost={on_quality['projectedBattleHpLost']:>3} "
+                    f"on cost={on_cost:>3} strategic={on_quality['strategicHpDeficit']:>3} "
+                    f"potion={int(on_quality.get('potionStrategicCost') or 0):>3} "
                     f"turn={on_quality['combatEndedTurn']!s:>3} wall={on_wall:6.2f}s {flash}")
-    rows.append(f"on better={better} same={same} worse={worse} lost_delta={lost:+d} adopted={adopted} "
+    rows.append(f"on better={better} same={same} worse={worse} cost_delta={lost:+d} "
+                f"potion_cost_diff={potion_cost_diff} adopted={adopted} "
                 f"off_wall={total['Off']:.1f}s on_wall={total['On']:.1f}s")
     (out / 'TABLE.txt').write_text('\n'.join(rows) + '\n', encoding='utf-8')
     return rows[-1]
@@ -467,9 +649,15 @@ def strategic_table(out: Path) -> str:
             on = json.loads((root / 'On/quality.json').read_text(encoding='utf-8-sig'))['quality']
         except (OSError, ValueError, KeyError):
             continue
-        key = lambda value: (not value['won'], value['strategicHpDeficit'], value['combatEndedTurn'] or 99)
-        mark = '=' if key(off) == key(on) else ('+' if key(on) < key(off) else '-')
-        lines.append(f"{root.name} {mark} deficit {off['strategicHpDeficit']}->{on['strategicHpDeficit']} "
+        off_key = solver_key(off)
+        on_key = solver_key(on)
+        mark = '=' if off_key == on_key else ('+' if on_key < off_key else '-')
+        lines.append(f"{root.name} {mark} cost {solver_cost(off)}->{solver_cost(on)} "
+                     f"strategic {off['strategicHpDeficit']}->{on['strategicHpDeficit']} "
+                     f"potion {int(off.get('potionStrategicCost') or 0)}->"
+                     f"{int(on.get('potionStrategicCost') or 0)} "
+                     f"deathsaves {int(off.get('deathSaveUseCount') or 0)}->"
+                     f"{int(on.get('deathSaveUseCount') or 0)} "
                      f"turn {off['combatEndedTurn']}->{on['combatEndedTurn']} "
                      f"lost {off['projectedBattleHpLost']}->{on['projectedBattleHpLost']}")
     (out / 'STRATEGIC.txt').write_text('\n'.join(lines) + ('\n' if lines else ''), encoding='utf-8')
@@ -486,13 +674,19 @@ def qcompare(left: Path, right: Path, mode: str) -> tuple[int, int]:
         total += 1
         old = json.loads(left_quality.read_text(encoding='utf-8-sig'))
         new = json.loads(right_quality.read_text(encoding='utf-8-sig'))
-        old_key = (old.get('won'), old.get('strategicHpDeficit'), old.get('combatEndedTurn'))
-        new_key = (new.get('won'), new.get('strategicHpDeficit'), new.get('combatEndedTurn'))
+        old_key = solver_key(old)
+        new_key = solver_key(new)
         if old_key != new_key:
             diff += 1
             print(root.name, old_key, '->', new_key)
     print(f'total {total} diff {diff}')
     return total, diff
+
+
+def cmd_table(args: argparse.Namespace) -> int:
+    corpus = args.corpus.resolve() if args.corpus else None
+    print(quality_table(args.run_dir.resolve(), corpus))
+    return 0
 
 
 def coordinator_roots(args: argparse.Namespace) -> list[tuple[str, Path]]:
@@ -560,6 +754,10 @@ def cmd_coordinator(args: argparse.Namespace) -> int:
             print(f'[{done}/{total}] {time.time() - started:7.1f}s', flush=True)
     print(coordinator_table(out))
     print(strategic_table(out))
+    corpus = Path(args.quality_dir).resolve() if args.quality_dir else None
+    table = quality_table(out, corpus)
+    (out / 'TABLE-GROUPS.txt').write_text(table + '\n', encoding='utf-8')
+    print(table)
     if args.compare:
         qcompare(out, Path(args.compare).resolve(), args.compare_mode)
     return 0
@@ -741,6 +939,12 @@ def build_parser() -> argparse.ArgumentParser:
     trace.add_argument('--side', default='both', choices=('both', 'flash', 'existing'))
     trace.add_argument('--timeout', type=float, default=480)
     trace.set_defaults(func=cmd_trace)
+
+    table = sub.add_parser('table', help='read-only Off/On quality table under the solver comparison key')
+    table.add_argument('run_dir', type=Path, help='a coordinator output directory with <id>/{Off,On}/quality.json')
+    table.add_argument('--corpus', type=Path, default=None,
+                       help='corpus with <id>/spec.json (characterId, actIndex, encounterKind)')
+    table.set_defaults(func=cmd_table)
 
     survey = sub.add_parser('survey', help='generate quality-corpus decks (coverage/corpora/flash-quality)')
     add_common(survey)

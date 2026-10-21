@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using CombatSolver.Engine.InCombat.Simulation;
 using CombatSolver.Flash.Kernel;
@@ -156,20 +157,20 @@ internal sealed class FlashRouteTrace : FlashBeamTrace
     internal override void NodeInserted(int node, bool added, int existingNode, bool incomingWon,
         double rank, double existingRank, double score, double existingScore,
         int existingPotionCount, int existingTurn, int existingDepth, int existingEnemyHp,
-        int existingProjectedHp)
+        int existingProjectedHp, in FlashTraceRouteInfo targetInfo, in FlashTraceRouteInfo existingInfo)
     {
         int step = StepOf(node);
         if (step == 0)
         {
-            // An untracked state replaced a tracked representative's seat; the route may already
-            // have children, so only report the seat change (the first missing step is the cut).
+            // An untracked route deduplicated into a tracked representative. Whether it replaced the
+            // representative's node or lost, the trace does not have the route metadata of the
+            // incoming path; keep the existing seat-replacement report and do not re-anchor.
             int replaced = StepOf(existingNode);
             if (replaced > 0 && !incomingWon)
                 _lines.Add($"STEP {replaced} seat replaced by untracked node={node}");
             return;
         }
-        bool firstInsert = !_inserted[step - 1];
-        if (firstInsert)
+        if (!_inserted[step - 1])
             _inserted[step - 1] = true;
         if (added)
         {
@@ -183,19 +184,53 @@ internal sealed class FlashRouteTrace : FlashBeamTrace
                 $" rank={rank:0.###} oldRank={existingRank:0.###}" +
                 $" score={score:0.###} oldScore={existingScore:0.###}" +
                 (replaced > 0 ? $" replacedStep={replaced}" : ""));
+            // The target's node is the retained representative; the target path is already anchored
+            // to it. Still emit the explicit re-anchor row so every dedup has one.
+            ReAnchor(step, node, targetWon: true, targetInfo, existingInfo);
             return;
         }
-        if (firstInsert)
-        {
-            Drop(step, $"dedup-first-admission representative={existingNode} rank={rank:0.###}" +
-                $" score={score:0.###} repScore={existingScore:0.###}" +
-                $" repRank={existingRank:0.###} repPotions={existingPotionCount}" +
-                $" repTurn={existingTurn} repDepth={existingDepth} repEnemyHp={existingEnemyHp}" +
-                $" repProjectedHp={existingProjectedHp}");
+        // The target node lost to an existing representative. The pool compares full state bytes, so
+        // the representative is the same state reached by a different route: continue the target
+        // route from the retained representative instead of declaring the target lost.
+        ReAnchor(step, existingNode, targetWon: false, targetInfo, existingInfo);
+    }
+
+    private void ReAnchor(int step, int representative, bool targetWon,
+        in FlashTraceRouteInfo targetInfo, in FlashTraceRouteInfo existingInfo)
+    {
+        _nodes[step - 1] = representative;
+        _lines.Add($"STEP {step} re-anchored representative={representative} reason=dedup " +
+            $"targetWon={targetWon.ToString().ToLowerInvariant()} " +
+            $"target[{DescribeRouteInfo(targetInfo)}] " +
+            $"representative[{DescribeRouteInfo(existingInfo)}]");
+    }
+
+    private static string DescribeRouteInfo(in FlashTraceRouteInfo info)
+        => string.Create(CultureInfo.InvariantCulture,
+            $"root=0x{info.RootActionKey:x16} lineage=0x{info.Lineage:x16} " +
+            $"commit={info.Commitment} routing={info.RoutingSignatureId} " +
+            $"potion={info.PotionCost}/{info.PotionCount}/{info.PotionId} " +
+            $"label={info.LabelPotionCount}/{info.LabelPotionStrategicCost}/{info.LabelFutureSoldHp}/" +
+            $"{info.LabelCumulativePlayerHpLost}/{info.LabelActionCount}/{info.LabelScore:0.###} " +
+            $"setup={info.SetupValue}/{info.SetupComboValue} " +
+            $"enemy={info.EnemyHp}/{info.ProjectedPlayerHp} turn={info.Turn} depth={info.Depth}");
+
+    internal override void SetupLeader(string lane, in FlashTraceSetupLeader target,
+        in FlashTraceSetupLeader leader, bool targetBeatsLeader, string comparison)
+    {
+        int step = StepOf(target.Node);
+        if (step == 0)
             return;
-        }
-        _lines.Add($"STEP {step} seat kept representative={existingNode} rank={rank:0.###}" +
-            $" repRank={existingRank:0.###}");
+        _lines.Add($"STEP {step} setup-lane lane={lane} " +
+            $"leader={leader.Node} leaderIsTarget={leader.Node == target.Node} " +
+            $"leaderSetup={leader.SetupValue}/{leader.SetupComboValue} " +
+            $"leaderRetained={leader.RetainedAttackValue} leaderHp={leader.ProjectedPlayerHp} " +
+            $"leaderScore={leader.Score:0.###} leaderRank={leader.RankPosition} " +
+            $"leaderRequired={leader.Required} " +
+            $"target={target.Node} targetSetup={target.SetupValue}/{target.SetupComboValue} " +
+            $"targetRetained={target.RetainedAttackValue} targetHp={target.ProjectedPlayerHp} " +
+            $"targetScore={target.Score:0.###} targetRank={target.RankPosition} " +
+            $"targetRequired={target.Required} targetBeatsLeader={targetBeatsLeader} key={comparison}");
     }
 
     internal override void NodeRetained(int node, string phase, bool selected, bool required,
