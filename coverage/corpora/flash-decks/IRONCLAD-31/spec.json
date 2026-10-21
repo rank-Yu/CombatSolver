@@ -1,4 +1,0 @@
-{ "schemaVersion": 1, "seed": "FLASH-DECK-IRONCLAD-31", "characterId": "IRONCLAD", "ascension": 10, "actIndex": 1,
-  "encounterKind": "Elite", "includeStartingDeck": true, "includeStartingRelics": true, "includeAscendersBane": true,
-  "characterCards": { "count": 9, "upgradeLevels": 1 }, "colorlessCards": { "count": 1 },
-  "relics": { "count": 5 }, "potions": { "count": 1 }, "mode": "Setup" }

@@ -54,7 +54,7 @@
 | `BeamSolveDispatch` | 协调器主搜索成员与固定前缀续接的后端分发（Off/Shadow/On）与 Shadow 隔离。Off/Shadow 的现有侧构造原求解器；On 只跑 Flash，只有 `flash-potion-policy-no-route` 返回 `PotionPolicyUnsatisfiedException`；物化后两侧药水约束不一致（`potion-policy-mismatch`）、准入/容量/内核/核对/根阶段/开发策略拒绝写稳定 `FLASH_SEARCH_FAILED` 事件并抛 `FlashSearchFailedException`，不回落 |
 | `CardChoiceSupport.Flash.cs` / `CombatBeamSolver.Flash.cs` / `SimulatedCombatState.FlashProjection.cs` / `StrategicHpRecoveryBound.Flash.cs` | 原搜索类给 Flash 桥接开放的读取接口：分部文件，用到原类的私有成员，随原类维护；协调器只经 `BeamSolveDispatch` 进入 [Flash 模块](#flash-模块srcflash) |
 
-Flash 的批量回归入口在 `tools/search/FlashRegression/`：全量差分、候选扫描、100 根协调器 Off/On 质量对照与牌组生成都调用 `OfflineSearchHarness`，不进入生产搜索路径；用法见 [工具入口](../tools/README.md) 与 [回归工具](../tools/search/FlashRegression/README.md)。
+Flash 的批量回归入口在 `tools/search/FlashRegression/`：全量差分、候选扫描、120 根协调器 Off/On 质量对照与质量语料生成都调用 `OfflineSearchHarness`，不进入生产搜索路径；用法见 [工具入口](../tools/README.md) 与 [回归工具](../tools/search/FlashRegression/README.md)。
 
 探针与现有搜索通过 `SearchEvaluator` 共用评分和指纹，并共用 `SearchReplayCore` 的完整动作/准备/选择回放（检查点、续接帧、证据与计量按调用方注入）；`OpeningProbe` 不引用 `CombatBeamSolver`，其产出仍由协调器交给 `BeamSolveDispatch` 求解。Flash 的固定前缀与最终物化同样使用该回放核心和共享物化器，不实例化原搜索类。成员共享原请求账本；预算准入、候选合法性和取优由所属策略决定。分支状态不承担 Beam 政策；中途保路和终局比较保持明确入口。药水反事实与强制用药的硬准入先于质量比较。终局可选用药遵守机会成本门槛，获胜且减少复活消耗或追回资源时保留对应政策例外；`RouteQualityPolicy.PotionPolicy` 为审计、组合成员和后置搜索统一比较战略战损加可选药水成本，成长与回合数在其后比较。固定前缀构造实际父链，EndTurn 从模拟前后状态生成 `TurnOutcome`。
 
@@ -88,6 +88,8 @@ Smart 药水梯度在主成员耗尽时间时拥有一个独立成员时间：�
 | `src/Flash/Content/` | `CombatSolver.Flash.Content.*` | 卡牌、Power、遗物、药水、球、附魔与怪物定义；只依赖 BCL 与内核 |
 | `src/Flash/Search/` | `CombatSolver.Flash.Search` | FlashBeam 搜索；从 `FlashBattle` 计算的状态评估（移植 `Snapshot` 与 `BeamRankScore`，逐内容数值表由 `Bridge/FlashScoreBridge` 在根上编译），Scoring 不引用原版模型类型；搜索中的进度、接管、取消与工作量记账在 `FlashBeamSolver.Progress.cs` 与 `Bridge/FlashRouteMaterializer.Progress.cs` |
 | `src/Flash/Bridge/` | `CombatSolver.Flash.Bridge` | 准入、规则编译、旧引擎状态投影、动作与选择翻译、固定前缀回放、部署前逐步核对与物化（只依赖 `SearchReplayCore`、`OpeningProbe` 与 `SearchRouteMaterializer`）；`FlashSearchFailure.cs` 是开启模式专属的稳定失败类别、`FLASH_SEARCH_FAILED` 事件与 `FlashSearchFailedException`，只经 `SearchDiagnosticsSink` 与搜索任务异常上报 |
+
+与 `src` 现有部分的职责对应：`Kernel/` 相当于 `src/Engine/InCombat/Simulation` 加上 `SimulatedCombatState` 的状态部分；`Content/` 相当于 `src/Engine/InCombat/Mirrors` 的卡牌、Power、遗物与药水语义，以及 `src/Prediction` 的怪物 AI；`Search/` 相当于 `CombatBeamSolver` 与评分；`Bridge/` 没有对应部分，是 Flash 与现有引擎之间的翻译与核对层。目录名不叫 `Engine`，避免 `CombatSolver.Flash.Engine` 在模块内遮蔽 `CombatSolver.Engine`。
 
 `Search/` 与 `Bridge/` 遵守 Search 层规则（结构门禁把它们计入 Search 文件），且不引用 `CombatBeamSolver`、`BeamSolveDispatch` 或协调器；`Kernel/` 与 `Content/` 只依赖 BCL。
 

@@ -5,9 +5,7 @@
 | [strategy](strategy/) | `p0.json`、`p2.json` 与 roots/ 的两对代表请求/规格：当前固定策略、预算和输入 |
 | [novelty](novelty/) | 固定训练/留存局面与排序配置 |
 | [runtime-gc](runtime-gc/) | GC 启动配置和压力局面 |
-| [flash-decks](flash-decks/) | 生成牌组上的 Flash 准入与差分回归输入（`request.json` + `spec.json`） |
-| [flash-quality](flash-quality/) | 五个角色 100 个生成牌组（三幕均衡）的协调器 Off/On 质量对照输入 |
-| [flash-act3](flash-act3/) | 五个角色各 30 个第三幕生成牌组的 Flash 差分输入 |
+| [flash-quality](flash-quality/) | 五个角色 120 个生成牌组（三幕均衡）的 Flash 差分回归与协调器 Off/On 质量对照输入 |
 
 修改路径时同步请求内的 `generatedScenarioPath`。Flash 语料的批量差分、候选扫描与协调器对照见 [Flash 回归工具](../../tools/search/FlashRegression/README.md)。历史记录中的哈希仍指当时输入；语义内容与历史验证范围保持各自来源。
 

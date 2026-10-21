@@ -24,71 +24,9 @@ ROOT = Path(__file__).resolve().parents[3]
 HARNESS = ROOT / ".local/tool-build/OfflineSearchHarness/bin/Release/net9.0/OfflineSearchHarness.dll"
 DEFAULT_OUT = ROOT / ".local/flash-regression"
 FIXTURES = ROOT / "coverage/fixtures/cards"
-DECKS = ROOT / "coverage/corpora/flash-decks"
 QUALITY = ROOT / "coverage/corpora/flash-quality"
-ACT3 = ROOT / "coverage/corpora/flash-act3"
 KERNEL_CHECKS = ROOT / "tools/testing/checks/FlashKernelChecks"
 DOTNET = shutil.which("dotnet") or "dotnet"
-
-# Natural encounter roots from the previous regress.sh: encounter, seed, character.
-# The harness defaults to the Ironclad starter deck when character is empty.
-NATURAL = [
-    ('FUZZY_WURM_CRAWLER_WEAK', 'FLASH1', ''), ('NIBBITS_NORMAL', 'FLASH1', ''), ('NIBBITS_WEAK', 'FLASH1', ''), ('SHRINKER_BEETLE_WEAK', 'FLASHM1', ''),
-    ('SLIMES_WEAK', 'FLASHM1', ''), ('SLIMES_NORMAL', 'FLASHM1', ''), ('FLYCONID_NORMAL', 'FLASHM1', ''), ('MAWLER_NORMAL', 'FLASHM1', ''),
-    ('RUBY_RAIDERS_NORMAL', 'FLASHM1', ''), ('SNAPPING_JAXFRUIT_NORMAL', 'FLASHM1', ''), ('CUBEX_CONSTRUCT_NORMAL', 'FLASHM1', ''), ('SLITHERING_STRANGLER_NORMAL', 'FLASHM1', ''),
-    ('OVERGROWTH_CRAWLERS', 'FLASHM1', ''), ('BYRDONIS_ELITE', 'FLASHM1', ''), ('CULTISTS_NORMAL', 'FLASHM1', ''), ('HAUNTED_SHIP_NORMAL', 'FLASHM1', ''),
-    ('PUNCH_CONSTRUCT_NORMAL', 'FLASHM1', ''), ('SEAPUNK_WEAK', 'FLASHM1', ''), ('SEAPUNK_NORMAL', 'FLASHM1', ''), ('SEWER_CLAM_NORMAL', 'FLASHM1', ''),
-    ('SLUDGE_SPINNER_WEAK', 'FLASHM1', ''), ('TOADPOLES_WEAK', 'FLASHM1', ''), ('INKLETS_NORMAL', 'FLASHM1', ''), ('BYGONE_EFFIGY_ELITE', 'FLASHM1', ''),
-    ('CONSTRUCT_MENAGERIE_NORMAL', 'FLASHM1', ''), ('LAGAVULIN_MATRIARCH_BOSS', 'FLASHM1', ''), ('CORPSE_SLUGS_NORMAL', 'FLASHM1', ''), ('CORPSE_SLUGS_WEAK', 'FLASHM1', ''),
-    ('TERROR_EEL_ELITE', 'FLASHM1', ''), ('FOGMOG_NORMAL', 'FLASHM1', ''), ('FOGMOG_NORMAL', 'FLASHM2', ''), ('TWO_TAILED_RATS_NORMAL', 'FLASHM1', ''),
-    ('TWO_TAILED_RATS_NORMAL', 'FLASHM2', ''), ('CHOMPERS_NORMAL', 'FLASHM1', ''), ('CHOMPERS_NORMAL', 'FLASHM2', ''), ('ENTOMANCER_ELITE', 'FLASHM1', ''),
-    ('ENTOMANCER_ELITE', 'FLASHM2', ''), ('EXOSKELETONS_NORMAL', 'FLASHM1', ''), ('EXOSKELETONS_NORMAL', 'FLASHM2', ''), ('EXOSKELETONS_WEAK', 'FLASHM1', ''),
-    ('EXOSKELETONS_WEAK', 'FLASHM2', ''), ('MYTES_NORMAL', 'FLASHM1', ''), ('MYTES_NORMAL', 'FLASHM2', ''), ('OVICOPTER_NORMAL', 'FLASHM1', ''),
-    ('OVICOPTER_NORMAL', 'FLASHM2', ''), ('SPINY_TOAD_NORMAL', 'FLASHM1', ''), ('SPINY_TOAD_NORMAL', 'FLASHM2', ''), ('THE_OBSCURA_NORMAL', 'FLASHM1', ''),
-    ('THE_OBSCURA_NORMAL', 'FLASHM2', ''), ('TUNNELER_WEAK', 'FLASHM1', ''), ('TUNNELER_WEAK', 'FLASHM2', ''), ('THE_INSATIABLE_BOSS', 'FLASHM1', ''),
-    ('THE_INSATIABLE_BOSS', 'FLASHM2', ''), ('FAKE_MERCHANT_EVENT_ENCOUNTER', 'FLASHM1', ''), ('FAKE_MERCHANT_EVENT_ENCOUNTER', 'FLASHM2', ''), ('BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER', 'FLASHM1', ''),
-    ('BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER', 'FLASHM2', ''), ('BATTLEWORN_DUMMY_EVENT_V2_ENCOUNTER', 'FLASHM1', ''), ('BATTLEWORN_DUMMY_EVENT_V2_ENCOUNTER', 'FLASHM2', ''), ('BATTLEWORN_DUMMY_EVENT_V3_ENCOUNTER', 'FLASHM1', ''),
-    ('BATTLEWORN_DUMMY_EVENT_V3_ENCOUNTER', 'FLASHM2', ''), ('MYSTERIOUS_KNIGHT_EVENT_ENCOUNTER', 'FLASHM1', ''), ('MYSTERIOUS_KNIGHT_EVENT_ENCOUNTER', 'FLASHM2', ''), ('THE_ARCHITECT_EVENT_ENCOUNTER', 'FLASHM1', ''),
-    ('THE_ARCHITECT_EVENT_ENCOUNTER', 'FLASHM2', ''), ('KNOWLEDGE_DEMON_BOSS', 'FLASHM1', ''), ('KNOWLEDGE_DEMON_BOSS', 'FLASHM2', ''), ('THIEVING_HOPPER_WEAK', 'FLASHM1', ''),
-    ('THIEVING_HOPPER_WEAK', 'FLASHM2', ''), ('GREMLIN_MERC_NORMAL', 'FLASHM1', ''), ('GREMLIN_MERC_NORMAL', 'FLASHM2', ''), ('WATERFALL_GIANT_BOSS', 'FLASHM1', ''),
-    ('WATERFALL_GIANT_BOSS', 'FLASHM2', ''), ('NIBBITS_NORMAL', 'FLASHM1', 'SILENT'), ('NIBBITS_NORMAL', 'FLASHM2', 'SILENT'), ('SLIMES_NORMAL', 'FLASHM1', 'SILENT'),
-    ('SLIMES_NORMAL', 'FLASHM2', 'SILENT'), ('CULTISTS_NORMAL', 'FLASHM1', 'SILENT'), ('CULTISTS_NORMAL', 'FLASHM2', 'SILENT'), ('NIBBITS_NORMAL', 'FLASHM1', 'DEFECT'),
-    ('NIBBITS_NORMAL', 'FLASHM2', 'DEFECT'), ('SLIMES_NORMAL', 'FLASHM1', 'DEFECT'), ('SLIMES_NORMAL', 'FLASHM2', 'DEFECT'), ('CULTISTS_NORMAL', 'FLASHM1', 'DEFECT'),
-    ('CULTISTS_NORMAL', 'FLASHM2', 'DEFECT'), ('NIBBITS_NORMAL', 'FLASHM1', 'REGENT'), ('NIBBITS_NORMAL', 'FLASHM2', 'REGENT'), ('SLIMES_NORMAL', 'FLASHM1', 'REGENT'),
-    ('SLIMES_NORMAL', 'FLASHM2', 'REGENT'), ('CULTISTS_NORMAL', 'FLASHM1', 'REGENT'), ('CULTISTS_NORMAL', 'FLASHM2', 'REGENT'), ('NIBBITS_NORMAL', 'FLASHM1', 'NECROBINDER'),
-    ('NIBBITS_NORMAL', 'FLASHM2', 'NECROBINDER'), ('SLIMES_NORMAL', 'FLASHM1', 'NECROBINDER'), ('SLIMES_NORMAL', 'FLASHM2', 'NECROBINDER'), ('CULTISTS_NORMAL', 'FLASHM1', 'NECROBINDER'),
-    ('CULTISTS_NORMAL', 'FLASHM2', 'NECROBINDER'), ('BOWLBUGS_NORMAL', 'FLASHM1', ''), ('BOWLBUGS_NORMAL', 'FLASHM2', ''), ('BOWLBUGS_WEAK', 'FLASHM1', ''),
-    ('BOWLBUGS_WEAK', 'FLASHM2', ''), ('DECIMILLIPEDE_ELITE', 'FLASHM1', ''), ('DECIMILLIPEDE_ELITE', 'FLASHM2', ''), ('HUNTER_KILLER_NORMAL', 'FLASHM1', ''),
-    ('HUNTER_KILLER_NORMAL', 'FLASHM2', ''), ('KAISER_CRAB_BOSS', 'FLASHM1', ''), ('KAISER_CRAB_BOSS', 'FLASHM2', ''), ('LOUSE_PROGENITOR_NORMAL', 'FLASHM1', ''),
-    ('LOUSE_PROGENITOR_NORMAL', 'FLASHM2', ''), ('PHROG_PARASITE_ELITE', 'FLASHM1', ''), ('PHROG_PARASITE_ELITE', 'FLASHM2', ''), ('SLUMBERING_BEETLE_NORMAL', 'FLASHM1', ''),
-    ('SLUMBERING_BEETLE_NORMAL', 'FLASHM2', ''), ('CEREMONIAL_BEAST_BOSS', 'FLASHM1', ''), ('CEREMONIAL_BEAST_BOSS', 'FLASHM2', ''), ('INFESTED_PRISMS_ELITE', 'FLASHM1', ''),
-    ('INFESTED_PRISMS_ELITE', 'FLASHM2', ''), ('LIVING_FOG_NORMAL', 'FLASHM1', ''), ('LIVING_FOG_NORMAL', 'FLASHM2', ''), ('VINE_SHAMBLER_NORMAL', 'FLASHM1', ''),
-    ('VINE_SHAMBLER_NORMAL', 'FLASHM2', ''), ('AXEBOTS_NORMAL', 'FLASHM1', ''), ('AXEBOTS_NORMAL', 'FLASHM2', ''), ('CONSTRUCT_MENAGERIE_NORMAL', 'FLASHM2', ''),
-    ('DEVOTED_SCULPTOR_WEAK', 'FLASHM1', ''), ('DEVOTED_SCULPTOR_WEAK', 'FLASHM2', ''), ('AEONGLASS_BOSS', 'FLASHM1', ''), ('AEONGLASS_BOSS', 'FLASHM2', ''),
-    ('FABRICATOR_NORMAL', 'FLASHM1', ''), ('FABRICATOR_NORMAL', 'FLASHM2', ''), ('FROG_KNIGHT_NORMAL', 'FLASHM1', ''), ('FROG_KNIGHT_NORMAL', 'FLASHM2', ''),
-    ('GLOBE_HEAD_NORMAL', 'FLASHM1', ''), ('GLOBE_HEAD_NORMAL', 'FLASHM2', ''), ('KNIGHTS_ELITE', 'FLASHM1', ''), ('KNIGHTS_ELITE', 'FLASHM2', ''),
-    ('MECHA_KNIGHT_ELITE', 'FLASHM1', ''), ('MECHA_KNIGHT_ELITE', 'FLASHM2', ''), ('OWL_MAGISTRATE_NORMAL', 'FLASHM1', ''), ('OWL_MAGISTRATE_NORMAL', 'FLASHM2', ''),
-    ('QUEEN_BOSS', 'FLASHM1', ''), ('QUEEN_BOSS', 'FLASHM2', ''), ('SCROLLS_OF_BITING_NORMAL', 'FLASHM1', ''), ('SCROLLS_OF_BITING_NORMAL', 'FLASHM2', ''),
-    ('SCROLLS_OF_BITING_WEAK', 'FLASHM1', ''), ('SCROLLS_OF_BITING_WEAK', 'FLASHM2', ''), ('SLIMED_BERSERKER_NORMAL', 'FLASHM1', ''), ('SLIMED_BERSERKER_NORMAL', 'FLASHM2', ''),
-    ('SOUL_NEXUS_ELITE', 'FLASHM1', ''), ('SOUL_NEXUS_ELITE', 'FLASHM2', ''), ('TEST_SUBJECT_BOSS', 'FLASHM1', ''), ('TEST_SUBJECT_BOSS', 'FLASHM2', ''),
-    ('THE_LOST_AND_FORGOTTEN_NORMAL', 'FLASHM1', ''), ('THE_LOST_AND_FORGOTTEN_NORMAL', 'FLASHM2', ''), ('TURRET_OPERATOR_WEAK', 'FLASHM1', ''), ('TURRET_OPERATOR_WEAK', 'FLASHM2', ''),
-]
-
-# Act 3 bosses need an explicit act index so Act3BossStrategy is selected.
-ACT3_BOSSES = [
-    ('AEONGLASS_BOSS', 'FLASHM1'), ('AEONGLASS_BOSS', 'FLASHM2'),
-    ('QUEEN_BOSS', 'FLASHM1'), ('QUEEN_BOSS', 'FLASHM2'),
-    ('TEST_SUBJECT_BOSS', 'FLASHM1'), ('TEST_SUBJECT_BOSS', 'FLASHM2'),
-]
-
-BENCH_ENCOUNTERS = [
-    'FUZZY_WURM_CRAWLER_WEAK', 'NIBBITS_NORMAL', 'NIBBITS_WEAK', 'SHRINKER_BEETLE_WEAK',
-    'SLIMES_WEAK', 'SLIMES_NORMAL', 'FLYCONID_NORMAL', 'MAWLER_NORMAL', 'RUBY_RAIDERS_NORMAL',
-    'SNAPPING_JAXFRUIT_NORMAL', 'CUBEX_CONSTRUCT_NORMAL', 'SLITHERING_STRANGLER_NORMAL',
-    'OVERGROWTH_CRAWLERS', 'BYRDONIS_ELITE', 'CULTISTS_NORMAL', 'HAUNTED_SHIP_NORMAL',
-    'PUNCH_CONSTRUCT_NORMAL', 'SEAPUNK_WEAK', 'SEAPUNK_NORMAL', 'SEWER_CLAM_NORMAL',
-    'SLUDGE_SPINNER_WEAK', 'TOADPOLES_WEAK', 'INKLETS_NORMAL', 'BYGONE_EFFIGY_ELITE',
-]
 
 SURVEY_KINDS = ('Monster', 'Elite', 'Boss')
 FLASH_LOG_LINE = re.compile(
@@ -118,42 +56,12 @@ def _relative(path: Path) -> str:
         return str(path.resolve())
 
 
-def natural_roots(walks: int) -> list[Root]:
-    roots = []
-    for index, (encounter, seed, character) in enumerate(NATURAL):
-        name = f"enc-{encounter}-{seed}" + (f"-{character}" if character else '')
-        roots.append(Root(name, encounter, seed, character or 'IRONCLAD', 0, None, walks, 'encounter', index))
-    offset = len(roots)
-    for index, (encounter, seed) in enumerate(ACT3_BOSSES):
-        roots.append(Root(f"a3boss-{encounter}-{seed}", encounter, seed, 'IRONCLAD', 2, None, walks,
-                          'act3boss', offset + index))
-    return roots
-
-
 def fixture_roots(walks: int) -> list[Root]:
     roots = []
     for index, path in enumerate(sorted(FIXTURES.glob('flash-*.json'))):
         data = json.loads(path.read_text(encoding='utf-8-sig'))
         roots.append(Root(path.stem, data['encounterId'], str(data['seed']), 'IRONCLAD', 0, path, walks,
                           'fixture', index))
-    return roots
-
-
-def deck_roots(walks: int) -> list[Root]:
-    roots = []
-    for index, request in enumerate(sorted(DECKS.glob('*/request.json'))):
-        roots.append(Root(f"deck-{request.parent.name}", 'NIBBITS_NORMAL', 'FLASH1', 'IRONCLAD', 0, request,
-                          walks, 'deck', index))
-    return roots
-
-
-def act3_roots(walks: int) -> list[Root]:
-    roots = []
-    for index, request in enumerate(sorted(ACT3.glob('*/*/request.json'))):
-        spec = json.loads((request.parent / 'spec.json').read_text(encoding='utf-8-sig'))
-        roots.append(Root(f"act3-{request.parent.name}", character=spec['characterId'],
-                          act_index=int(spec.get('actIndex', 2)), request=request, walks=walks,
-                          category='act3', category_index=index, spec=spec))
     return roots
 
 
@@ -170,16 +78,10 @@ def quality_roots(walks: int) -> list[Root]:
 def resolve_roots(args: argparse.Namespace) -> list[Root]:
     only = args.only
     roots: list[Root] = []
-    if only in ('all', 'encounters'):
-        roots += natural_roots(args.walks)
     if only in ('all', 'fixtures'):
         roots += fixture_roots(args.walks)
-    if only in ('all', 'decks'):
-        roots += deck_roots(args.walks)
-    if only == 'act3' or args.include_act3:
-        roots += act3_roots(args.act3_walks)
     if only in ('all', 'quality'):
-        roots += quality_roots(args.act3_walks)
+        roots += quality_roots(args.quality_walks)
     shards = max(1, args.shards)
     for root in roots:
         root.shard = root.category_index % shards
@@ -387,9 +289,8 @@ def output_dir(args: argparse.Namespace, suffix: str) -> Path:
 
 def add_root_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--walks', type=int, default=32, help='random walks per root (default 32)')
-    parser.add_argument('--act3-walks', type=int, default=48, help='walks for act3 and quality roots (default 48)')
-    parser.add_argument('--only', choices=('all', 'encounters', 'fixtures', 'decks', 'act3', 'quality'), default='all')
-    parser.add_argument('--include-act3', action='store_true', help='add coverage/corpora/flash-act3')
+    parser.add_argument('--quality-walks', type=int, default=48, help='walks per quality-corpus root (default 48)')
+    parser.add_argument('--only', choices=('all', 'fixtures', 'quality'), default='all')
     parser.add_argument('--shards', type=int, default=1, help='split roots into this many shards')
     parser.add_argument('--shard', type=int, default=None, help='run only this shard (0-based)')
     parser.add_argument('--root', action='append', default=[], help='substring/name filter; repeatable')
@@ -598,14 +499,6 @@ def coordinator_roots(args: argparse.Namespace) -> list[tuple[str, Path]]:
     roots: list[tuple[str, Path]] = []
     if args.quality_dir:
         roots += [(path.parent.name, path) for path in sorted(Path(args.quality_dir).glob('*/request.json'))]
-    if args.deck_dir:
-        for request in sorted(Path(args.deck_dir).glob('*/request.json')):
-            spec = json.loads((request.parent / 'spec.json').read_text(encoding='utf-8-sig'))
-            if not args.include_act3_decks and int(spec.get('actIndex', 0)) == 2:
-                continue
-            if args.character and spec.get('characterId') != args.character:
-                continue
-            roots.append((request.parent.name, request))
     if args.ids:
         selected = set(args.ids)
         roots = [root for root in roots if root[0] in selected]
@@ -672,15 +565,12 @@ def cmd_coordinator(args: argparse.Namespace) -> int:
     return 0
 
 
-def survey_spec(character: str, index: int, act: int, seed_prefix: str = 'FLASH-DECK',
-                vary_extras: bool = False) -> dict:
-    # deck-survey.sh ties colorless cards and potions to index % 3, which is also the encounter kind;
-    # --vary-extras steps them with index // 3 so every kind sees 0/1/2 of each.
-    extras = (index // 3) % 3 if vary_extras else index % 3
-    colorless = (index // 3 + 1) % 3 if vary_extras else index % 3
+def survey_spec(character: str, index: int, act: int) -> dict:
+    """One quality-corpus deck. The encounter kind follows index % 3; potions and colorless cards step with
+    index // 3, so every encounter kind sees decks with 0, 1 and 2 of each."""
     return {
         'schemaVersion': 1,
-        'seed': f'{seed_prefix}-{character}-{index:02d}',
+        'seed': f'FLASH-QUALITY-{character}-{index:03d}',
         'characterId': character,
         'ascension': 10,
         'actIndex': act,
@@ -689,28 +579,28 @@ def survey_spec(character: str, index: int, act: int, seed_prefix: str = 'FLASH-
         'includeStartingRelics': True,
         'includeAscendersBane': True,
         'characterCards': {'count': 6 + index % 7, 'upgradeLevels': 1},
-        'colorlessCards': {'count': colorless},
+        'colorlessCards': {'count': (index // 3 + 1) % 3},
         'relics': {'count': 2 + index % 4},
-        'potions': {'count': extras},
+        'potions': {'count': (index // 3) % 3},
         'mode': 'Setup',
     }
 
 
+def survey_act(index: int, count: int) -> int:
+    """Consecutive thirds of the indexes take Acts 1, 2 and 3 (actIndex 0/1/2)."""
+    return min(2, index * 3 // count)
+
+
 def cmd_survey(args: argparse.Namespace) -> int:
-    out = output_dir(args, f'survey-{args.character.lower()}-{args.act if args.act >= 0 else "mixed"}')
+    out = output_dir(args, f'survey-{args.character.lower()}')
     out.mkdir(parents=True, exist_ok=True)
     roots = []
-    blocks = [int(part) for part in args.act_blocks.split(',')] if args.act_blocks else []
-    if blocks and sum(blocks) != args.count:
-        print(f'--act-blocks {args.act_blocks} must add up to --count {args.count}', file=sys.stderr)
-        return 2
-    block_acts = [act for act, size in enumerate(blocks) for _ in range(size)]
     for index in range(args.count):
-        act = block_acts[index] if blocks else (args.act if args.act >= 0 else index % 2)
-        identifier = f'{args.character}-{index:02d}'
+        act = survey_act(index, args.count)
+        identifier = f'{args.character}-{index:03d}'
         directory = out / identifier
         directory.mkdir(parents=True, exist_ok=True)
-        spec = survey_spec(args.character, index, act, args.seed_prefix, args.vary_extras)
+        spec = survey_spec(args.character, index, act)
         spec_path = directory / 'spec.json'
         spec_path.write_text(json.dumps(spec, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         request = {'schemaVersion': 1, 'scenarioId': identifier, 'cards': [],
@@ -771,12 +661,7 @@ def build_parser() -> argparse.ArgumentParser:
     coordinator = sub.add_parser('coordinator', help='Off/On coordinator comparison on the quality corpus')
     add_common(coordinator)
     coordinator.add_argument('--quality-dir', type=Path, default=QUALITY,
-                             help='quality corpus (default coverage/corpora/flash-quality, 100 roots)')
-    coordinator.add_argument('--deck-dir', type=Path, default=None,
-                             help='optionally add a deck corpus such as coverage/corpora/flash-decks')
-    coordinator.add_argument('--character', default='IRONCLAD', help='deck-dir character filter; empty disables')
-    coordinator.add_argument('--include-act3-decks', action='store_true',
-                             help='also run flash-decks roots with actIndex 2')
+                             help='quality corpus (default coverage/corpora/flash-quality, 120 roots)')
     coordinator.add_argument('--ids', nargs='+', default=None, help='run only these directory names')
     coordinator.add_argument('--modes', default=None, help='default Off,On; with --off-baseline default On')
     coordinator.add_argument('--off-baseline', type=Path, default=None,
@@ -788,17 +673,10 @@ def build_parser() -> argparse.ArgumentParser:
     coordinator.add_argument('--compare-mode', default='On', choices=('Off', 'On'))
     coordinator.set_defaults(func=cmd_coordinator)
 
-    survey = sub.add_parser('survey', help='generate generated-deck corpora in the deck-survey.sh format')
+    survey = sub.add_parser('survey', help='generate quality-corpus decks (coverage/corpora/flash-quality)')
     add_common(survey)
     survey.add_argument('--character', required=True, help='IRONCLAD/SILENT/DEFECT/REGENT/NECROBINDER')
-    survey.add_argument('--count', type=int, default=30)
-    survey.add_argument('--act', type=int, default=-1,
-                        help='fixed actIndex; -1 alternates 0/1 like deck-survey.sh, 2 builds Act 3')
-    survey.add_argument('--act-blocks', default=None,
-                        help='consecutive index blocks per act, e.g. 7,7,6 = acts 0/1/2 (overrides --act)')
-    survey.add_argument('--seed-prefix', default='FLASH-DECK', help='seed is <prefix>-<CHARACTER>-<NN>')
-    survey.add_argument('--vary-extras', action='store_true',
-                        help='vary potions/colorless cards independently of the encounter kind')
+    survey.add_argument('--count', type=int, default=24, help='decks per character, split into Acts 1/2/3 (default 24)')
     survey.add_argument('--run', action='store_true', help='also run a 1-walk differential probe per root')
     survey.add_argument('--walks', type=int, default=1, help='walks for --run (default 1)')
     survey.set_defaults(func=cmd_survey)

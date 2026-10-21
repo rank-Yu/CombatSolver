@@ -188,7 +188,7 @@ Globe Head/GalvanicPower、MagiKnight/DampenPower、Queen/ChainsOfBindingPower�
 Vambrace、Turret Operator/RampartPower、Axebot/StockPower、召唤物初始行动、HellraiserPower、
 攻击后抽牌的死亡结算与 GigantificationPower 等内核语义分歧。修复后 150 个根除第三幕首领的
 `score=rejected`（A3B 批次负责 `Act3BossStrategy` 评估移植）外全部零差异。该批的代表牌组与
-48 条游走结论仍在 [flash-decks 语料说明](../../../coverage/corpora/flash-decks/README.md)。
+48 条游走结论仍在 flash-decks 语料说明（`coverage/corpora/flash-decks/`，已于 2026-10-21 删除，见 Git 历史）。
 
 ## 9. 与现行测试记录的关系
 

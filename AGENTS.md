@@ -56,7 +56,7 @@ CombatSolver 是《杀戮尖塔 2》的单人战斗路线求解器 Mod，使用 
 - `tools/inspection/verify-refactor-boundaries.ps1`（Windows / PowerShell 7）与 `tools/inspection/verify-refactor-boundaries.sh`（Linux / Bash）：当前架构边界的等价可执行门禁。
 - [Flash 搜索后端](docs/flash-search/README.md)：可选结构体状态搜索后端的设计规格、准入与校验合同。
 - `tools/search/OfflineSearchHarness/`：不启动 Godot、在普通 .NET 进程里批量跑搜索的离线宿主，用法与口径见 [离线搜索宿主](docs/OFFLINE_SEARCH_HARNESS.md)。只产指标，不做正确性验收。
-- `tools/search/FlashRegression/`：已提交的 Flash 批量回归入口（全量差分、候选扫描、100 根协调器对照与牌组生成），只调用离线宿主。用法与验收口径见 [Flash 回归工具](tools/search/FlashRegression/README.md)。
+- `tools/search/FlashRegression/`：已提交的 Flash 批量回归入口（全量差分、候选扫描、120 根协调器对照与质量语料生成），只调用离线宿主。用法与验收口径见 [Flash 回归工具](tools/search/FlashRegression/README.md)。
 
 源码与当前可重跑结果优先于历史说明。职责发生变化时，同一提交更新 `docs/ARCHITECTURE.md`、相关 skill 和结构门禁，避免多份地图继续漂移。
 

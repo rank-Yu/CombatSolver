@@ -34,8 +34,8 @@ description: 修改 Flash 搜索后端：src/Flash 的内核与内容定义（Ke
 ## 验证
 
 - 纯内核：编译并运行 `tools/testing/checks/FlashKernelChecks/`。
-- 差分：`python3 -B tools/search/FlashRegression/flash_regression.py diff --label <标签> --only fixtures --root <fixture>`（或 `--only decks --root <牌组>`），工具负责 Release 构建、离线宿主与 K0，并运行到 `--milestone M1`；要求 `flash-diff.txt` 首行 `failed=0 walkFailed=0`。全量根集合用 `diff --walks 32`，第三幕语料用 `--only act3`。
-- 批量回归：`scan`（候选路线扫描）与 `coordinator`（100 根 Off/On 质量对照）同样经该入口；口径、输出与验收条件见 [Flash 回归工具](../../../tools/search/FlashRegression/README.md)。直接设置 `OFFLINE_HARNESS_FLASH_DIFF=1` 只用于调试单根。
+- 差分：`python3 -B tools/search/FlashRegression/flash_regression.py diff --label <标签> --only fixtures --root <fixture>`（或 `--only quality --root quality-<角色>-<NNN>`），工具负责 Release 构建、离线宿主与 K0，并运行到 `--milestone M1`；要求 `flash-diff.txt` 首行 `failed=0 walkFailed=0`。全量根集合用 `diff --jobs 8`。
+- 批量回归：`scan`（候选路线扫描）与 `coordinator`（120 根 Off/On 质量对照）同样经该入口；口径、输出与验收条件见 [Flash 回归工具](../../../tools/search/FlashRegression/README.md)。直接设置 `OFFLINE_HARNESS_FLASH_DIFF=1` 只用于调试单根。
 - 结构门禁：`./tools/inspection/verify-refactor-boundaries.sh`（Windows 用同名 `.ps1`）。
 - 文档改动：`python3 -B tools/inspection/verify-documentation.py`。
 

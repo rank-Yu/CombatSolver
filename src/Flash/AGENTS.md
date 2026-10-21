@@ -5,7 +5,7 @@
 | 子目录 | 命名空间 | 职责 |
 | --- | --- | --- |
 | `Kernel/` | `CombatSolver.Flash.Kernel` | 结构体状态 `FlashBattle`、回合与出牌管线、结算与规则表 |
-| `Content/` | `CombatSolver.Flash.Content.*` | 卡牌、Power、遗物、药水、球、附魔与怪物定义 |
+| `Content/` | `CombatSolver.Flash.Content.*` | 卡牌、Power、遗物、药水、球、附魔与怪物定义；文件名按内容/来源命名，角色卡按 `StarterCards`、`AttackCards.<稀有度>`、`SkillCards.<稀有度>`、`PowerCards.<稀有度>`、`GeneratedCards` 分文件，不使用批次代号 |
 | `Search/` | `CombatSolver.Flash.Search`（含 `.Scoring`） | `FlashBeamSolver` 与状态评估 |
 | `Bridge/` | `CombatSolver.Flash.Bridge` | 准入、规则编译、旧引擎状态导入、动作与选择翻译、路线核对与物化、开启模式失败约定 |
 

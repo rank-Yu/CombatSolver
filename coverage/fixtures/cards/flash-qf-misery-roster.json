@@ -1,7 +1,7 @@
 {
  "schemaVersion": 1,
  "scenarioId": "FLASH-QF-MISERY-ROSTER",
- "generatedScenarioPath": "coverage/corpora/flash-quality/NECROBINDER-15/spec.json",
+ "generatedScenarioPath": "coverage/fixtures/cards/specs/flash-qf-misery-roster.spec.json",
  "cards": [],
  "flashPrefixPlan": [
   {

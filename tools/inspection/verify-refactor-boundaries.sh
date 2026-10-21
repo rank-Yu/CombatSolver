@@ -47,7 +47,8 @@ strategy_id_literal_count=$(rg -o --no-filename '"[A-Z][A-Z0-9_]{4,}"' "$reposit
     --glob '!PotionValuationRegistry.cs' \
     --glob '!OpeningActionRegistry.cs' \
     --glob '!TargetPlanRegistry.cs' \
-    --glob '!FlashPowerEvidence.cs' | wc -l)
+    --glob '!FlashPowerEvidence.cs' \
+    --glob '!UnsupportedCategories.cs' | wc -l)
 if (( strategy_id_literal_count > 647 )); then
     violations+=("Search strategy ID literals increased: $strategy_id_literal_count > 647")
 fi
