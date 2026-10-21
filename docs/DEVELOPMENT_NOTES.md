@@ -44,6 +44,22 @@ stand-pat 分组前已被同指纹去重代表顶替，不是探测/比较器差
 `flash-qp1-touch-of-insanity` 修正前动作集合失败 47/47/46/45，修正后均为 0；固定根与 120 个
 质量牌组全量动作集合核对见 QP1 报告。
 
+### Flash 选牌药水 X 费筛选（QF4）
+
+`TouchOfInsanity` 的 Flash 选项谓词把 `EnergyCostWithModifiers`/`StarCostWithModifiers`
+（对 X 费返回当前能量/星能，等价于实付值）当成原版 `CardModel.CostsEnergyOrStars` 的 global
+分支，X 费牌因此在资源大于 0 时多出旧引擎没有的选项，后续选择会落到不同的牌。现按原版
+`CardModel.cs:1579-1595` 的 `!EnergyCost.CostsX` / `!HasStarCostX` 前置条件排除 X 费的 global
+项，local 能量项对 X 费保持占位 0（X 星费的 local 仍按 `CurrentStarCost`，临时星费大于 0 时
+保留原版可选中行为）；Unplayable 与费用被改为 0 的牌仍按原版取两支并集，回放数不参与
+费用判断。其余三种 QP1 药水与 `DropletOfPrecognition` 都没有费用筛选谓词，选项来源、顺序与
+`PotionChoiceSupport.GetSpec` 一致，本轮无同类修改。
+
+新增固定根 `flash-qf4-touch-of-insanity-xcost`（手牌含 `WHIRLWIND` 与普通耗能牌）：
+修正前 `failed=3 walkFailed=17`（首个差异 `old=2 flash=3`），修正后 32 条游走
+`failed=0 walkFailed=0 actionSetFailed=0`；四个 `flash-qp1-*` 固定根与
+`quality-NECROBINDER-022` 默认游走数同为零差异，候选扫描 `routes=7 mismatches=0`。
+
 `AddRequired` 的来源标签默认关闭，仅离线追踪打开：由 `SearchDiagnosticsSink.RetentionLabels`
 控制在 `GlobalRetention` 中输出 `requiredLabel`。关闭时 DEFECT-012 开启模式协调器路线、
 总展开 242219、总转移 1621887 与证据逐位相同。
