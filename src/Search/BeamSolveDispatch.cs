@@ -274,6 +274,14 @@ internal static class BeamSolveDispatch
     /// Turns a non-adopted Flash attempt into the caller's existing no-route shape or one stable
     /// explicit failure. Never falls back to the existing solver.
     /// </summary>
+    private static void AttachFlashMetrics(FlashSolveOutcome outcome)
+    {
+        if (outcome.Result is not { } result || outcome.Search is not { } search)
+            return;
+        result.FlashExpandedNodes = search.ExpandedNodes;
+        result.FlashSearchElapsed = search.Elapsed;
+    }
+
     private static void ThrowOnRefusal(SearchPolicySnapshot policy, object purpose, FlashAttempt attempt)
     {
         if (attempt.Mismatch is { } mismatch)
@@ -420,6 +428,7 @@ internal static class BeamSolveDispatch
                 profileScale: ProfileScale(request.Purpose),
                 earlyTurnScoutDepth: request.EarlyTurnScoutDepth,
                 earlyTurnScoutObserver: request.EarlyTurnScoutObserver);
+            AttachFlashMetrics(outcome);
             return new FlashAttempt(outcome, null);
         }
         catch (FlashVerificationException ex)
@@ -525,6 +534,7 @@ internal static class BeamSolveDispatch
                 earlyTurnScoutObserver: request.EarlyTurnScoutObserver,
                 resetFixedPrefixSchedulingBaseline: request.Purpose == ContinuationPurpose.SmartOpeningPotionPosterior
                     ? request.ResetFixedPrefixSchedulingBaseline : null);
+            AttachFlashMetrics(outcome);
             return new FlashAttempt(outcome, null);
         }
         catch (FlashVerificationException ex)

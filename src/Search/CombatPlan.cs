@@ -1487,6 +1487,11 @@ internal sealed class SolverResult
     public required SolverSnapshot Snapshot { get; init; }
     public required IntentForecast Forecast { get; init; }
     public required int ExpandedNodes { get; init; }
+
+    /// <summary>Flash search's own expansion count/time when this result came from the Flash backend.</summary>
+    public int? FlashExpandedNodes { get; internal set; }
+    public TimeSpan? FlashSearchElapsed { get; internal set; }
+
     public long TotalExpandedNodes { get; internal set; }
     public NoveltySearchTelemetry? NoveltySearch { get; internal set; }
     public NoveltyPortfolioTelemetry? NoveltyPortfolio { get; internal set; }

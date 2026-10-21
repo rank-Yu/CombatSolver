@@ -180,6 +180,7 @@ internal static class FlashDifferentialProbe
         bool checkRank = policy.Profile.ContinuousThreatRanking || policy.Profile.ContextualRanking != null;
         ScoreCheck scores = new(scorer, bound, solver, report, checkRank);
         TraitCheck traits = new(player, rules, report);
+        FlashActionSetCheck actionSet = new(root, names, damage, policy, player, rules, report);
 
         FlashAction[] actions = new FlashAction[FlashKernel.MaxLegalActions];
         int oneStepChecked = 0, oneStepFailed = 0, choiceActions = 0, choiceCapped = 0, choiceDeadEnds = 0, unsupported = 0;
@@ -193,6 +194,7 @@ internal static class FlashDifferentialProbe
                 ? $"root[{rootIndex}]{DescribeChoices(rootIndex, searchRoots)}"
                 : "root";
             scores.Check(rootSnapshot, flashRoot, prefixPlan.Count, rootLabel);
+            actionSet.Check(rootSnapshot, flashRoot, $"{rootLabel} root", isRoot: true);
             if (policy.IncludeTurnSetup)
                 report.Add($"ROOT[{rootIndex}] choices={DescribeChoiceVector(searchRoots[rootIndex].Choices)}");
 
@@ -232,6 +234,8 @@ internal static class FlashDifferentialProbe
                     }
                     else
                     {
+                        actionSet.Check(outcome.OldChild!, outcome.FlashChild,
+                            $"{rootLabel} K1 {completion.Action}", isRoot: false);
                         traits.Check(rootSnapshot, outcome.OldChild!, flashRoot, outcome.FlashChild,
                             completion.Action, $"K1 {rootLabel} {completion.Action}", completion.HistoryRisk);
                         scores.Check(outcome.OldChild!, outcome.FlashChild, 1,
@@ -254,6 +258,8 @@ internal static class FlashDifferentialProbe
                         endings[$"{battle.Outcome}/{snapshot.BoundaryReason}"] = endings.GetValueOrDefault($"{battle.Outcome}/{snapshot.BoundaryReason}") + 1;
                         break;
                     }
+                    actionSet.Check(snapshot, battle, $"{rootLabel} K2 seed={seed} step={step}",
+                        isRoot: false);
                     count = FlashKernel.LegalActions(battle, rules, actions);
                     // Favour card plays so walks reach deeper hands, deaths and shuffles.
                     FlashAction action = count > 1 && random.Next(4) != 0 ? actions[random.Next(count - 1)] : actions[random.Next(count)];
@@ -318,6 +324,9 @@ internal static class FlashDifferentialProbe
         summary["boundChecked"] = scores.BoundChecked;
         summary["boundFailed"] = scores.BoundFailed;
         summary["unsupported"] = unsupported;
+        summary["actionSetChecked"] = actionSet.Checked;
+        summary["actionSetFailed"] = actionSet.Failed;
+        summary["actionSetFirst"] = actionSet.FirstFailure;
         summary["boundFailedFields"] = scores.BoundFailedFields;
         summary["rankChecked"] = scores.RankChecked;
         summary["noveltyFailed"] = scores.NoveltyFailed;
@@ -343,6 +352,8 @@ internal static class FlashDifferentialProbe
             + $" declinedChecked={traits.DeclinedChecked} declinedFailed={traits.DeclinedFailed}"
             + $" pureChecked={traits.PureChecked} pureRefMismatch={traits.PureReferenceMismatch}"
             + (policy.IncludeTurnSetup ? $" turnSetupRoots={searchRoots.Count}" : "")
+            + $" actionSetChecked={actionSet.Checked} actionSetFailed={actionSet.Failed}"
+            + (actionSet.FirstFailure is { } firstActionSet ? $" actionSetFirst={firstActionSet}" : "")
             + $" unsupported={unsupported}");
         if (scores.FailedFields.Count > 0)
             report.Insert(1, "K4 FIELDS " + string.Join(",", scores.FailedFields

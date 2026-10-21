@@ -77,6 +77,23 @@ K1 单步穷举与 K2 随机游走的差分回归，默认根集合：
 分片与并发：`--jobs` 控制同时运行的宿主进程数（默认 4）；`--shards N` 按
 “每组根的下标 mod N”分片，`--shard k` 只跑第 k 片。默认 `--shards 1`、不筛选。
 
+### `trace`
+
+对一个质量语料根运行单条请求的路线追踪：目标 `route.json` 来自关闭模式（或指定阶段），
+工具把每一步映射到 Flash 动作，并报告目标状态在 Flash 侧的生成、去重顶替、排名截断、
+必保泳道/分组、下界剪枝与回合结束压缩；同一请求同时跑现有求解器，报告目标状态每层的
+原始排名、必保席位与选中席位。追踪默认关闭，不改变任何选择结果。
+
+```bash
+python3 -B tools/search/FlashRegression/flash_regression.py trace \
+  --id DEFECT-012 --route .local/tool-tasks/flash-search/qr-evidence/DEFECT-012/coord-Off/route.json \
+  --purpose SmartOpeningPotionPosterior --continuation --prefix 1 --beam 60 \
+  --nodes 120000 --budget-ms 120000 --side both
+```
+
+输出 `flash-trace.txt`。`--flags` 接受 `band,base,power`，药水/incumbent 参数见
+`--help`；`--skip-build` 复用现有 Release 构建。
+
 ### `scan`
 
 与 `diff` 相同的根集合与分片规则，但每根改为 Flash 求解后把排序前 N 条最终候选路线交现有
@@ -116,9 +133,10 @@ K1 单步穷举与 K2 随机游走的差分回归，默认根集合：
 
 | 子命令 | 输出 | 通过条件 |
 | --- | --- | --- |
-| `diff` | `SUMMARY.txt`、每根 `stdout.txt` / `flash-diff.txt`、可选 `BASELINE.txt` | 每根 `exit=0`，首行 `SUMMARY failed=0 walkFailed=0`，`unsupported=0`；有 `--baseline` 时 `bad=0` |
+| `diff` | `SUMMARY.txt`、每根 `stdout.txt` / `flash-diff.txt`、可选 `BASELINE.txt` | 每根 `exit=0`，首行 `SUMMARY failed=0 walkFailed=0`，`actionSetFailed=0`，`unsupported=0`；有 `--baseline` 时 `bad=0` |
 | `scan` | `SUMMARY.txt`、每根 `harness-result.json` | 每根 `exit=0`，`mismatches=0` |
 | `coordinator` | `TABLE.txt`、`STRATEGIC.txt`、每根 `Off`/`On` | 每根 `FLASH_ADOPTED`，没有 `FLASH_SEARCH_FAILED`；数字按实际结果计入 |
+| `trace` | `flash-trace.txt`、`stdout.txt` | 目标路线可映射；映射失败会写首个不能映射的步骤 |
 | `survey` | 每根 `spec.json` / `request.json`、`SUMMARY.txt` | 路径可解析；`--run` 时探针输出可读 |
 
 默认输出根目录是 `.local/flash-regression/<label>/`；`--out` 可指定别处。结果、日志与构建
@@ -127,7 +145,9 @@ K1 单步穷举与 K2 随机游走的差分回归，默认根集合：
 ## 已知边界
 
 - `diff`/`scan` 只证明 Flash 与现有引擎一致；现有引擎与原版是否一致由既有的 actual/simulated
-  严格差分负责。`coordinator` 只产质量与耗时指标，不做正确性验收。
+  严格差分负责。`diff` 的 `actionSetFailed` 是动作集合核对：同一状态下现有求解器计划动作与
+  Flash 合法动作的规范化键（种类、卡牌/药水、目标、药水槽位、药水是否需要选择）；卡牌选择在
+  展开时附加，由 K1 的逐动作选择请求对账。`coordinator` 只产质量与耗时指标，不做正确性验收。
 - `coordinator` 的 Off/On 是同一预算下的单次运行；同代码重复测量时个别根有数点波动，
   不能把单根差当作回归。
 - `coordinator` 的预算按墙钟计，记录的数字注明并行进程数。当前口径是 8 个并行进程

@@ -550,7 +550,9 @@ internal sealed partial class CombatBeamSolver
             return true;
         }
 
-        private static void AddRequired(List<SearchNode> required, SearchNode? candidate, int limit)
+        private void AddRequired(List<SearchNode> required, SearchNode? candidate, int limit,
+            [System.Runtime.CompilerServices.CallerArgumentExpression(nameof(candidate))]
+            string label = "")
         {
             // 原来的 Any(lambda) 捕获 candidate，每次调用都要建闭包与委托；
             // ContainsReference 是同样的顺序扫描 + 短路，只是不分配。
@@ -561,6 +563,12 @@ internal sealed partial class CombatBeamSolver
                 return;
             }
             required.Add(candidate);
+            if (_requiredLabels != null)
+            {
+                _requiredLabels[candidate] = _requiredLabels.TryGetValue(candidate, out string? prior)
+                    ? prior + ";" + label
+                    : label;
+            }
         }
 
         private static bool ContainsReference(IReadOnlyList<SearchNode> nodes, SearchNode candidate)

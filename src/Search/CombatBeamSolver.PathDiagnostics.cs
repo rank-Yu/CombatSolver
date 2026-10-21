@@ -12,6 +12,7 @@ internal sealed partial class CombatBeamSolver
         IReadOnlyList<SearchNode> Required,
         IReadOnlyList<SearchNode> Routing,
         IReadOnlyList<SearchNode> Selected,
+        IReadOnlyDictionary<SearchNode, string>? RequiredLabels,
         int Limit,
         int EffectiveLimit,
         int? RoutingQuota,
@@ -241,6 +242,7 @@ internal sealed partial class CombatBeamSolver
                 Retention = new SearchPathRetentionDetails(
                     RawRank: index,
                     RequiredIndex: ObservedReferenceIndex(decision.Required, node),
+                    RequiredLabel: decision.RequiredLabels?.GetValueOrDefault(node),
                     RoutingIndex: ObservedReferenceIndex(decision.Routing, node),
                     SelectedIndex: ObservedReferenceIndex(decision.Selected, node),
                     BeamRankScore: decision.BeamRankScore(node),

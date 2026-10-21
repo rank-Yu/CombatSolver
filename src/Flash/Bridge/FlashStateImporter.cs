@@ -744,23 +744,47 @@ internal static class FlashStateImporter
         var starCosts = card._temporaryStarCosts;
         if (starCosts.Count > 0)
         {
-            // Flash keeps one temporary star cost. CurrentStarCost reads the last entry, and cleanup
-            // removes whole expiration classes, so several identical entries behave exactly like the
-            // last one (BulletTime can stack duplicates). Different costs or expirations are not
-            // representable: removing one would expose an older value.
-            TemporaryCardCost last = starCosts[^1];
-            for (int index = 0; index < starCosts.Count - 1; index++)
+            // Flash keeps the current entry plus up to two older entries with the same cost,
+            // preserving their clear flags. CurrentStarCost reads the last entry; cleanup removes
+            // whole expiration classes and exposes the next older entry. Different costs are not
+            // representable (the single TemporaryStarCost value is shared by all entries).
+            int cost = starCosts[0].Cost;
+            bool allSame = true;
+            for (int index = 1; index < starCosts.Count; index++)
             {
                 TemporaryCardCost entry = starCosts[index];
-                if (entry.Cost != last.Cost
-                    || entry.ClearsWhenTurnEnds != last.ClearsWhenTurnEnds
-                    || entry.ClearsWhenCardIsPlayed != last.ClearsWhenCardIsPlayed)
+                if (entry.Cost != cost
+                    || entry.ClearsWhenTurnEnds != starCosts[0].ClearsWhenTurnEnds
+                    || entry.ClearsWhenCardIsPlayed != starCosts[0].ClearsWhenCardIsPlayed)
                 {
-                    throw new FlashImportException(FlashRejection.Capacity,
-                        $"{card.Id.Entry} 临时星能费用条目不一致（{starCosts.Count} 条）");
+                    allSame = false;
+                    break;
                 }
             }
-            result.SetTemporaryStarCost(last.Cost, last.ClearsWhenTurnEnds, last.ClearsWhenCardIsPlayed);
+            if (starCosts.Count > 3 && !allSame)
+            {
+                throw new FlashImportException(FlashRejection.Capacity,
+                    $"{card.Id.Entry} 临时星能费用条目 {starCosts.Count} 条");
+            }
+            if (allSame)
+            {
+                result.SetTemporaryStarCost(cost, starCosts[0].ClearsWhenTurnEnds,
+                    starCosts[0].ClearsWhenCardIsPlayed);
+            }
+            else
+            {
+                for (int index = 0; index < starCosts.Count; index++)
+                {
+                    TemporaryCardCost entry = starCosts[index];
+                    if (entry.Cost != cost)
+                    {
+                        throw new FlashImportException(FlashRejection.Capacity,
+                            $"{card.Id.Entry} 临时星能费用条目成本不一致（{starCosts.Count} 条）");
+                    }
+                    result.SetTemporaryStarCost(entry.Cost, entry.ClearsWhenTurnEnds,
+                        entry.ClearsWhenCardIsPlayed);
+                }
+            }
         }
 
         FlashCardDef def = FlashRegistry.Card(id);

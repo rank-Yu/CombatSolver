@@ -431,8 +431,11 @@ internal sealed partial class CombatBeamSolver
         Func<SearchNode, StandPatEvaluation> _evaluateStandPat,
         Action<IEnumerable<SearchNode>>? _prepareStandPat = null,
         DevelopmentSearchStrategy? _developmentStrategy = null,
-        PlanCommitment? _planCommitment = null)
+        PlanCommitment? _planCommitment = null,
+        bool _retentionLabels = false)
     {
+        private readonly Dictionary<SearchNode, string>? _requiredLabels =
+            _retentionLabels ? new(ReferenceEqualityComparer.Instance) : null;
         private void ForEachRetentionIndex(
             int count,
             ParallelExpansionWorkProfile.Kind kind,
@@ -1053,8 +1056,8 @@ internal sealed partial class CombatBeamSolver
             if (ranked.Count <= limit)
             {
                 observe?.Invoke(new GlobalRetentionDecision(
-                    ranked, [], routingChoices, ranked, limit, limit, null, RoutingChoiceLimit,
-                    observedRoutingSignatures, observedOptionLeaders, BeamRankScore));
+                    ranked, [], routingChoices, ranked, _requiredLabels, limit, limit, null,
+                    RoutingChoiceLimit, observedRoutingSignatures, observedOptionLeaders, BeamRankScore));
                 AssignRetentionRanks(ranked, []);
                 return ranked;
             }
@@ -1768,7 +1771,7 @@ internal sealed partial class CombatBeamSolver
             else
                 SortByBeamRank(ranked);
             observe?.Invoke(new GlobalRetentionDecision(
-                quotaPool, required, routingChoices, ranked, limit, effectiveLimit,
+                quotaPool, required, routingChoices, ranked, _requiredLabels, limit, effectiveLimit,
                 routingChoiceQuota, RoutingChoiceLimit,
                 observedRoutingSignatures, observedOptionLeaders, BeamRankScore));
             AssignRetentionRanks(ranked, required);

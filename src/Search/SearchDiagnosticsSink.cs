@@ -3,9 +3,13 @@ namespace CombatSolver;
 internal sealed class SearchDiagnosticsSink(
     Action<string> info,
     Action<string> debug,
-    SearchPathObserver? pathObserver = null)
+    SearchPathObserver? pathObserver = null,
+    bool retentionLabels = false)
 {
     public SearchPathObserver? PathObserver { get; } = pathObserver;
+
+    /// <summary>Opt-in source labels on required representatives; default off.</summary>
+    public bool RetentionLabels { get; } = retentionLabels;
 
     public void Info(string message) => info(message);
 
@@ -109,6 +113,7 @@ internal sealed record SearchPathRetentionDetails(
     int? PoolIndex = null,
     int? RawRank = null,
     int? RequiredIndex = null,
+    string? RequiredLabel = null,
     int? RoutingIndex = null,
     int? SelectedIndex = null,
     double? BeamRankScore = null,

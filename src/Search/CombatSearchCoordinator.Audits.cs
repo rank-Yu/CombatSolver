@@ -1158,6 +1158,8 @@ internal static partial class CombatSearchCoordinator
                 $"required={hpRequired} protects_loot={protectsLoot} acceptable={acceptable} " +
                 $"selected={improvesSelection} " +
                 $"expanded={candidate.ExpandedNodes} transitions={candidate.TransitionCount} " +
+                $"flash_expanded={candidate.FlashExpandedNodes?.ToString() ?? "-"} " +
+                $"flash_elapsed_ms={(candidate.FlashSearchElapsed is { } flashElapsed ? flashElapsed.TotalMilliseconds.ToString("F1") : "-")} " +
                 $"choice_branches={candidate.ChoiceBranchesEvaluated} " +
                 $"elapsed_ms={candidate.Elapsed.TotalMilliseconds:F1} " +
                 $"allocated_bytes={candidate.WorkerAllocatedBytes} " +

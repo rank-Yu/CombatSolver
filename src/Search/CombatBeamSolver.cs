@@ -204,7 +204,8 @@ internal sealed partial class CombatBeamSolver(
         EvaluateStandPat,
         PrepareStandPatProbes,
         _developmentStrategy,
-        _planCommitment);
+        _planCommitment,
+        policy.Diagnostics.RetentionLabels);
     private FinalPlanOrdering? _finalOrdering;
     private FinalPlanOrdering FinalOrdering => _finalOrdering ??= new FinalPlanOrdering(
         _potionPolicy,

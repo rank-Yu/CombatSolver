@@ -201,6 +201,18 @@ plan 每项的字段：`label`（必填，简单目录名）、`request`（必�
 
 `Coordinator --use-portfolio` 默认启用组合再分配。`--disable-reallocated-refinement` 在同一最终程序集恢复旧默认成员列表，供明确A/B；`--reallocated-refinement` 可显式开启。真实运行是否采用新布局由 `PORTFOLIO_REALLOCATION` 与实际成员表确认，显式成员布局和其他可选实验不被改写。配置保存在 `searchPolicy.Profile.ReallocatedRefinementPortfolio`，对照工具将其视为算法差异而保留目标政策/根/预算核对。
 
+## Flash 路线追踪
+
+设置 `OFFLINE_HARNESS_FLASH_TRACE_ROUTE=<route.json>` 后，宿主在 M1 之后用给定目标路线运行一次 Flash 请求，并逐层报告目标状态是否生成、是否在去重中被同指纹代表顶替、排名截断位置、必保泳道/分组标记、下界剪枝与预算结束；同一请求再跑一次现有求解器，用 `SearchPathObserver` 记录目标状态键的原始排名、必保席位和选中席位。追踪只写 `flash-trace.txt`，不改变选择结果；不设置该变量时零诊断。请求参数用同一组环境变量复现：
+
+- `OFFLINE_HARNESS_FLASH_TRACE_PURPOSE`、`OFFLINE_HARNESS_FLASH_TRACE_CONTINUATION=1`：目的枚举。
+- `OFFLINE_HARNESS_FLASH_TRACE_PREFIX`：目标路线开头的固定前缀动作数。
+- `OFFLINE_HARNESS_FLASH_TRACE_BEAM` / `_NODES` / `_PROFILE_SCALE` / `_FLAGS`（`band,base,power`）。
+- `OFFLINE_HARNESS_FLASH_TRACE_MAX_POTIONS` / `_MIN_POTIONS` / `_POTION_POLICY` / `_INCUMBENT_DEFICIT` / `_INCUMBENT_TURN`。
+- `OFFLINE_HARNESS_FLASH_TRACE_SIDE=both|flash|existing`、`_OUT`。
+
+`tools/search/FlashRegression/flash_regression.py trace` 封装同一入口。该追踪是分析工具，不改变生产路径；生产 `FlashBeamOptions.Trace` 恒为 null。
+
 ## Flash 差分探针
 
-设置 `OFFLINE_HARNESS_FLASH_DIFF=1` 后，宿主在到达玩家第一回合（M1）时比较现有引擎与 Flash 内核：先投影根，再对全部合法动作各执行一步、并按固定种子做多回合随机游走，逐步比较投影后的字节。结果写入 `flash-diff.txt` 与 `harness-result.json` 的 `flashDiff` 字段。根含 Flash 尚不支持的内容时报告准入拒绝原因，并在下一行 `MISSING` 列出根上全部没有 Flash 定义的卡牌、遗物、药水与怪物，不做比较。命令与当前证据见 [Flash 测试记录](flash-search/testing.md)。
+设置 `OFFLINE_HARNESS_FLASH_DIFF=1` 后，宿主在到达玩家第一回合（M1）时比较现有引擎与 Flash 内核：先投影根，再对全部合法动作各执行一步、并按固定种子做多回合随机游走，逐步比较投影后的字节。每个根状态、K1 子状态与 K2 状态还比较动作集合：现有求解器计划动作与 Flash 合法动作按（种类、卡牌/药水、目标、药水槽位、药水是否需要选择）去重后的键集合；差异计入 `actionSetFailed`，并写出首例。结果写入 `flash-diff.txt` 与 `harness-result.json` 的 `flashDiff` 字段。根含 Flash 尚不支持的内容时报告准入拒绝原因，并在下一行 `MISSING` 列出根上全部没有 Flash 定义的卡牌、遗物、药水与怪物，不做比较。命令与当前证据见 [Flash 测试记录](flash-search/testing.md)。

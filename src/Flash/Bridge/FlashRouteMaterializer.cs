@@ -42,6 +42,15 @@ internal sealed record FlashSolveOutcome(
     public IReadOnlyList<string> CandidateMismatchDetails { get; init; } = [];
 }
 
+/// <summary>Inputs the offline route-trace factory needs after admission and root import.</summary>
+internal sealed record FlashTraceContext(
+    OpeningProbe Probe,
+    Player Player,
+    SimulationSnapshot SearchRoot,
+    FlashBattle Root,
+    FlashRules Rules,
+    IReadOnlyList<PlanAction> Prefix);
+
 /// <summary>
 /// Runs one Flash solve for a <see cref="the existing search"/> request: admission and root import,
 /// <see cref="FlashBeamSolver"/>, step-by-step replay of the chosen route through the existing
@@ -87,7 +96,9 @@ internal static partial class FlashRouteMaterializer
         int profileScale = ProfileWidthScale,
         PlanCommitment? planCommitment = null,
         int earlyTurnScoutDepth = 0,
-        Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null)
+        Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null,
+        FlashBeamTrace? trace = null,
+        Func<FlashTraceContext, FlashBeamTrace?>? traceFactory = null)
     {
         FlashWorkAccounting accounting = new(policy.RequestWorkTotals, purpose, continuationPurpose,
             profileScale, policy.FramePressureSignal, policy.Diagnostics);
@@ -99,7 +110,7 @@ internal static partial class FlashRouteMaterializer
                 primaryIncumbent, fixedPrefixActions, maximumPotionUses, minimumPotionUses,
                 earliestPotionTurn, continuationPurpose, potionFreePolicyBaseline,
                 resetFixedPrefixSchedulingBaseline, profileScale, planCommitment, earlyTurnScoutDepth,
-                earlyTurnScoutObserver);
+                earlyTurnScoutObserver, trace, traceFactory);
         }
         finally
         {
@@ -130,7 +141,9 @@ internal static partial class FlashRouteMaterializer
         int profileScale = ProfileWidthScale,
         PlanCommitment? planCommitment = null,
         int earlyTurnScoutDepth = 0,
-        Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null)
+        Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null,
+        FlashBeamTrace? trace = null,
+        Func<FlashTraceContext, FlashBeamTrace?>? traceFactory = null)
     {
         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
         Player player = root.PlayerIdentity;
@@ -365,6 +378,9 @@ internal static partial class FlashRouteMaterializer
             PowerCommitments = powerCommitments,
             Novelty = policy.NoveltySearch is { } novelty ? FlashNoveltyOptions.From(novelty) : null,
         };
+        trace ??= traceFactory?.Invoke(new FlashTraceContext(
+            probe, player, searchRootSnapshot, battles[0], rules, prefix));
+        options = options with { Trace = trace };
         // The offensive-reserved lane is a Flash-specific diversity seat (the existing RankBest has
         // no such lane). Short searches rely on it to keep aggressive lines; the production Medium
         // coordinator budget has enough rank seats without reserving a quarter of the beam.

@@ -226,7 +226,7 @@ def diff_line_failed(line: str) -> bool:
     summary = match.group(2)
     if not summary.startswith('SUMMARY'):
         return True
-    for key in ('failed', 'walkFailed'):
+    for key in ('failed', 'walkFailed', 'actionSetFailed'):
         found = re.search(rf'\b{key}=(\d+)', summary)
         if not found or int(found.group(1)) != 0:
             return True
@@ -242,8 +242,8 @@ def scan_line_failed(line: str) -> bool:
 
 
 def compare_baseline(new_path: Path, base_path: Path) -> tuple[list[str], str]:
-    fail_keys = ('failed', 'walkFailed', 'scoreFailed', 'boundFailed', 'traitFailed',
-                 'pocketwatchFailed', 'declinedFailed', 'unsupported')
+    fail_keys = ('failed', 'walkFailed', 'actionSetFailed', 'scoreFailed', 'boundFailed',
+                 'traitFailed', 'pocketwatchFailed', 'declinedFailed', 'unsupported')
     new = parse_summary(new_path)
     base = parse_summary(base_path)
     problems: list[str] = []
@@ -631,6 +631,55 @@ def cmd_survey(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_trace(args: argparse.Namespace) -> int:
+    """Run one request with the offline Flash route trace enabled.
+
+    The target route is an existing-engine PlanAction list (for example a coordinator
+    `route.json`). The harness reconstructs the same request, maps the route onto Flash
+    actions, and reports every generation/dedup/rank/lane/bound/prune step. The existing
+    solver runs the same request with a state-key path observer.
+    """
+    request = args.request
+    if request is None:
+        request = args.quality_dir / args.id / 'request.json'
+    if not request.is_file():
+        raise SystemExit(f'missing request: {request}')
+    route = args.route or args.quality_dir / args.id / 'route.json'
+    if not route.is_file():
+        raise SystemExit(f'missing route: {route}')
+    out = args.out or (OUT / 'trace' / f"{args.id}-{args.purpose}")
+    out.mkdir(parents=True, exist_ok=True)
+    env = baseline_environment()
+    env['OFFLINE_HARNESS_FLASH_TRACE_ROUTE'] = str(route.resolve())
+    env['OFFLINE_HARNESS_FLASH_TRACE_PURPOSE'] = args.purpose
+    env['OFFLINE_HARNESS_FLASH_TRACE_CONTINUATION'] = '1' if args.continuation else '0'
+    env['OFFLINE_HARNESS_FLASH_TRACE_PREFIX'] = str(args.prefix)
+    env['OFFLINE_HARNESS_FLASH_TRACE_BEAM'] = str(args.beam)
+    env['OFFLINE_HARNESS_FLASH_TRACE_NODES'] = str(args.nodes)
+    env['OFFLINE_HARNESS_FLASH_TRACE_SIDE'] = args.side
+    env['OFFLINE_HARNESS_FLASH_TRACE_OUT'] = str((out / 'flash-trace.txt').resolve())
+    if args.flags:
+        env['OFFLINE_HARNESS_FLASH_TRACE_FLAGS'] = args.flags
+    if args.max_potions is not None:
+        env['OFFLINE_HARNESS_FLASH_TRACE_MAX_POTIONS'] = str(args.max_potions)
+    if args.min_potions is not None:
+        env['OFFLINE_HARNESS_FLASH_TRACE_MIN_POTIONS'] = str(args.min_potions)
+    if args.potion_policy:
+        env['OFFLINE_HARNESS_FLASH_TRACE_POTION_POLICY'] = args.potion_policy
+    command = [args.dotnet, str(args.harness), '--request', str(request),
+               '--label', args.id, '--profile', 'Medium', '--beam', str(args.beam),
+               '--nodes', str(args.nodes), '--budget-ms', str(args.budget_ms),
+               '--search-mode', 'Evaluate', '--out', str(out)]
+    code = run_command(command, cwd=ROOT, env=env, timeout=args.timeout,
+                       log=out / 'stdout.txt')
+    print(f'exit={code} trace={out / "flash-trace.txt"}')
+    trace = out / 'flash-trace.txt'
+    if trace.is_file():
+        for line in trace.read_text(encoding='utf-8').splitlines()[:80]:
+            print(line)
+    return 0 if code == 0 else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -672,6 +721,26 @@ def build_parser() -> argparse.ArgumentParser:
                              help='other coordinator output; run the per-root quality comparison')
     coordinator.add_argument('--compare-mode', default='On', choices=('Off', 'On'))
     coordinator.set_defaults(func=cmd_coordinator)
+
+    trace = sub.add_parser('trace', help='trace a target route through one Flash request')
+    add_common(trace)
+    trace.add_argument('--id', required=True, help='quality corpus directory name (for request/route)')
+    trace.add_argument('--quality-dir', type=Path, default=QUALITY)
+    trace.add_argument('--request', type=Path, default=None, help='override request json')
+    trace.add_argument('--route', type=Path, default=None, help='target route.json (default <quality-dir>/<id>/route.json)')
+    trace.add_argument('--purpose', required=True, help='DirectSearchPurpose or ContinuationPurpose name')
+    trace.add_argument('--continuation', action='store_true', help='purpose is a ContinuationPurpose')
+    trace.add_argument('--prefix', type=int, default=0, help='fixed-prefix action count (default 0)')
+    trace.add_argument('--beam', type=int, default=60, help='profile beam width (Flash uses x4)')
+    trace.add_argument('--nodes', type=int, default=120000)
+    trace.add_argument('--budget-ms', type=int, default=120000)
+    trace.add_argument('--flags', default='', help='comma list: band,base,power')
+    trace.add_argument('--max-potions', type=int, default=None)
+    trace.add_argument('--min-potions', type=int, default=None)
+    trace.add_argument('--potion-policy', default=None, help='SolverPotionPolicy override')
+    trace.add_argument('--side', default='both', choices=('both', 'flash', 'existing'))
+    trace.add_argument('--timeout', type=float, default=480)
+    trace.set_defaults(func=cmd_trace)
 
     survey = sub.add_parser('survey', help='generate quality-corpus decks (coverage/corpora/flash-quality)')
     add_common(survey)
