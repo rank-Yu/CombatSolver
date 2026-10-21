@@ -36,13 +36,8 @@ python3 -B tools/search/FlashRegression/flash_regression.py diff \
 # 最终候选路线扫描
 python3 -B tools/search/FlashRegression/flash_regression.py scan --label scan --candidates 8
 
-# 48 根质量基准
-python3 -B tools/search/FlashRegression/flash_regression.py bench --label bench --budget-ms 10000
-python3 -B tools/search/FlashRegression/flash_regression.py bench \
-  --label bench-one --budget-ms 10000 --encounter NIBBITS_NORMAL --seeds FLASHM1
-
-# 79 根协调器 Off/On 对照；Off 可复用旧结果目录
-python3 -B tools/search/FlashRegression/flash_regression.py coordinator --label coord
+# 100 根协调器 Off/On 质量对照（8 个并行进程）；Off 可复用旧结果目录
+python3 -B tools/search/FlashRegression/flash_regression.py coordinator --label coord --jobs 8
 python3 -B tools/search/FlashRegression/flash_regression.py coordinator \
   --label coord-on --off-baseline .local/flash-regression/coord
 
@@ -58,7 +53,7 @@ python3 -B tools/search/FlashRegression/flash_regression.py survey \
 执行与旧脚本相同的三步：`dotnet build CombatSolver.csproj -c Release
 -p:CopyModOnBuild=false`、`dotnet build tools/search/OfflineSearchHarness/... -c Release`、
 `DOTNET_TieredCompilation=0 dotnet run --project tools/testing/checks/FlashKernelChecks -c Release`。
-输出 `build.txt` 与 `k0.txt`。`diff` / `scan` 默认先跑这一步；`bench` / `coordinator` 只做两次
+输出 `build.txt` 与 `k0.txt`。`diff` / `scan` 默认先跑这一步；`coordinator` 只做两次
 Release 构建，不跑 K0。
 
 ### `diff`
@@ -92,25 +87,18 @@ K1 单步穷举与 K2 随机游走的差分回归。根集合与旧 `regress.sh`
 --beam 24 --nodes 2000 --dop 1`，单根超时 300 秒。`SUMMARY.txt` 每行记录
 `exit=`、`routes=`、`mismatches=` 与首个错误。验收要求 `mismatches=0`。
 
-### `bench`
-
-24 个自然遭遇 × 2 个种子（默认 `FLASHM1`、`FLASHM2`）的 48 根质量基准，口径同旧
-`bench.sh`：`OFFLINE_HARNESS_FLASH_SOLVE=1`，每根 `--character IRONCLAD --encounter ...
---seed ... --milestone M1 --budget-ms <budget>`。`--encounter` 与 `--seeds` 可把基准收窄到单个根。结果写入 `TABLE.txt`，每行比较现有主搜索与
-Flash 的胜负、投影失血、结束回合、耗时，并在末行汇总 `better/same/worse`、失血差、
-旧耗时、Flash 热耗时与分配峰值/均值。
-
 ### `coordinator`
 
-默认 79 根协调器对照：`coverage/corpora/flash-quality/` 的 46 个四角色牌组，加
-`coverage/corpora/flash-decks/` 中 `IRONCLAD` 且非第三幕的 33 个牌组。每根在
+默认读取 [质量语料](../../../coverage/corpora/flash-quality/README.md) 的 100 个牌组（五个角色各 20，
+第一、二、三幕 7/7/6）。`--deck-dir coverage/corpora/flash-decks` 可另加差分语料中的牌组（默认只取
+`--character` 指定角色、非第三幕的根）。每根在
 `--search-mode Coordinator --use-portfolio --profile Medium --budget-ms 120000` 下分别跑
 `Off` 与 `On`（`OFFLINE_HARNESS_WARMUP_SEARCHES=1`），单次超时 1800 秒。`TABLE.txt` 汇总
 `better/same/worse`、战略失血差、采用数与 Off/On 总耗时；`STRATEGIC.txt` 逐根列出
 `strategicHpDeficit` 变化。
 
 `--off-baseline <dir>` 复用旧结果的 `<id>/Off`（复制到新输出目录），此时默认只跑 `On`；
-`--ids` 限定根；`--modes Off,On` 可显式覆盖；`--include-act3-decks` 把 `flash-decks` 的第三幕
+`--ids` 限定根；`--modes Off,On` 可显式覆盖；`--include-act3-decks` 把 `--deck-dir` 中的第三幕
 根也加入；`--compare <dir> --compare-mode On` 按旧 `qcmp.py` 比较两份输出的逐根
 `(won, strategicHpDeficit, combatEndedTurn)`。
 
@@ -121,6 +109,10 @@ Flash 的胜负、投影失血、结束回合、耗时，并在末行汇总 `bet
 `characterCards.count = 6 + (i % 7)`、`colorlessCards.count = i % 3`、
 `relics.count = 2 + i % 4`、`potions.count = i % 3`，遭遇种类按 `i % 3` 取
 Monster/Elite/Boss。`--act -1` 按 `i % 2` 交替第一/二幕，`--act 2` 生成第三幕语料。
+`--act-blocks 7,7,6` 按连续序号块依次分配第一/二/三幕（覆盖 `--act`）；`--seed-prefix` 改种子前缀
+（种子为 `<前缀>-<角色>-<NN>`，默认 `FLASH-DECK`）；`--vary-extras` 让药水与无色牌按 `i // 3`
+变化，不再与遭遇种类同步（旧口径下普通战总是 0 瓶药水、首领战总是 2 瓶）。质量语料用
+`--count 20 --act-blocks 7,7,6 --seed-prefix FLASH-QUALITY --vary-extras` 生成。
 每个子目录写 `spec.json` 与 `request.json`，`generatedScenarioPath` 指向仓库相对路径。
 `--run` 额外对每个根跑一次 1 条游走的差分探针，但不替代正式 `diff`。
 
@@ -130,7 +122,6 @@ Monster/Elite/Boss。`--act -1` 按 `i % 2` 交替第一/二幕，`--act 2` 生�
 | --- | --- | --- |
 | `diff` | `SUMMARY.txt`、每根 `stdout.txt` / `flash-diff.txt`、可选 `BASELINE.txt` | 每根 `exit=0`，首行 `SUMMARY failed=0 walkFailed=0`，`unsupported=0`；有 `--baseline` 时 `bad=0` |
 | `scan` | `SUMMARY.txt`、每根 `harness-result.json` | 每根 `exit=0`，`mismatches=0` |
-| `bench` | `TABLE.txt` | 每根有结果；基准数字与 [Flash 测试记录](../../../docs/flash-search/testing.md) 同口径 |
 | `coordinator` | `TABLE.txt`、`STRATEGIC.txt`、每根 `Off`/`On` | 每根 `FLASH_ADOPTED`，没有 `FLASH_SEARCH_FAILED`；数字按实际结果计入 |
 | `survey` | 每根 `spec.json` / `request.json`、`SUMMARY.txt` | 路径可解析；`--run` 时探针输出可读 |
 
@@ -141,9 +132,11 @@ Monster/Elite/Boss。`--act -1` 按 `i % 2` 交替第一/二幕，`--act 2` 生�
 ## 已知边界
 
 - `diff`/`scan` 只证明 Flash 与现有引擎一致；现有引擎与原版是否一致由既有的 actual/simulated
-  严格差分负责。`bench` 只产指标，不做正确性验收。
+  严格差分负责。`coordinator` 只产质量与耗时指标，不做正确性验收。
 - `coordinator` 的 Off/On 是同一预算下的单次运行；同代码重复测量时个别根有数点波动，
   不能把单根差当作回归。
+- `coordinator` 的预算按墙钟计，记录的数字注明并行进程数。当前口径是 8 个并行进程
+  （`--jobs 8`）；与串行相比每个进程都会变慢，79 根校准中 Off 总耗时 +21%、On +12%。
 - 第三幕语料默认 48 条游走，其余根默认 32 条；`--walks` / `--act3-walks` 可覆盖。
 - 工具参数跨平台，但游戏依赖与 Steam 目录仍由本机 `local.props`/环境决定；没有在 Windows
   上运行的记录时，不把 Linux 结果写成 Windows 结论。

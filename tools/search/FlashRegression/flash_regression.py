@@ -157,6 +157,16 @@ def act3_roots(walks: int) -> list[Root]:
     return roots
 
 
+def quality_roots(walks: int) -> list[Root]:
+    roots = []
+    for index, request in enumerate(sorted(QUALITY.glob('*/request.json'))):
+        spec = json.loads((request.parent / 'spec.json').read_text(encoding='utf-8-sig'))
+        roots.append(Root(f"quality-{request.parent.name}", character=spec['characterId'],
+                          act_index=int(spec.get('actIndex', 0)), request=request, walks=walks,
+                          category='quality', category_index=index, spec=spec))
+    return roots
+
+
 def resolve_roots(args: argparse.Namespace) -> list[Root]:
     only = args.only
     roots: list[Root] = []
@@ -168,6 +178,8 @@ def resolve_roots(args: argparse.Namespace) -> list[Root]:
         roots += deck_roots(args.walks)
     if only == 'act3' or args.include_act3:
         roots += act3_roots(args.act3_walks)
+    if only == 'quality' or args.include_quality:
+        roots += quality_roots(args.act3_walks)
     shards = max(1, args.shards)
     for root in roots:
         root.shard = root.category_index % shards
@@ -367,9 +379,11 @@ def output_dir(args: argparse.Namespace, suffix: str) -> Path:
 
 def add_root_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--walks', type=int, default=32, help='random walks per root (default 32)')
-    parser.add_argument('--act3-walks', type=int, default=48, help='walks for --include-act3 roots (default 48)')
-    parser.add_argument('--only', choices=('all', 'encounters', 'fixtures', 'decks', 'act3'), default='all')
+    parser.add_argument('--act3-walks', type=int, default=48, help='walks for --include-act3/--include-quality roots (default 48)')
+    parser.add_argument('--only', choices=('all', 'encounters', 'fixtures', 'decks', 'act3', 'quality'), default='all')
     parser.add_argument('--include-act3', action='store_true', help='add coverage/corpora/flash-act3')
+    parser.add_argument('--include-quality', action='store_true',
+                        help='add coverage/corpora/flash-quality (walks from --act3-walks)')
     parser.add_argument('--shards', type=int, default=1, help='split roots into this many shards')
     parser.add_argument('--shard', type=int, default=None, help='run only this shard (0-based)')
     parser.add_argument('--root', action='append', default=[], help='substring/name filter; repeatable')
@@ -492,83 +506,6 @@ def cmd_scan(args: argparse.Namespace) -> int:
     write_summary(out / 'SUMMARY.txt', ([k0_line] if k0_line else []) + lines + ['DONE'])
     print(f'wrote {out / "SUMMARY.txt"}')
     return 1 if any(scan_line_failed(line) for line in lines) else 0
-
-
-def bench_key(value: dict) -> tuple:
-    return (not value.get('won'), value.get('projectedBattleHpLost'), value.get('combatEndedTurn') or 99)
-
-
-def bench_table(out: Path, rows: list[str], totals: dict) -> None:
-    better, same, worse = totals['better'], totals['same'], totals['worse']
-    rows.append(f"flash better={better} same={same} worse={worse} total_lost_delta={totals['lost']:+d} "
-                f"old_ms={totals['old_ms']:.0f} flash_warm_ms={totals['flash_ms']:.0f} "
-                f"alloc_mb_max={max(totals['allocs'] or [0]):.1f} "
-                f"alloc_mb_mean={sum(totals['allocs']) / max(1, len(totals['allocs'])):.1f}")
-    (out / 'TABLE.txt').write_text('\n'.join(rows) + '\n', encoding='utf-8')
-    print(rows[-1])
-
-
-def cmd_bench(args: argparse.Namespace) -> int:
-    out = output_dir(args, 'bench')
-    if not prepare(args, out, k0=False):
-        return 1
-    seeds = args.seeds or ['FLASHM1', 'FLASHM2']
-    encounters = args.encounter or BENCH_ENCOUNTERS
-    roots = []
-    for encounter in encounters:
-        for seed in seeds:
-            roots.append(Root(f'{encounter}-{seed}', encounter, seed, 'IRONCLAD', 0, None, 0, 'bench'))
-    print(f'bench: {len(roots)} roots, jobs={args.jobs}, budget={args.budget_ms}ms', flush=True)
-
-    def env_for(_: Root) -> dict[str, str]:
-        env = baseline_environment()
-        env['OFFLINE_HARNESS_FLASH_SOLVE'] = '1'
-        return env
-
-    def run_one(root: Root) -> None:
-        outdir = out / root.name
-        outdir.mkdir(parents=True, exist_ok=True)
-        command = [args.dotnet, str(args.harness), '--character', 'IRONCLAD', '--encounter', root.encounter,
-                   '--seed', root.seed, '--milestone', 'M1', '--budget-ms', str(args.budget_ms),
-                   '--out', str(outdir)]
-        code = run_command(command, cwd=ROOT, env=env_for(root), timeout=900, log=outdir / 'stdout.txt')
-        if code != 0:
-            (outdir / 'exit.txt').write_text(str(code), encoding='utf-8')
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as executor:
-        list(executor.map(run_one, roots))
-
-    rows: list[str] = []
-    totals = {'better': 0, 'same': 0, 'worse': 0, 'lost': 0, 'old_ms': 0.0, 'flash_ms': 0.0, 'allocs': []}
-    for directory in sorted(path for path in out.iterdir() if path.is_dir()):
-        try:
-            solve = json.loads((directory / 'harness-result.json').read_text(encoding='utf-8-sig')).get('flashSolve') or {}
-        except (OSError, ValueError) as error:
-            rows.append(f'{directory.name:42} ERROR {error}')
-            continue
-        if solve.get('flashRejection'):
-            rows.append(f'{directory.name:42} REJECTED {solve["flashRejection"]}')
-            continue
-        if 'flash' not in solve:
-            rows.append(f'{directory.name:42} NO-RESULT')
-            continue
-        existing, flash, search = solve['existing'], solve['flash'], solve['flashSearch']
-        mark = '=' if bench_key(existing) == bench_key(flash) else ('+' if bench_key(flash) < bench_key(existing) else '-')
-        totals['better'] += mark == '+'
-        totals['worse'] += mark == '-'
-        totals['same'] += mark == '='
-        warm = min(solve.get('flashWarmWallMs') or [flash['wallMs']])
-        totals['old_ms'] += existing['wallMs']
-        totals['flash_ms'] += warm
-        totals['allocs'].append(min(solve.get('flashWarmAllocatedBytes') or [0]) / 1e6)
-        totals['lost'] += (flash.get('projectedBattleHpLost') or 0) - (existing.get('projectedBattleHpLost') or 0)
-        rows.append(f"{directory.name:42} {mark} old won={existing.get('won')!s:5} "
-                    f"lost={existing.get('projectedBattleHpLost')!s:>3} turn={existing.get('combatEndedTurn')!s:>4} "
-                    f"ms={existing['wallMs']:6.0f} | flash won={flash.get('won')!s:5} "
-                    f"lost={flash.get('projectedBattleHpLost')!s:>3} turn={flash.get('combatEndedTurn')!s:>4} "
-                    f"warm_ms={warm:6.0f} search_ms={search['searchMs']:6.1f}")
-    bench_table(out, rows, totals)
-    return 0
 
 
 def load_quality(directory: Path) -> tuple[float, dict, str]:
@@ -731,10 +668,15 @@ def cmd_coordinator(args: argparse.Namespace) -> int:
     return 0
 
 
-def survey_spec(character: str, index: int, act: int) -> dict:
+def survey_spec(character: str, index: int, act: int, seed_prefix: str = 'FLASH-DECK',
+                vary_extras: bool = False) -> dict:
+    # deck-survey.sh ties colorless cards and potions to index % 3, which is also the encounter kind;
+    # --vary-extras steps them with index // 3 so every kind sees 0/1/2 of each.
+    extras = (index // 3) % 3 if vary_extras else index % 3
+    colorless = (index // 3 + 1) % 3 if vary_extras else index % 3
     return {
         'schemaVersion': 1,
-        'seed': f'FLASH-DECK-{character}-{index:02d}',
+        'seed': f'{seed_prefix}-{character}-{index:02d}',
         'characterId': character,
         'ascension': 10,
         'actIndex': act,
@@ -743,9 +685,9 @@ def survey_spec(character: str, index: int, act: int) -> dict:
         'includeStartingRelics': True,
         'includeAscendersBane': True,
         'characterCards': {'count': 6 + index % 7, 'upgradeLevels': 1},
-        'colorlessCards': {'count': index % 3},
+        'colorlessCards': {'count': colorless},
         'relics': {'count': 2 + index % 4},
-        'potions': {'count': index % 3},
+        'potions': {'count': extras},
         'mode': 'Setup',
     }
 
@@ -754,12 +696,17 @@ def cmd_survey(args: argparse.Namespace) -> int:
     out = output_dir(args, f'survey-{args.character.lower()}-{args.act if args.act >= 0 else "mixed"}')
     out.mkdir(parents=True, exist_ok=True)
     roots = []
+    blocks = [int(part) for part in args.act_blocks.split(',')] if args.act_blocks else []
+    if blocks and sum(blocks) != args.count:
+        print(f'--act-blocks {args.act_blocks} must add up to --count {args.count}', file=sys.stderr)
+        return 2
+    block_acts = [act for act, size in enumerate(blocks) for _ in range(size)]
     for index in range(args.count):
-        act = args.act if args.act >= 0 else index % 2
+        act = block_acts[index] if blocks else (args.act if args.act >= 0 else index % 2)
         identifier = f'{args.character}-{index:02d}'
         directory = out / identifier
         directory.mkdir(parents=True, exist_ok=True)
-        spec = survey_spec(args.character, index, act)
+        spec = survey_spec(args.character, index, act, args.seed_prefix, args.vary_extras)
         spec_path = directory / 'spec.json'
         spec_path.write_text(json.dumps(spec, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         request = {'schemaVersion': 1, 'scenarioId': identifier, 'cards': [],
@@ -817,19 +764,12 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument('--budget-ms', type=int, default=10000, help='per-root search budget (default 10000)')
     scan.set_defaults(func=cmd_scan)
 
-    bench = sub.add_parser('bench', help='48-root quality benchmark (24 encounters x 2 seeds)')
-    add_common(bench)
-    bench.add_argument('--budget-ms', type=int, default=10000, help='per-root search budget (default 10000)')
-    bench.add_argument('--seeds', nargs='+', default=None, help='default FLASHM1 FLASHM2')
-    bench.add_argument('--encounter', action='append', default=[], help='limit to these encounters; repeatable')
-    bench.set_defaults(func=cmd_bench)
-
-    coordinator = sub.add_parser('coordinator', help='Off/On coordinator comparison (79 default roots)')
+    coordinator = sub.add_parser('coordinator', help='Off/On coordinator comparison on the quality corpus')
     add_common(coordinator)
     coordinator.add_argument('--quality-dir', type=Path, default=QUALITY,
-                             help='four-character quality corpus (default coverage/corpora/flash-quality)')
-    coordinator.add_argument('--deck-dir', type=Path, default=DECKS,
-                             help='Ironclad deck corpus (default coverage/corpora/flash-decks)')
+                             help='quality corpus (default coverage/corpora/flash-quality, 100 roots)')
+    coordinator.add_argument('--deck-dir', type=Path, default=None,
+                             help='optionally add a deck corpus such as coverage/corpora/flash-decks')
     coordinator.add_argument('--character', default='IRONCLAD', help='deck-dir character filter; empty disables')
     coordinator.add_argument('--include-act3-decks', action='store_true',
                              help='also run flash-decks roots with actIndex 2')
@@ -850,6 +790,11 @@ def build_parser() -> argparse.ArgumentParser:
     survey.add_argument('--count', type=int, default=30)
     survey.add_argument('--act', type=int, default=-1,
                         help='fixed actIndex; -1 alternates 0/1 like deck-survey.sh, 2 builds Act 3')
+    survey.add_argument('--act-blocks', default=None,
+                        help='consecutive index blocks per act, e.g. 7,7,6 = acts 0/1/2 (overrides --act)')
+    survey.add_argument('--seed-prefix', default='FLASH-DECK', help='seed is <prefix>-<CHARACTER>-<NN>')
+    survey.add_argument('--vary-extras', action='store_true',
+                        help='vary potions/colorless cards independently of the encounter kind')
     survey.add_argument('--run', action='store_true', help='also run a 1-walk differential probe per root')
     survey.add_argument('--walks', type=int, default=1, help='walks for --run (default 1)')
     survey.set_defaults(func=cmd_survey)

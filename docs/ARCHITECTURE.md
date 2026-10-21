@@ -56,7 +56,7 @@
 | `FlashBeam/Bridge/` / `CardChoiceSupport.Flash.cs` | Flash 准入、规则编译、旧引擎状态投影、动作与选择翻译、固定前缀回放；桥接与物化只依赖 `SearchReplayCore`、`OpeningProbe` 与 `SearchRouteMaterializer`（[Flash 规格](flash-search/README.md)） |
 | `FlashBeam/FlashBeamSolver.cs` / `FlashBeam/Scoring/` | FlashBeam 搜索；从 `FlashBattle` 计算的状态评估（移植 `Snapshot` 与 `BeamRankScore`，逐内容数值表由 `Bridge/FlashScoreBridge` 在根上编译），Scoring 不引用原版模型类型；搜索中的进度、接管、取消与工作量记账在 `FlashBeamSolver.Progress.cs` 与 `Bridge/FlashRouteMaterializer.Progress.cs` |
 
-Flash 的批量回归入口在 `tools/search/FlashRegression/`：全量差分、候选扫描、48 根基准、79 根协调器 Off/On 对照与牌组生成都调用 `OfflineSearchHarness`，不进入生产搜索路径；用法见 [工具入口](../tools/README.md) 与 [回归工具](../tools/search/FlashRegression/README.md)。
+Flash 的批量回归入口在 `tools/search/FlashRegression/`：全量差分、候选扫描、100 根协调器 Off/On 质量对照与牌组生成都调用 `OfflineSearchHarness`，不进入生产搜索路径；用法见 [工具入口](../tools/README.md) 与 [回归工具](../tools/search/FlashRegression/README.md)。
 
 探针与现有搜索通过 `SearchEvaluator` 共用评分和指纹，并共用 `SearchReplayCore` 的完整动作/准备/选择回放（检查点、续接帧、证据与计量按调用方注入）；`OpeningProbe` 不引用 `CombatBeamSolver`，其产出仍由协调器交给 `BeamSolveDispatch` 求解。Flash 的固定前缀与最终物化同样使用该回放核心和共享物化器，不实例化原搜索类。成员共享原请求账本；预算准入、候选合法性和取优由所属策略决定。分支状态不承担 Beam 政策；中途保路和终局比较保持明确入口。药水反事实与强制用药的硬准入先于质量比较。终局可选用药遵守机会成本门槛，获胜且减少复活消耗或追回资源时保留对应政策例外；`RouteQualityPolicy.PotionPolicy` 为审计、组合成员和后置搜索统一比较战略战损加可选药水成本，成长与回合数在其后比较。固定前缀构造实际父链，EndTurn 从模拟前后状态生成 `TurnOutcome`。
 
