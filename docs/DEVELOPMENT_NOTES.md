@@ -12,6 +12,22 @@
 
 新增可选的结构体状态内核（`src/Flash/Kernel/`、`src/Flash/Content/`）与旧引擎衔接层（`src/Flash/Bridge/`）。默认关闭；设置 > 性能 > 搜索预算 >「Flash 快速搜索（实验）」可选择关闭、对照或启用。关闭时玩家可见行为不变；对照只记录一行对照日志，结果、工作量和诊断与关闭相同。启用模式只运行 Flash，不回落现有搜索：Flash 判定没有满足药水策略的路线时，返回与现有搜索同形的无路线结果；遇到不支持的内容、根状态超容量、内核边界、逐步回放核对不一致或药水约束复核不一致时，停止本回合部署、关闭全自动、提示切回关闭模式，问题包标注 `FlashSearchFailed` 与具体失败类别；回合准备搜索失败按同一约定处理，原生选择留给玩家作答。无人测试在这些失败上直接判 Failed。覆盖五个角色卡池、296 个遗物、65 种药水、三幕已实现遭遇与第三幕首领策略，以及事件卡牌与事件遭遇；未支持的内容在准入阶段按类别拒绝。当前同政策、同预算的质量对照（五个角色、三幕均衡的 120 个生成牌组）：开启相对关闭 28 好 / 76 同 / 16 差，胜场 87 → 88，总耗时约为关闭模式的 42%；按角色与幕次的细分和变差根见测试记录。规格、失败类别与请求参数见 [Flash 搜索](flash-search/README.md) 与 [搜索与接入](flash-search/search.md)，覆盖、逐根证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
 
+### Flash 选牌药水 X 费筛选（QF4）
+
+`TouchOfInsanity` 的 Flash 选项谓词把 `EnergyCostWithModifiers`/`StarCostWithModifiers`
+（对 X 费返回当前能量/星能，等价于实付值）当成原版 `CardModel.CostsEnergyOrStars` 的 global
+分支，X 费牌因此在资源大于 0 时多出旧引擎没有的选项，后续选择会落到不同的牌。现按原版
+`CardModel.cs:1579-1595` 的 `!EnergyCost.CostsX` / `!HasStarCostX` 前置条件排除 X 费的 global
+项，local 能量项对 X 费保持占位 0（X 星费的 local 仍按 `CurrentStarCost`，临时星费大于 0 时
+保留原版可选中行为）；Unplayable 与费用被改为 0 的牌仍按原版取两支并集，回放数不参与
+费用判断。其余三种 QP1 药水与 `DropletOfPrecognition` 都没有费用筛选谓词，选项来源、顺序与
+`PotionChoiceSupport.GetSpec` 一致，本轮无同类修改。
+
+新增固定根 `flash-qf4-touch-of-insanity-xcost`（手牌含 `WHIRLWIND` 与普通耗能牌）：
+修正前 `failed=3 walkFailed=17`（首个差异 `old=2 flash=3`），修正后 32 条游走
+`failed=0 walkFailed=0 actionSetFailed=0`；四个 `flash-qp1-*` 固定根与
+`quality-NECROBINDER-022` 默认游走数同为零差异，候选扫描 `routes=7 mismatches=0`。合入后在最终源码上：默认差分 409 根零差异，候选扫描 409 根 2,194 条候选零不一致（`flash-sk-a-discard-sly` 仍是已知内核边界），120 根质量与 QP2 逐根相同（见 [Flash 测试记录](flash-search/testing.md) 2.1）。
+
 ### Flash 六维 Pareto 去重与质量基线（QP2）
 
 Flash 池去重命中时按现有 `TranspositionFrontier` 的六维标签（药水数、药水战略成本、未来卖血、
@@ -19,12 +35,17 @@ Flash 池去重命中时按现有 `TranspositionFrontier` 的六维标签（药�
 升序），不再只留 Flash 排序值最高者；标签数不设上限，`FutureSoldHp` 在 Flash 恒 0 是残差。
 120 根开启模式由 28/76/16、失血差 +34、胜场 88、On 701 s 变为 29/75/16、+10、胜场 89、
 On 678 s；8 个目标根中 IRONCLAD-016 从 80 降到 53，其余不变。单根首步谱系签名实验在 120 根
-变为 27/76/17、+45，已撤回。路由 `ContextId`/`UnorderedPileKey` 未移植：Flash 搜索期间没有与
-旧引擎同构的字符串上下文，需后续在 Bridge 提供。stand-pat 诊断显示 IRONCLAD-014 的目标在进入
+变为 27/76/17、+45，已撤回。路由签名的 `ContextId` 仍恒为 0，牌堆与敌人分布键仍取选择前的父状态
+（现有搜索取选择完成后的状态）。stand-pat 诊断显示 IRONCLAD-014 的目标在进入
 stand-pat 分组前已被同指纹去重代表顶替，不是探测/比较器差异。`SMART_POTION_GRADIENT` 日志
 新增 `flash_expanded`/`flash_elapsed_ms`，原 `expanded`/`elapsed_ms` 保留为物化回放统计。
 验证：K0 Passed、四项门禁 OK、全量差分与动作集合 `actionSetFailed=0`、10 个质量根 48 条游走
 零差异；详见 QP2 报告（`.local`）。
+
+同批试过两项更完整的移植，120 根质量都与上面逐项相同，均未采用：整次求解范围的准入/展开
+转置表（照现有 `_run.Transpositions`/`ExpandedTranspositions`，两表合计 100 万条上限）在很多
+请求中打满上限，每条约 100 B，单次求解约 100 MB 托管内存，与 Flash 预分配、不产生 GC 的池
+设计相冲突；路由签名改取选择完成后的状态，实现上要对每个路由选择多执行一遍动作。
 
 ### Flash 选牌药水与动作集合核对（QP1）
 
@@ -43,22 +64,6 @@ stand-pat 分组前已被同指纹去重代表顶替，不是探测/比较器差
 四个固定根 `flash-qp1-liquid-memories`、`flash-qp1-ashwater`、`flash-qp1-gamblers-brew`、
 `flash-qp1-touch-of-insanity` 修正前动作集合失败 47/47/46/45，修正后均为 0；固定根与 120 个
 质量牌组全量动作集合核对见 QP1 报告。
-
-### Flash 选牌药水 X 费筛选（QF4）
-
-`TouchOfInsanity` 的 Flash 选项谓词把 `EnergyCostWithModifiers`/`StarCostWithModifiers`
-（对 X 费返回当前能量/星能，等价于实付值）当成原版 `CardModel.CostsEnergyOrStars` 的 global
-分支，X 费牌因此在资源大于 0 时多出旧引擎没有的选项，后续选择会落到不同的牌。现按原版
-`CardModel.cs:1579-1595` 的 `!EnergyCost.CostsX` / `!HasStarCostX` 前置条件排除 X 费的 global
-项，local 能量项对 X 费保持占位 0（X 星费的 local 仍按 `CurrentStarCost`，临时星费大于 0 时
-保留原版可选中行为）；Unplayable 与费用被改为 0 的牌仍按原版取两支并集，回放数不参与
-费用判断。其余三种 QP1 药水与 `DropletOfPrecognition` 都没有费用筛选谓词，选项来源、顺序与
-`PotionChoiceSupport.GetSpec` 一致，本轮无同类修改。
-
-新增固定根 `flash-qf4-touch-of-insanity-xcost`（手牌含 `WHIRLWIND` 与普通耗能牌）：
-修正前 `failed=3 walkFailed=17`（首个差异 `old=2 flash=3`），修正后 32 条游走
-`failed=0 walkFailed=0 actionSetFailed=0`；四个 `flash-qp1-*` 固定根与
-`quality-NECROBINDER-022` 默认游走数同为零差异，候选扫描 `routes=7 mismatches=0`。
 
 `AddRequired` 的来源标签默认关闭，仅离线追踪打开：由 `SearchDiagnosticsSink.RetentionLabels`
 控制在 `GlobalRetention` 中输出 `requiredLabel`。关闭时 DEFECT-012 开启模式协调器路线、
