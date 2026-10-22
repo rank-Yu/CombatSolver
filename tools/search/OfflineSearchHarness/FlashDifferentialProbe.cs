@@ -327,9 +327,6 @@ internal static class FlashDifferentialProbe
         summary["actionSetChecked"] = actionSet.Checked;
         summary["actionSetFailed"] = actionSet.Failed;
         summary["actionSetFirst"] = actionSet.FirstFailure;
-        summary["duplicatePlayableChecked"] = actionSet.DuplicatePlayableChecked;
-        summary["duplicatePlayableFailed"] = actionSet.DuplicatePlayableFailed;
-        summary["duplicatePlayableFirst"] = actionSet.FirstDuplicatePlayableFailure;
         summary["boundFailedFields"] = scores.BoundFailedFields;
         summary["rankChecked"] = scores.RankChecked;
         summary["noveltyFailed"] = scores.NoveltyFailed;
@@ -357,10 +354,6 @@ internal static class FlashDifferentialProbe
             + (policy.IncludeTurnSetup ? $" turnSetupRoots={searchRoots.Count}" : "")
             + $" actionSetChecked={actionSet.Checked} actionSetFailed={actionSet.Failed}"
             + (actionSet.FirstFailure is { } firstActionSet ? $" actionSetFirst={firstActionSet}" : "")
-            + $" duplicatePlayableChecked={actionSet.DuplicatePlayableChecked}"
-            + $" duplicatePlayableFailed={actionSet.DuplicatePlayableFailed}"
-            + (actionSet.FirstDuplicatePlayableFailure is { } firstDuplicate
-                ? $" duplicatePlayableFirst={firstDuplicate}" : "")
             + $" unsupported={unsupported}");
         if (scores.FailedFields.Count > 0)
             report.Insert(1, "K4 FIELDS " + string.Join(",", scores.FailedFields

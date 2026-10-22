@@ -193,34 +193,20 @@ internal static class RetentionDiffProbe
             bool sameSet = view.Old != null && view.Flash != null
                 && SameMultiset(view.Old.SelectedKeys, view.Flash.SelectedKeys);
             bool sameOrder = sameSet && view.Old!.SelectedKeys.SequenceEqual(view.Flash!.SelectedKeys);
-            Dictionary<string, object?> traceItem = new()
+            trace.Add(new
             {
-                ["index"] = index,
-                ["key"] = key,
-                ["kind"] = view.Kind.ToString(),
-                ["turn"] = view.TurnLayer,
-                ["depth"] = view.PlayDepth,
-                ["oldInput"] = view.Old?.Meta.InputCount,
-                ["flashInput"] = view.Flash?.Meta.InputCount,
-                ["oldSelected"] = oldCount,
-                ["flashSelected"] = flashCount,
-                ["sameSet"] = sameSet,
-                ["sameOrder"] = sameOrder,
-            };
-            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_RETENTION_ORDER") == "1")
-            {
-                traceItem["oldOrder"] = view.Old?.Selected
-                    .Select(key => view.Old.SelectedActionByKey.GetValueOrDefault(key, "")).ToArray();
-                traceItem["flashOrder"] = view.Flash?.Selected
-                    .Select(key => view.Flash.SelectedActionByKey.GetValueOrDefault(key, "")).ToArray();
-                traceItem["oldRequired"] = view.Old?.Pool
-                    .Where(entry => entry.Required)
-                    .Select(entry => $"{entry.Key}:{entry.Label ?? "-"}:{entry.LastAction}:{entry.Score:R}").ToArray();
-                traceItem["flashRequired"] = view.Flash?.Pool
-                    .Where(entry => entry.Required)
-                    .Select(entry => $"{entry.Key}:{entry.Label ?? "-"}:{entry.LastAction}:{entry.Score:R}").ToArray();
-            }
-            trace.Add(traceItem);
+                index,
+                key,
+                kind = view.Kind.ToString(),
+                turn = view.TurnLayer,
+                depth = view.PlayDepth,
+                oldInput = view.Old?.Meta.InputCount,
+                flashInput = view.Flash?.Meta.InputCount,
+                oldSelected = oldCount,
+                flashSelected = flashCount,
+                sameSet,
+                sameOrder,
+            });
             if (!sameSet && first == null)
             {
                 first = DescribeFirstDivergence(index, view, oldSide, flashSide, oldResult,
@@ -624,7 +610,6 @@ internal static class RetentionDiffProbe
         ["expanded"] = outcome?.Search?.ExpandedNodes,
         ["transitions"] = outcome?.Search?.Transitions,
         ["duplicates"] = outcome?.Search?.Duplicates,
-        ["duplicateCardBranchesPruned"] = outcome?.Search?.DuplicateCardBranchesPruned,
         ["turns"] = outcome?.Search?.TurnsSearched,
         ["capacityDropped"] = outcome?.Search?.CapacityDroppedChildren,
         ["rejection"] = outcome?.Rejection.ToString(),

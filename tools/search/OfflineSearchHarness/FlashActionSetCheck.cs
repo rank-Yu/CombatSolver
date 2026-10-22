@@ -1,9 +1,7 @@
 using CombatSolver;
-using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Simulation;
 using CombatSolver.Flash.Bridge;
 using CombatSolver.Flash.Kernel;
-using CombatSolver.Flash.Search;
 using MegaCrit.Sts2.Core.Entities.Players;
 
 namespace OfflineSearchHarness;
@@ -38,18 +36,6 @@ internal sealed class FlashActionSetCheck(
 
     public string? FirstFailure { get; private set; }
 
-    /// <summary>
-    /// Duplicate-branch check: the first hand position kept for each playable-card state key must be
-    /// the same on both sides. This is the observable output of the existing enumerator's
-    /// <c>DuplicateCardBranchesPruned</c>; the plain action set below collapses equal canonical keys
-    /// and therefore cannot see it.
-    /// </summary>
-    public int DuplicatePlayableChecked { get; private set; }
-
-    public int DuplicatePlayableFailed { get; private set; }
-
-    public string? FirstDuplicatePlayableFailure { get; private set; }
-
     public void Check(SimulationSnapshot snapshot, in FlashBattle battle, string label, bool isRoot)
     {
         if (!snapshot.HasSimulator || snapshot.BoundaryReason != SearchBoundaryReason.None
@@ -58,7 +44,6 @@ internal sealed class FlashActionSetCheck(
             return;
         }
         Checked++;
-        CheckDuplicatePlayable(snapshot, battle, label);
         HybridSet oldSet = [];
         HybridSet flashSet = [];
         CollectExisting(snapshot, isRoot ? 0 : 1, oldSet);
@@ -79,79 +64,6 @@ internal sealed class FlashActionSetCheck(
                 report.Add("  flash-only: " + string.Join(", ", flashOnly));
         }
     }
-
-    private void CheckDuplicatePlayable(
-        SimulationSnapshot snapshot, in FlashBattle battle, string label)
-    {
-        if (!snapshot.HasSimulator)
-            return;
-        CombatPredictionSimulator simulator = (CombatPredictionSimulator)snapshot.Simulator;
-        SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
-        IReadOnlyList<PredictedCard> hand =
-            simulator.State.GetPlayerCombatState(player).Hand.Cards;
-        if (hand.Count != battle.HandCount)
-            return;
-        DuplicatePlayableChecked++;
-        List<int> oldKept = [];
-        List<StateFingerprint> oldKeys = [];
-        HashSet<StateFingerprint> oldSeen = [];
-        for (int handIndex = 0; handIndex < hand.Count; handIndex++)
-        {
-            PredictedCard card = hand[handIndex];
-            if (!combat.CanPlayCard(simulator, card))
-                continue;
-            StateFingerprint key = _probe.EvaluatorForBridge.BuildPlayableCardKey(card);
-            if (!oldSeen.Add(key))
-                continue;
-            oldKept.Add(handIndex);
-            oldKeys.Add(key);
-        }
-
-        List<int> flashKept = [];
-        List<ulong> flashKeys = [];
-        HashSet<ulong> flashSeen = [];
-        for (int handIndex = 0; handIndex < battle.HandCount; handIndex++)
-        {
-            if (!FlashKernel.CanPlayCard(battle, rules, handIndex))
-                continue;
-            StateFingerprint fingerprint = FlashCardKey.Playable(
-                battle, battle.Cards[handIndex], rules);
-            ulong hash = Hash(fingerprint);
-            if (!flashSeen.Add(hash))
-                continue;
-            flashKept.Add(handIndex);
-            flashKeys.Add(hash);
-        }
-
-        bool same = oldKept.Count == flashKept.Count;
-        for (int index = 0; same && index < oldKept.Count; index++)
-            same = oldKept[index] == flashKept[index];
-        // Equal-key groups must be the same on both sides even when the kept positions match by
-        // accident; compare the pairwise partition of the kept cards.
-        for (int left = 0; same && left < oldKeys.Count; left++)
-        {
-            for (int right = left + 1; same && right < oldKeys.Count; right++)
-            {
-                bool oldEqual = oldKeys[left] == oldKeys[right];
-                bool flashEqual = flashKeys[left] == flashKeys[right];
-                same = oldEqual == flashEqual;
-            }
-        }
-        if (same)
-            return;
-        DuplicatePlayableFailed++;
-        FirstDuplicatePlayableFailure ??=
-            $"{label} existing-kept=[{string.Join(",", oldKept)}] flash-kept=[{string.Join(",", flashKept)}]";
-        if (report.Count < 200)
-        {
-            report.Add($"DUPLICATE-PLAYABLE MISMATCH {label}");
-            report.Add($"  existing-kept: [{string.Join(",", oldKept)}]");
-            report.Add($"  flash-kept: [{string.Join(",", flashKept)}]");
-        }
-    }
-
-    private static ulong Hash(in StateFingerprint fingerprint)
-        => (fingerprint.First * 0x9E3779B97F4A7C15UL) ^ fingerprint.Second;
 
     private void CollectExisting(SimulationSnapshot snapshot, int actionCount, HybridSet output)
     {

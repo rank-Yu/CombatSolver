@@ -1182,10 +1182,6 @@ def _retention_aggregate(records: list[dict]) -> dict:
     }
 
 
-def _numeric_key(value: str) -> int:
-    return int(value) if value.isdigit() else -1
-
-
 def _retention_summary_lines(records: list[dict], aggregate: dict) -> list[str]:
     lines = []
     lines.append('MEMBER SUMMARY')
@@ -1215,9 +1211,9 @@ def _retention_summary_lines(records: list[dict], aggregate: dict) -> list[str]:
     lines.append('member\tturn:count\tdepth:count')
     for member, entry in sorted(aggregate['members'].items()):
         turns = ','.join(f'{key}:{value}' for key, value in sorted(
-            entry['turns'].items(), key=lambda item: _numeric_key(item[0])))
+            entry['turns'].items(), key=lambda item: int(item[0])))
         depths = ','.join(f'{key}:{value}' for key, value in sorted(
-            entry['depths'].items(), key=lambda item: _numeric_key(item[0])))
+            entry['depths'].items(), key=lambda item: int(item[0])))
         lines.append(f"{member}\t{turns or '-'}\t{depths or '-'}")
     lines.append('')
     lines.append('MOST COMMON CONCRETE REASONS (top-N per first divergence)')

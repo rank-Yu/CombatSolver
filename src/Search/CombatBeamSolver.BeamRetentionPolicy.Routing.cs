@@ -552,11 +552,7 @@ internal sealed partial class CombatBeamSolver
 
         private void AddRequired(List<SearchNode> required, SearchNode? candidate, int limit,
             [System.Runtime.CompilerServices.CallerArgumentExpression(nameof(candidate))]
-            string label = "",
-            [System.Runtime.CompilerServices.CallerMemberName]
-            string callSite = "",
-            [System.Runtime.CompilerServices.CallerLineNumber]
-            int callLine = 0)
+            string label = "")
         {
             // 原来的 Any(lambda) 捕获 candidate，每次调用都要建闭包与委托；
             // ContainsReference 是同样的顺序扫描 + 短路，只是不分配。
@@ -569,14 +565,9 @@ internal sealed partial class CombatBeamSolver
             required.Add(candidate);
             if (_requiredLabels != null)
             {
-                // K6 诊断专用：同一个 CallerArgumentExpression 出现在多个分组（全局、药水、
-                // 谱系、焦点、持续铺垫等）时只靠表达式无法区分调用点。追加成员名与行号构成
-                // 调用点身份；只在 retentionLabels 打开时拼接，生产路径不分配，也不改变
-                // required 集合、顺序或保留结果。
-                string qualified = label + "@" + callSite + ":" + callLine;
                 _requiredLabels[candidate] = _requiredLabels.TryGetValue(candidate, out string? prior)
-                    ? prior + ";" + qualified
-                    : qualified;
+                    ? prior + ";" + label
+                    : label;
             }
         }
 
