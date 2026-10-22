@@ -160,7 +160,8 @@ Linux 无头整场入口：从质量语料固定挑 40 根，逐场调用
 默认 40 根写死在工具里：五个角色（`IRONCLAD`、`SILENT`、`DEFECT`、`REGENT`、`NECROBINDER`）
 各取序号 `000 001 002`（第一幕普通/精英/首领）、`009 010 011`（第二幕普通/精英/首领）与
 `019 020`（第三幕精英/首领）。`--ids` 覆盖清单（空格或逗号分隔的语料目录名）；`--quality-dir`
-可改用别的语料目录。默认输出 `.local/flash-regression/headless/`，`--label`/`--out` 可改。
+可改用别的语料目录。默认输出 `.local/flash-regression/headless/`，`--label`/`--out` 可改。跑全部
+120 根时传 `--ids $(ls coverage/corpora/flash-quality | grep -E '^[A-Z]+-[0-9]{3}$')`。
 
 每场从 `coverage/corpora/flash-quality/<id>/spec.json` 派生 `<out>/<id>/scenario.json`，把生成模式
 改为 `Deploy`，再传 `--generated-scenario-path`、`--flash-search-mode-for-test On|Off`（`--mode`，默认

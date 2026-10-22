@@ -10,7 +10,7 @@
 
 ### Flash 无头整场回归入口（HL）
 
-新增 `flash_regression.py headless`：把 40 根质量语料固定写进工具（五个角色各 8 根：第一、二幕普通/精英/首领与第三幕精英/首领），在 Linux 无头实例上跑完整自动战斗。每场从 `spec.json` 派生 `mode=Deploy` 的场景，传 `--cards-json []`，生成场景保留原生战斗状态，敌人生命是自然值、手牌没有额外打击；启动前把 `flashSearchMode` 写入实例持久设置，覆盖模式覆盖前捕获的回合准备根。默认开启模式、2 条通道，共用 `COMBATSOLVER_HEADLESS_HOST_ROOT`，每通道一个 `.local/headless-instances/<label>-<通道>` 实例，最后一场 `--cleanup-instance-on-exit` 并检查目录删除。证据在 `<out>/<id>/evidence`；`SUMMARY.txt` 逐场记录胜负、结束回合、真实终局生命、`FLASH_ADOPTED` 与核对通过次数、`FLASH_SEARCH_FAILED`、核对/预览不一致、计划外重算与合计，失败条件见工具 README。玩家战死按 `death` 记录，不作为运行失败。两根试跑（IRONCLAD-000、SILENT-000）的场景 `resolved`/`loadout` 与离线证据逐字段一致。40 场整轮 `RESULT PASS`：29 胜、11 战死，388 次 `FLASH_ADOPTED` 全部核对通过，没有搜索失败、核对不一致或计划外重算，战死集合与离线协调器对照中开启模式未胜的 11 根一致；玩家在自己回合结束时战死、写结果时尚未离开战斗的情形按 `wait_combat_end` 阶段归为战死。未改 C# 源码。
+新增 `flash_regression.py headless`：把 40 根质量语料固定写进工具（五个角色各 8 根：第一、二幕普通/精英/首领与第三幕精英/首领），在 Linux 无头实例上跑完整自动战斗。每场从 `spec.json` 派生 `mode=Deploy` 的场景，传 `--cards-json []`，生成场景保留原生战斗状态，敌人生命是自然值、手牌没有额外打击；启动前把 `flashSearchMode` 写入实例持久设置，覆盖模式覆盖前捕获的回合准备根。默认开启模式、2 条通道，共用 `COMBATSOLVER_HEADLESS_HOST_ROOT`，每通道一个 `.local/headless-instances/<label>-<通道>` 实例，最后一场 `--cleanup-instance-on-exit` 并检查目录删除。证据在 `<out>/<id>/evidence`；`SUMMARY.txt` 逐场记录胜负、结束回合、真实终局生命、`FLASH_ADOPTED` 与核对通过次数、`FLASH_SEARCH_FAILED`、核对/预览不一致、计划外重算与合计，失败条件见工具 README。玩家战死按 `death` 记录，不作为运行失败。两根试跑（IRONCLAD-000、SILENT-000）的场景 `resolved`/`loadout` 与离线证据逐字段一致。40 场整轮 `RESULT PASS`：29 胜、11 战死，388 次 `FLASH_ADOPTED` 全部核对通过，没有搜索失败、核对不一致或计划外重算，战死集合与离线协调器对照中开启模式未胜的 11 根一致；玩家在自己回合结束时战死、写结果时尚未离开战斗的情形按 `wait_combat_end` 阶段归为战死。质量语料其余 80 根随后补跑，合计 120 根 91 胜、29 战死，1,357 次采用全部核对通过，逐根胜负与离线 120 根对照的开启模式一致。未改 C# 源码。
 
 ### Flash 搜索后端（默认关闭）
 
