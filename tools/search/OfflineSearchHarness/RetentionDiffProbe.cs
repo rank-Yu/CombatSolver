@@ -609,6 +609,7 @@ internal static class RetentionDiffProbe
         ["expanded"] = outcome?.Search?.ExpandedNodes,
         ["transitions"] = outcome?.Search?.Transitions,
         ["duplicates"] = outcome?.Search?.Duplicates,
+        ["duplicateCardBranchesPruned"] = outcome?.Search?.DuplicateCardBranchesPruned,
         ["turns"] = outcome?.Search?.TurnsSearched,
         ["capacityDropped"] = outcome?.Search?.CapacityDroppedChildren,
         ["rejection"] = outcome?.Rejection.ToString(),
