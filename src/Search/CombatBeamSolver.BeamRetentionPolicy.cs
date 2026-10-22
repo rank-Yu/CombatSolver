@@ -796,6 +796,9 @@ internal sealed partial class CombatBeamSolver
             bool useSecondRankBand = false,
             Action<GlobalRetentionDecision>? observe = null)
         {
+            // Source labels describe this retention decision only; a node kept by an earlier
+            // boundary must not look required here. Diagnostics-only dictionary.
+            _requiredLabels?.Clear();
             Dictionary<SearchNode, RoutingChoiceSignature>? observedRoutingSignatures =
                 observe != null && preserveDefensiveRoute
                     ? new(ReferenceEqualityComparer.Instance)

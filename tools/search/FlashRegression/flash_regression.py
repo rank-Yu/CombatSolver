@@ -1054,8 +1054,10 @@ def _reason_key(category: str, detail: dict) -> str:
             return f'D:score-differs:{last}:delta={left - right:g}'
         return f'D:score-differs:{last}'
     if category == 'E':
-        return ('E:required:' + str(detail.get('presentLabel') or '-')
-                + '->' + str(detail.get('otherLabel') or '-'))
+        def one_line(value: object) -> str:
+            text = ' '.join(str(value or '-').split())
+            return text if len(text) <= 96 else text[:93] + '...'
+        return 'E:required:' + one_line(detail.get('presentLabel')) + '->' + one_line(detail.get('otherLabel'))
     return f'{category}:{detail.get("reason") or "-"}'
 
 

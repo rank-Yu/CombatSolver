@@ -376,7 +376,7 @@ internal static partial class FlashRouteMaterializer
                 pruning.EffectivePotionPolicy, potionPolicyOverride == SolverPotionPolicy.Disabled),
             Scorer = scorer,
             Ordering = new FlashRouteOrdering(root.InitialPlayerHp, root.InitialPlayerMaxHp, root.BossHpRelief,
-                root.PostCombatRelicHeal),
+                root.PostCombatRelicHeal, battleDamage.SoldHpCommitted),
             HpTargetStop = HpTargetStop(policy, battleDamage, pruning.EffectivePotionPolicy,
                 minimumPotionUses, enforceForcedPotionDirectives),
             Bound = bound,
