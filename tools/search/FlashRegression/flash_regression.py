@@ -1427,11 +1427,14 @@ def _headless_analyze(evidence: Path, baseline: Path | None, identifier: str) ->
         match = re.search(r'战斗出现 (\d+) 次非预期重算', error)
         if match:
             replans = int(match.group(1))
-    if (native is None and result.get('combatEnded') is True
-            and '仍存在未死亡敌人' in error):
+    if (native is None and '仍存在未死亡敌人' in error
+            and (result.get('combatEnded') is True or result.get('stage') == 'wait_combat_end')):
         # The deployment lock path reports player death as Failed before the post-combat
-        # NativeOutcome check runs. CombatEnded with living enemies is the native death result;
-        # take the turn from result.json and max HP from the actual loadout, never solverMetrics.
+        # NativeOutcome check runs. The executor raises this error only after the native combat
+        # reached IsOverOrEnding, so living enemies mean the player died. A death at the player's
+        # own end of turn can still leave CombatManager.IsInProgress set when result.json is
+        # written (combatEnded=false), hence the wait_combat_end stage also counts.
+        # Take the turn from result.json and max HP from the actual loadout, never solverMetrics.
         loadout = _headless_read_json(evidence / 'generated-scenario.loadout.json')
         native = {
             'combatEnded': True,

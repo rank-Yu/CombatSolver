@@ -194,7 +194,9 @@ verifyMismatch  previewMismatch  replans  scenario  exit  cleanup  evidence
 
 `outcome` 取 `win`、`death`、`failed` 或 `no-result`；`turn`/`hp`/`maxHp` 取
 `NativeOutcome:combatEnded=...` 完成检查。玩家战死时执行器可能先以“仍存在未死亡敌人”结束、不写
-`NativeOutcome`；工具使用该原生结束状态（`combatEnded=True`）、`result.json` 的 `FinishedTurn` 与
+`NativeOutcome`。执行器只在原生战斗进入结束状态（`IsOverOrEnding`）后才报这条错误；玩家在自己回合
+结束时战死，写结果时游戏可能还没离开战斗，`result.json` 的 `combatEnded` 仍为 `false`、`stage` 为
+`wait_combat_end`。工具把这两种情况都按原生结束处理，用 `result.json` 的 `FinishedTurn` 与
 实际 `generated-scenario.loadout.json` 的最大生命记为 `death`、HP 0，不读取 `solverMetrics.finalHp`。
 `adopted` 是 `FLASH_ADOPTED` 行数，`verified` 是其中 `status=verified` 的行数；
 `searchFailed`、`verifyMismatch`、`previewMismatch` 与 `replans` 分别统计
