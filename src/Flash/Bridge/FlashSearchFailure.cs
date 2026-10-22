@@ -134,7 +134,6 @@ internal sealed record FlashVerificationFailure(
     IReadOnlyList<string> FlashAfter,
     string? DirectPurpose,
     string? ContinuationPurpose,
-    int ProfileScale,
     IReadOnlyList<string> Prefix);
 
 /// <summary>

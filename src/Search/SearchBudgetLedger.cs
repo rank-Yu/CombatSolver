@@ -41,10 +41,8 @@ internal sealed class SearchBudgetLedger
         => _requestLimitMilliseconds - _requestClock.ElapsedMilliseconds;
 
     internal long RemainingNodes(SolverSearchProfile profile)
-        // Budget unit: legacy-equivalent expanded nodes. Flash contributes its physical search
-        // divided by the profile width multiple it actually used (see
-        // SearchRequestWorkTotals.BudgetExpandedNodes), so a wider Flash member does not consume
-        // the shared node budget proportionally faster than the legacy member it replaces.
+        // Budget unit: expanded nodes. A contribution defaults to its physical ExpandedNodes
+        // (see SearchRequestWorkTotals.BudgetExpandedNodes) unless it reports another unit.
         => profile.MaxExpandedNodes - WorkTotals.Snapshot().BudgetExpandedNodes;
 
     internal SearchBudgetWindow RequestWindow(SolverSearchProfile profile)

@@ -929,7 +929,7 @@ def build_parser() -> argparse.ArgumentParser:
     trace.add_argument('--purpose', required=True, help='DirectSearchPurpose or ContinuationPurpose name')
     trace.add_argument('--continuation', action='store_true', help='purpose is a ContinuationPurpose')
     trace.add_argument('--prefix', type=int, default=0, help='fixed-prefix action count (default 0)')
-    trace.add_argument('--beam', type=int, default=60, help='profile beam width (Flash uses x4)')
+    trace.add_argument('--beam', type=int, default=60, help='profile beam width (also used by Flash)')
     trace.add_argument('--nodes', type=int, default=120000)
     trace.add_argument('--budget-ms', type=int, default=120000)
     trace.add_argument('--flags', default='', help='comma list: band,base,power')

@@ -30,7 +30,6 @@ internal static class FlashRouteTraceProbe
         if (prefixLength < 0 || prefixLength > route.Count)
             throw new InvalidOperationException($"追踪前缀长度 {prefixLength} 超出路线动作数 {route.Count}。");
         List<PlanAction> prefix = [.. route.Take(prefixLength)];
-        int profileScale = ReadInt("OFFLINE_HARNESS_FLASH_TRACE_PROFILE_SCALE", FlashRouteMaterializer.ProfileWidthScale);
         string purposeText = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_TRACE_PURPOSE") ?? "";
         bool continuation = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_TRACE_CONTINUATION") == "1";
         DirectSearchPurpose? directPurpose = continuation ? null : ParseDirect(purposeText);
@@ -75,7 +74,7 @@ internal static class FlashRouteTraceProbe
 
         List<string> output = [];
         output.Add($"route={routePath} actions={route.Count} prefix={prefixLength}" +
-            $" purpose={purposeText} continuation={continuation} profileScale={profileScale}" +
+            $" purpose={purposeText} continuation={continuation}" +
             $" beam={profile.BeamWidth} nodes={profile.MaxExpandedNodes}");
         Dictionary<string, object?> summary = new()
         {
@@ -103,7 +102,6 @@ internal static class FlashRouteTraceProbe
                 minimumPotionUses: minimumPotionUses,
                 continuationPurpose: continuationPurpose,
                 resetFixedPrefixSchedulingBaseline: continuation ? resetBaseline : null,
-                profileScale: profileScale,
                 traceFactory: context =>
                 {
                     trace = FlashRouteTrace.TryCreate(context.Probe, context.Player,

@@ -36,13 +36,11 @@ internal sealed class FlashVerificationException(int step, IReadOnlyList<string>
 
     public string? ContinuationPurpose { get; set; }
 
-    public int ProfileScale { get; set; }
-
     public IReadOnlyList<string> Prefix { get; set; } = [];
 
     public FlashVerificationFailure ToFailure()
         => new(Step, Action, Plan, StateDifferences, StateBefore, OldAfter, FlashAfter,
-            DirectPurpose, ContinuationPurpose, ProfileScale, Prefix);
+            DirectPurpose, ContinuationPurpose, Prefix);
 }
 
 internal sealed record FlashSolveOutcome(
@@ -90,22 +88,6 @@ internal sealed record FlashTraceContext(
 internal static partial class FlashRouteMaterializer
 {
     /// <summary>
-    /// FlashBeam width and node budget as a multiple of the existing profile's, under the same soft time
-    /// budget. FlashBeam retains one rank lane and one offensive lane instead of the existing routing,
-    /// diversity and Pareto lanes, so it needs a wider beam for the same route quality
-    /// (docs/flash-search/testing.md, width benchmark).
-    /// </summary>
-    internal const int ProfileWidthScale = 4;
-
-    /// <summary>
-    /// Offline width experiments only (<c>OFFLINE_HARNESS_FLASH_PROFILE_SCALE</c>): replaces
-    /// <see cref="ProfileWidthScale"/> for every member that uses it. The mod never sets it.
-    /// </summary>
-    internal static int? ProfileWidthScaleOverrideForTesting { get; set; }
-
-    internal static int EffectiveProfileWidthScale => ProfileWidthScaleOverrideForTesting ?? ProfileWidthScale;
-
-    /// <summary>
     /// Requests at or below this soft budget keep the 25% offensive diversity lane. The 10 s
     /// natural-root benchmark and short player budgets use it; the 120 s Medium coordinator path
     /// ranks the whole beam by the existing rank order.
@@ -131,7 +113,6 @@ internal static partial class FlashRouteMaterializer
         ContinuationPurpose? continuationPurpose = null,
         PotionFreePolicyBaseline? potionFreePolicyBaseline = null,
         bool? resetFixedPrefixSchedulingBaseline = null,
-        int profileScale = ProfileWidthScale,
         PlanCommitment? planCommitment = null,
         int earlyTurnScoutDepth = 0,
         Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null,
@@ -139,7 +120,7 @@ internal static partial class FlashRouteMaterializer
         Func<FlashTraceContext, FlashBeamTrace?>? traceFactory = null)
     {
         FlashWorkAccounting accounting = new(policy.RequestWorkTotals, purpose, continuationPurpose,
-            profileScale, policy.FramePressureSignal, policy.Diagnostics);
+            policy.FramePressureSignal, policy.Diagnostics);
         Stopwatch workWatch = Stopwatch.StartNew();
         try
         {
@@ -147,7 +128,7 @@ internal static partial class FlashRouteMaterializer
                 accounting, flashOptions, potionPolicyOverride, progressCallback, purpose,
                 primaryIncumbent, fixedPrefixActions, maximumPotionUses, minimumPotionUses,
                 earliestPotionTurn, continuationPurpose, potionFreePolicyBaseline,
-                resetFixedPrefixSchedulingBaseline, profileScale, planCommitment, earlyTurnScoutDepth,
+                resetFixedPrefixSchedulingBaseline, planCommitment, earlyTurnScoutDepth,
                 earlyTurnScoutObserver, trace, traceFactory);
         }
         catch (FlashVerificationException ex)
@@ -156,7 +137,6 @@ internal static partial class FlashRouteMaterializer
             // unchanged. The exception is rethrown in place so the verification stack is preserved.
             ex.DirectPurpose = purpose?.ToString();
             ex.ContinuationPurpose = continuationPurpose?.ToString();
-            ex.ProfileScale = profileScale;
             ex.Prefix = [.. (fixedPrefixActions ?? []).Select(action =>
                 $"{action.Turn}:{action.Kind}:{action.CardId}->{action.TargetCombatId}")];
             throw;
@@ -187,7 +167,6 @@ internal static partial class FlashRouteMaterializer
         ContinuationPurpose? continuationPurpose = null,
         PotionFreePolicyBaseline? potionFreePolicyBaseline = null,
         bool? resetFixedPrefixSchedulingBaseline = null,
-        int profileScale = ProfileWidthScale,
         PlanCommitment? planCommitment = null,
         int earlyTurnScoutDepth = 0,
         Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null,
@@ -385,8 +364,8 @@ internal static partial class FlashRouteMaterializer
             ? seed with { CombatEndedTurn = seed.CombatEndedTurn - rootSnapshot.Turn + rootPlayerTurn }
             : null;
         FlashBeamOptions options = (flashOptions ?? new FlashBeamOptions(
-            checked(profile.BeamWidth * profileScale),
-            checked(profile.MaxExpandedNodes * profileScale),
+            profile.BeamWidth,
+            profile.MaxExpandedNodes,
             MaxTurns: 64,
             TimeSpan.FromMilliseconds(profile.SoftTimeBudgetMilliseconds),
             root.InitialPlayerMaxHp)) with
@@ -440,7 +419,6 @@ internal static partial class FlashRouteMaterializer
                     ? 0.25d
                     : 0d,
         };
-        accounting.SetProfileScale(options.BeamWidth / (double)Math.Max(1, profile.BeamWidth));
         FlashProgressBridge progressBridge = new(probe, player, root, displayNames, battleDamage,
             policy, profile, searchRoots, battles, rules, prefix, potionUsage.PotionUseCount,
             progressCallback, accounting.Pacer, cancellationToken);

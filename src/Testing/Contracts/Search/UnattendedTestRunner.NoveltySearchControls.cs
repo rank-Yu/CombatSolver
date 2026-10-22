@@ -155,18 +155,16 @@ internal sealed partial class UnattendedTestRunner
                 throw new InvalidOperationException(
                     $"Flash 搜索期间没有发布路线预览/进度：events={progressEvents} preview={previewSeen}。");
             SearchRequestWorkSnapshot work = routeWork.Snapshot();
-            long expectedBudget = (work.ExpandedNodes + 3) / 4;
             if (work.RecordedSolverCount != 1 || work.ExpandedNodes <= 0
-                || work.TransitionCount <= 0 || work.BudgetExpandedNodes != expectedBudget)
+                || work.TransitionCount <= 0 || work.BudgetExpandedNodes != work.ExpandedNodes)
             {
                 throw new InvalidOperationException(
-                    "Flash 路线接管的工作量没有按一次搜索记录并归一化：" +
+                    "Flash 路线接管的工作量没有按一次搜索记录并按实际展开数记账：" +
                     $"records={work.RecordedSolverCount} expanded={work.ExpandedNodes} " +
-                    $"transitions={work.TransitionCount} budget={work.BudgetExpandedNodes} " +
-                    $"expected_budget={expectedBudget}。");
+                    $"transitions={work.TransitionCount} budget={work.BudgetExpandedNodes}。");
             }
         }
-        _completedChecks.Add("Flash:ProgressPreview:AdoptDisplayedRoute:WorkNormalized");
+        _completedChecks.Add("Flash:ProgressPreview:AdoptDisplayedRoute:WorkCounted");
 
         // 2. Apply-current-turn from a running Flash search.
         SearchInteractionState turnInteraction = new();

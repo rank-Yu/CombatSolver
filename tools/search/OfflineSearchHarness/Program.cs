@@ -304,7 +304,6 @@ internal static class Program
                     flashAfter = verification.FlashAfter,
                     directPurpose = verification.DirectPurpose,
                     continuationPurpose = verification.ContinuationPurpose,
-                    profileScale = verification.ProfileScale,
                     prefix = verification.Prefix,
                 };
             }

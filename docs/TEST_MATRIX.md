@@ -6,7 +6,7 @@
 
 0.50.0 定稿沿用 PR #207、PR #211 与开局药水准入的既有行为证据，来源和范围见 [历史卷 20](archive/testing/volume-20.md)。
 
-按改动选择最小验证层，方法见 [无人测试](HEADLESS_TESTING.md) 与 [社区验收](community/testing-guide.md)。以下命令提供当前复跑入口，不表示本轮已执行。单人共享损血剪枝的新基线验证见[策略证据](strategy/hp-loss-pruning/README.md#单人共享损血剪枝2026-10-05)。Flash 搜索后端（默认关闭）的内核合同、K4 评估与 K5 incumbent 下界差分证据以及无人测试部署入口（`--flash-search-mode-for-test` / `-FlashSearchModeForTest`）见[Flash 测试记录](flash-search/testing.md)。选牌药水 `LiquidMemories`/`Ashwater`/`GamblersBrew`/`TouchOfInsanity` 的固定根为 `coverage/fixtures/cards/flash-qp1-*.json`，动作集合核对随 `flash_regression.py diff` 的 `actionSetFailed` 一起验收；`TouchOfInsanity` 的 X 费筛选回归固定根为 `coverage/fixtures/cards/flash-qf4-touch-of-insanity-xcost.json`。Anger 复制与 Dampen 恢复顺序的固定根为 `coverage/fixtures/cards/flash-qf5-anger-dampen-clone.json`，默认 32 条游走随 `diff` 验收。
+按改动选择最小验证层，方法见 [无人测试](HEADLESS_TESTING.md) 与 [社区验收](community/testing-guide.md)。以下命令提供当前复跑入口，不表示本轮已执行。单人共享损血剪枝的新基线验证见[策略证据](strategy/hp-loss-pruning/README.md#单人共享损血剪枝2026-10-05)。Flash 搜索后端（默认关闭）使用与常规搜索相同档位的 Beam 宽度、节点上限与软时间；内核合同、K4 评估与 K5 incumbent 下界差分证据以及无人测试部署入口（`--flash-search-mode-for-test` / `-FlashSearchModeForTest`）见[Flash 测试记录](flash-search/testing.md)。选牌药水 `LiquidMemories`/`Ashwater`/`GamblersBrew`/`TouchOfInsanity` 的固定根为 `coverage/fixtures/cards/flash-qp1-*.json`，动作集合核对随 `flash_regression.py diff` 的 `actionSetFailed` 一起验收；`TouchOfInsanity` 的 X 费筛选回归固定根为 `coverage/fixtures/cards/flash-qf4-touch-of-insanity-xcost.json`。Anger 复制与 Dampen 恢复顺序的固定根为 `coverage/fixtures/cards/flash-qf5-anger-dampen-clone.json`，默认 32 条游走随 `diff` 验收。
 
 历史记录见 [归档索引](archive/testing/README.md)，0.48.1 的验证、失败与未验证项见 [历史卷 12](archive/testing/volume-12.md)。
 

@@ -428,7 +428,6 @@ internal static class BeamSolveDispatch
                 maximumPotionUses: request.MaximumPotionUses,
                 minimumPotionUses: request.MinimumPotionUses,
                 potionFreePolicyBaseline: request.PotionFreePolicyBaseline,
-                profileScale: ProfileScale(request.Purpose),
                 earlyTurnScoutDepth: request.EarlyTurnScoutDepth,
                 earlyTurnScoutObserver: request.EarlyTurnScoutObserver);
             AttachFlashMetrics(outcome);
@@ -493,19 +492,6 @@ internal static class BeamSolveDispatch
         }
     }
 
-    /// <summary>
-    /// The Flash profile scale of one direct member. The narrow opening incumbent deliberately
-    /// searches a 1/16-width pilot; the coordinator already built the scout's wide profile and the
-    /// novelty budget is the request's own node/time bound, so those three keep scale one.
-    /// </summary>
-    private static int ProfileScale(DirectSearchPurpose purpose)
-        => purpose is DirectSearchPurpose.NarrowOpeningIncumbent
-            or DirectSearchPurpose.EarlyTurnScout
-            or DirectSearchPurpose.NoveltyExploration
-            or DirectSearchPurpose.AdaptiveNoveltyRefinement
-                ? 1
-                : FlashRouteMaterializer.EffectiveProfileWidthScale;
-
     private static FlashAttempt SolveFlashContinuation(ContinuationSearchRequest request)
     {
         try
@@ -535,7 +521,6 @@ internal static class BeamSolveDispatch
                 planCommitment: request.Commitment,
                 earlyTurnScoutDepth: request.EarlyTurnScoutDepth,
                 earlyTurnScoutObserver: request.EarlyTurnScoutObserver,
-                profileScale: FlashRouteMaterializer.EffectiveProfileWidthScale,
                 resetFixedPrefixSchedulingBaseline: request.Purpose == ContinuationPurpose.SmartOpeningPotionPosterior
                     ? request.ResetFixedPrefixSchedulingBaseline : null);
             AttachFlashMetrics(outcome);

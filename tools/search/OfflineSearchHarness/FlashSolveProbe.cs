@@ -31,13 +31,12 @@ internal static class FlashSolveProbe
         SolverResult existing = existingTask.GetAwaiter().GetResult();
         double existingMs = watch.Elapsed.TotalMilliseconds;
 
-        double widthScale = double.TryParse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_WIDTH_SCALE"), out double scale) ? scale : FlashRouteMaterializer.ProfileWidthScale;
         double offensiveShare = double.TryParse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_OFFENSIVE_SHARE"), out double share) ? share : 0.25d;
         int candidateScan = int.TryParse(
             Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_CANDIDATE_SCAN"), out int scan) ? scan : 0;
         FlashBeamOptions flashOptions = new(
-            (int)(profile.BeamWidth * widthScale),
-            (int)(profile.MaxExpandedNodes * widthScale),
+            profile.BeamWidth,
+            profile.MaxExpandedNodes,
             MaxTurns: 64,
             TimeSpan.FromMilliseconds(profile.SoftTimeBudgetMilliseconds),
             root.InitialPlayerMaxHp)

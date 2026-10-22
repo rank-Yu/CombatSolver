@@ -10,11 +10,11 @@
 
 ### Flash 搜索后端（默认关闭）
 
-新增可选的结构体状态内核（`src/Flash/Kernel/`、`src/Flash/Content/`）与旧引擎衔接层（`src/Flash/Bridge/`）。默认关闭；设置 > 性能 > 搜索预算 >「Flash 快速搜索（实验）」可选择关闭、对照或启用。关闭时玩家可见行为不变；对照只记录一行对照日志，结果、工作量和诊断与关闭相同。启用模式只运行 Flash，不回落现有搜索：Flash 判定没有满足药水策略的路线时，返回与现有搜索同形的无路线结果；遇到不支持的内容、根状态超容量、内核边界、逐步回放核对不一致或药水约束复核不一致时，停止本回合部署、关闭全自动、提示切回关闭模式，问题包标注 `FlashSearchFailed` 与具体失败类别；回合准备搜索失败按同一约定处理，原生选择留给玩家作答。无人测试在这些失败上直接判 Failed。覆盖五个角色卡池、296 个遗物、65 种药水、三幕已实现遭遇与第三幕首领策略，以及事件卡牌与事件遭遇；未支持的内容在准入阶段按类别拒绝。当前同政策、同预算的质量对照（五个角色、三幕均衡的 120 个生成牌组）：开启相对关闭 28 好 / 76 同 / 16 差，胜场 87 → 88，总耗时约为关闭模式的 42%；按角色与幕次的细分和变差根见测试记录。规格、失败类别与请求参数见 [Flash 搜索](flash-search/README.md) 与 [搜索与接入](flash-search/search.md)，覆盖、逐根证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
+新增可选的结构体状态内核（`src/Flash/Kernel/`、`src/Flash/Content/`）与旧引擎衔接层（`src/Flash/Bridge/`）。默认关闭；设置 > 性能 > 搜索预算 >「Flash 快速搜索（实验）」可选择关闭、对照或启用。关闭时玩家可见行为不变；对照只记录一行对照日志，结果、工作量和诊断与关闭相同。启用模式只运行 Flash，不回落现有搜索：Flash 判定没有满足药水策略的路线时，返回与现有搜索同形的无路线结果；遇到不支持的内容、根状态超容量、内核边界、逐步回放核对不一致或药水约束复核不一致时，停止本回合部署、关闭全自动、提示切回关闭模式，问题包标注 `FlashSearchFailed` 与具体失败类别；回合准备搜索失败按同一约定处理，原生选择留给玩家作答。无人测试在这些失败上直接判 Failed。覆盖五个角色卡池、296 个遗物、65 种药水、三幕已实现遭遇与第三幕首领策略，以及事件卡牌与事件遭遇；未支持的内容在准入阶段按类别拒绝。Flash 直接使用玩家所选档位的 Beam 宽度、节点上限与软时间，与常规搜索相同。当前同政策、同预算的质量对照（五个角色、三幕均衡的 120 个生成牌组）：开启相对关闭 19 好 / 78 同 / 23 差，胜场 87 → 85，总耗时约为关闭模式的 14%；按角色与幕次的细分和变差根见测试记录。规格、失败类别与请求参数见 [Flash 搜索](flash-search/README.md) 与 [搜索与接入](flash-search/search.md)，覆盖、逐根证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
 
 ### Flash 内核：Anger 复制与 Dampen 恢复顺序（QF5）
 
-1 倍宽度（`OFFLINE_HARNESS_FLASH_PROFILE_SCALE=1`）下 `quality-IRONCLAD-019` 的协调器开启模式在第 18 步
+档位宽度（当时用已移除的 `OFFLINE_HARNESS_FLASH_PROFILE_SCALE=1` 得到与现行档位相同的宽度）下 `quality-IRONCLAD-019` 的协调器开启模式在第 18 步
 核对失败：`PlayCard:ANGER#0->3` 的复制在旧引擎为 `ANGER+1`、Flash 为 `ANGER+0`。根因是现有引擎
 `CorePowerSupport.ApplyCardPowers` 在镜像攻击之后、Anger 的复制补偿之前执行 `ApplyEnemyDeathPowers`：
 本次攻击击杀最后一个 `DampenPower` 施法者时，原版 `DampenPower.AfterRemoved` 先把正在打出的 `CardModel`
@@ -26,13 +26,32 @@
 
 新增固定根 `flash-qf5-anger-dampen-clone`：修正前 32 条游走 `failed=1 walkFailed=18`（首个差异旧
 `Discard[0]=ANGER+1`、Flash `ANGER+0`），修正后 `failed=0 walkFailed=0 actionSetFailed=0`；
-`quality-IRONCLAD-019` 默认 48 条游走同为零差异。1 倍宽度单根协调器开启模式 30 行 `FLASH_ADOPTED`，
-没有 `FLASH_SEARCH_FAILED`。默认游走、动作集合检查与 4 倍宽度没发现它的原因见下面三条：该状态只位于
+`quality-IRONCLAD-019` 默认 48 条游走同为零差异。档位宽度单根协调器开启模式 30 行 `FLASH_ADOPTED`，
+没有 `FLASH_SEARCH_FAILED`。默认游走、动作集合检查与旧批次更宽 Beam 没发现它的原因见下面三条：该状态只位于
 协调器 `OpeningPowerRouteMember` 的 `JUGGLING` 固定前缀之后，默认差分从原始根做随机游走没有走到
 “Dampen 已施加、第二张 Anger 击杀最后施法者”的时点；动作集合只比较根/单步合法动作，不执行该步；
-4 倍宽度的候选与质量路线在相同预算下走了另一条不触发该时点的路线。离线宿主在
+旧批次更宽 Beam 的候选与质量路线在相同预算下走了另一条不触发该时点的路线。离线宿主在
 `harness-result.json`/`result.json` 新增 `flashFailure` 全量记录（成员、完整路线、步前状态、两侧步后
 状态、全部差异），稳定日志行与 320 字符 `detail` 不变。
+
+### Flash 宽度与节点上限直接使用档位值（QW）
+
+Flash 不再把请求 profile 的 Beam 宽度与全局节点上限乘以桥接层常数，也不再按宽度倍数折算共享节点预算。
+删除 `FlashRouteMaterializer.ProfileWidthScale`、`ProfileWidthScaleOverrideForTesting`、
+`EffectiveProfileWidthScale` 与 `Solve/SolveCore` 的 `profileScale` 参数链；`FlashBeamOptions` 的宽度与节点
+上限直接取 `profile.BeamWidth`/`profile.MaxExpandedNodes`，软时间仍取同一 profile。工作贡献的
+`BudgetExpandedNodes` 改用默认值，即实际 `ExpandedNodes`；`FlashWorkAccounting` 的宽度倍数与
+`BeamSolveDispatch.ProfileScale` 一并删除。窄开局、早期侦察与两个新颖度成员原本就不放大，行为不变。
+离线宿主删除 `OFFLINE_HARNESS_FLASH_PROFILE_SCALE`、`OFFLINE_HARNESS_FLASH_TRACE_PROFILE_SCALE` 与
+`OFFLINE_HARNESS_FLASH_WIDTH_SCALE`；宽度实验改用已有的 `--profile`/`--beam`/`--nodes`/`--budget-ms`。
+Flash 特有的 25% 进攻席位不变，仍只在软时间预算不超过 30 秒的请求中保留。
+
+验收：120 根协调器开启模式与同代码旧开关 `PROFILE_SCALE=1` 的结果逐根相同（`cmp-runs.py` 120/120；
+路线、完整 `quality.json`、`SelectedExpanded`、`SelectedTransitions` 与 `FLASH_ADOPTED` 的逐根
+`flash_expanded`/`flash_transitions` 合计也全部一致，合计 6,066,815 / 34,235,126，共 2,812 行）。
+质量表 19 好 / 78 同 / 23 差、`cost_delta=-8`、胜场 87 → 85、总耗时 1671 s → 241 s，没有
+`FLASH_SEARCH_FAILED`。Release 构建 0 警告；K0 通过，结构、文档、工具与覆盖四项门禁通过。文档与设置界面
+同步改为“与常规搜索使用同一档位”，界面支持范围按当前单人原版内容更新。
 
 ### Flash 选牌药水 X 费筛选（QF4）
 

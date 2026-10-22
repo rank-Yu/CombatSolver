@@ -17,19 +17,16 @@ internal static partial class FlashRouteMaterializer
 {
     /// <summary>
     /// One Flash request's work contribution. The shared ledger sees the physical Flash expanded
-    /// nodes (telemetry and the early-turn continuation log), while its node budget sees the
-    /// legacy-equivalent units: the physical count is divided by the profile width scale the bridge
-    /// applied. Dividing keeps a 4x-wide Flash member from consuming the shared node budget four
-    /// times as fast as the legacy member it replaces; the actual route/expanded numbers remain in
-    /// the <c>FLASH_ADOPTED</c> log. Transitions additionally include every existing-engine replay
-    /// this request performed (admission, turn-setup, prefix, verification, materialization) so the
-    /// ledger and the diagnostics describe the same physical work.
+    /// nodes and transitions, so a Flash member contributes exactly the search work it performed.
+    /// The actual route/expanded numbers also remain in the <c>FLASH_ADOPTED</c> log. Transitions
+    /// additionally include every existing-engine replay this request performed (admission,
+    /// turn-setup, prefix, verification, materialization) so the ledger and the diagnostics
+    /// describe the same physical work.
     /// </summary>
     private sealed class FlashWorkAccounting(
         SearchRequestWorkTotals? totals,
         DirectSearchPurpose? purpose,
         ContinuationPurpose? continuationPurpose,
-        int profileScale,
         SearchFramePressureSignal framePressureSignal,
         SearchDiagnosticsSink diagnostics)
     {
@@ -37,7 +34,6 @@ internal static partial class FlashRouteMaterializer
         private readonly SearchRequestWorkTotals? _totals = totals;
         private readonly DirectSearchPurpose? _purpose = purpose;
         private readonly ContinuationPurpose? _continuationPurpose = continuationPurpose;
-        private double _profileScale = Math.Max(1, profileScale);
         private readonly long _allocatedAtStart = GC.GetAllocatedBytesForCurrentThread();
         private readonly int _gen0AtStart = GC.CollectionCount(0);
         private readonly int _gen1AtStart = GC.CollectionCount(1);
@@ -58,17 +54,6 @@ internal static partial class FlashRouteMaterializer
             _replayTransitionsAtStart = probe.AccountingForBridge.TransitionCount;
         }
 
-        /// <summary>
-        /// The width multiple the request actually used, taken from the constructed
-        /// <see cref="FlashBeamOptions.BeamWidth"/> rather than a hard-coded four. Production
-        /// requests are 4x or 1x; a probe-provided option set keeps its own ratio.
-        /// </summary>
-        public void SetProfileScale(double scale)
-        {
-            if (scale > 0 && double.IsFinite(scale))
-                _profileScale = scale;
-        }
-
         public void Record(TimeSpan elapsed)
         {
             if (_totals == null)
@@ -78,7 +63,6 @@ internal static partial class FlashRouteMaterializer
                 : Math.Max(0,
                     _probe.AccountingForBridge.TransitionCount - _replayTransitionsAtStart);
             long physicalTransitions = Transitions + replayTransitions;
-            long budgetExpanded = (long)Math.Ceiling(Expanded / _profileScale);
             _totals.Record(new SearchSolverWorkContribution(
                 Expanded,
                 (int)Math.Min(int.MaxValue, physicalTransitions),
@@ -89,8 +73,7 @@ internal static partial class FlashRouteMaterializer
                 Math.Max(0, GC.CollectionCount(1) - _gen1AtStart),
                 Math.Max(0, GC.CollectionCount(2) - _gen2AtStart),
                 MaxZero(GC.GetTotalPauseDuration() - _gcPauseAtStart),
-                Pacer.MaxObservedGcPause,
-                BudgetExpandedNodes: budgetExpanded),
+                Pacer.MaxObservedGcPause),
                 _continuationPurpose, _purpose);
             if (ProgressStats.ProgressEvents > 0)
             {

@@ -20,11 +20,9 @@ internal readonly record struct SearchRequestWorkSnapshot(
     long Gen0Collections, long Gen1Collections, long Gen2Collections,
     TimeSpan GcPauseDuration, TimeSpan MaxObservedGcPause, int RecordedSolverCount,
     int CycleReplayActions = 0,
-    // Legacy-equivalent expanded-node units used by the shared request node budget. Legacy
-    // contributions equal ExpandedNodes; Flash reports its physical expansions divided by the
-    // profile width multiple the request actually used, so a wider Flash member consumes the
-    // same budget share as the legacy member of that profile. Telemetry keeps the physical
-    // ExpandedNodes.
+    // Expanded-node units used by the shared request node budget. A contribution defaults to
+    // its physical ExpandedNodes; a caller may report a different budget unit explicitly.
+    // Telemetry keeps the physical ExpandedNodes.
     long BudgetExpandedNodes = 0);
 
 internal readonly record struct SearchSolverWorkContribution(
