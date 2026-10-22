@@ -3,7 +3,8 @@
 `flash_regression.py` 是 Flash 搜索后端已提交的回归入口。它把原先散在
 `.local/tool-tasks/flash-search/` 的构建、差分、候选扫描、基准、协调器对照、设置兼容检查与牌组生成
 收进一个跨平台 Python 入口，供审阅者在仓库内复跑证据。工具只调用
-`OfflineSearchHarness`，不重新实现搜索或战斗语义。
+`OfflineSearchHarness`，不重新实现搜索或战斗语义；宿主里的 Flash 探针（差分、动作集合、候选扫描、
+路线追踪、设置兼容检查）集中在 `tools/search/OfflineSearchHarness/Flash/`。
 
 ## 依赖
 
