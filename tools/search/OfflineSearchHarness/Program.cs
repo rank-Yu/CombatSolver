@@ -184,6 +184,8 @@ internal static class Program
                 payload["flashDiff"] = FlashDifferentialProbe.Run(
                     combat!, options, options.OutputDirectory, generated?.Request.FlashPrefixActions,
                     TurnSetupRootCapture.Captured, generated?.Request.FlashPrefixPlan);
+            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_RETENTION_DIFF") == "1")
+                payload["retentionDiff"] = RetentionDiffProbe.Run(combat!, options, loop);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_TRACE_ROUTE") is { Length: > 0 } traceRoute)
                 payload["flashTrace"] = FlashRouteTraceProbe.Run(combat!, options, traceRoute, loop);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_SOLVE") == "1")

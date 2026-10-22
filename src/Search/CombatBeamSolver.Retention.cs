@@ -172,7 +172,11 @@ internal sealed partial class CombatBeamSolver
         return longTermResource;
     }
 
-    private List<SearchNode> Prune(IEnumerable<SearchNode> nodes)
+    private List<SearchNode> Prune(
+        IEnumerable<SearchNode> nodes,
+        SearchRetentionBoundaryKind retentionKind,
+        int retentionTurnLayer,
+        int retentionPlayDepth)
     {
         SearchMeasurement measurement = _run.Performance.Begin();
         try
@@ -183,6 +187,10 @@ internal sealed partial class CombatBeamSolver
             List<SearchNode> pool = nodes as List<SearchNode> ?? nodes.ToList();
             int pathBoundaryId = ObserveSearchPathBoundaryInput(
                 pool, SearchPathObservationStage.PruneInput, "prune_input");
+            SearchRetentionObserver? retention = policy.Diagnostics.Retention;
+            retention?.Boundary(new SearchRetentionBoundary(
+                pathBoundaryId, retentionKind, retentionTurnLayer, retentionPlayDepth,
+                pool.Count, _profile.BeamWidth));
             Action<GlobalRetentionDecision>? observeGlobalRetention =
                 CreateGlobalRetentionObserver(pool, pathBoundaryId);
             List<SearchNode> global = Retention.RankBest(
@@ -266,10 +274,22 @@ internal sealed partial class CombatBeamSolver
             // The paired value events avoid equating a `with` clone with a dropped route.
             ObserveSearchPathBoundary(
                 bounded, SearchPathObservationStage.PruneFinal, "after_incumbent", pathBoundaryId);
-            if (observeGlobalRetention != null)
+            if (observeGlobalRetention != null
+                && policy.Diagnostics.PathObserver is { ObservesRetentionPools: true })
             {
                 ObserveSearchPathRetentionPool(
                     bounded, SearchPathObservationStage.RetentionPoolFinal, "outer_prune_final", pathBoundaryId);
+            }
+            if (retention != null)
+            {
+                for (int index = 0; index < bounded.Count; index++)
+                {
+                    SearchNode node = bounded[index];
+                    retention.Selected(new SearchRetentionSelected(
+                        pathBoundaryId, index, node.StateKey,
+                        retention.Project(node.StateKey, node.Snapshot),
+                        node.Score, ObservedLastAction(node), node.Turn, node.ActionCount));
+                }
             }
             return bounded;
         }

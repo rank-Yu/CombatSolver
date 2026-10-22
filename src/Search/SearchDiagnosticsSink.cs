@@ -4,12 +4,16 @@ internal sealed class SearchDiagnosticsSink(
     Action<string> info,
     Action<string> debug,
     SearchPathObserver? pathObserver = null,
-    bool retentionLabels = false)
+    bool retentionLabels = false,
+    SearchRetentionObserver? retention = null)
 {
     public SearchPathObserver? PathObserver { get; } = pathObserver;
 
     /// <summary>Opt-in source labels on required representatives; default off.</summary>
     public bool RetentionLabels { get; } = retentionLabels;
+
+    /// <summary>Opt-in per-boundary retention-set capture for the offline K6 probe; default off.</summary>
+    public SearchRetentionObserver? Retention { get; } = retention;
 
     public void Info(string message) => info(message);
 

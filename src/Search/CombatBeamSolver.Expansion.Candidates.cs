@@ -491,11 +491,13 @@ private List<ActionCandidate> SelectActionCandidates(
             || CanRetainOrderedMutationLease(_run, candidate))
         {
             ObserveSearchPath(candidate, SearchPathObservationStage.AdmissionTransposition, "bypass_cycle_or_ordered_lease");
+            ObserveRetentionAdmission(candidate, "bypass_cycle_or_ordered_lease");
             return true;
         }
         if ((policy.TranspositionPruningDisabledMask & 1) != 0)
         {
             ObserveSearchPath(candidate, SearchPathObservationStage.AdmissionTransposition, "disabled_for_measurement");
+            ObserveRetentionAdmission(candidate, "disabled_for_measurement");
             return true;
         }
         TranspositionLabel next = new(
@@ -511,20 +513,24 @@ private List<ActionCandidate> SelectActionCandidates(
             {
                 _run.TranspositionLimitBypasses++;
                 ObserveSearchPath(candidate, SearchPathObservationStage.AdmissionTransposition, "entry_limit");
+            ObserveRetentionAdmission(candidate, "entry_limit");
                 return true;
             }
             _run.Transpositions.Add(candidate.StateKey, new TranspositionFrontier(next));
             ObserveTranspositionEntries();
             ObserveSearchPath(candidate, SearchPathObservationStage.AdmissionTransposition, "accepted_new_state");
+            ObserveRetentionAdmission(candidate, "accepted_new_state");
             return true;
         }
         if (frontier.TryAccept(next))
         {
             ObserveSearchPath(candidate, SearchPathObservationStage.AdmissionTransposition, "accepted_label");
+            ObserveRetentionAdmission(candidate, "accepted_label");
             return true;
         }
         _run.TranspositionBranchesPruned++;
         ObserveSearchPath(candidate, SearchPathObservationStage.AdmissionTransposition, "rejected_dominated");
+            ObserveRetentionAdmission(candidate, "rejected_dominated");
         if (_detailedDiagnostics && candidate.ActionCount <= 2)
         {
             policy.Diagnostics.Info(
@@ -550,11 +556,13 @@ private List<ActionCandidate> SelectActionCandidates(
             || CanRetainOrderedMutationLease(_run, node))
         {
             ObserveSearchPath(node, SearchPathObservationStage.ExpansionTransposition, "bypass_cycle_or_ordered_lease");
+            ObserveRetentionAdmission(node, "bypass_cycle_or_ordered_lease");
             return true;
         }
         if ((policy.TranspositionPruningDisabledMask & 2) != 0)
         {
             ObserveSearchPath(node, SearchPathObservationStage.ExpansionTransposition, "disabled_for_measurement");
+            ObserveRetentionAdmission(node, "disabled_for_measurement");
             return true;
         }
         TranspositionLabel next = new(
@@ -570,20 +578,24 @@ private List<ActionCandidate> SelectActionCandidates(
             {
                 _run.TranspositionLimitBypasses++;
                 ObserveSearchPath(node, SearchPathObservationStage.ExpansionTransposition, "entry_limit");
+            ObserveRetentionAdmission(node, "entry_limit");
                 return true;
             }
             _run.ExpandedTranspositions.Add(node.StateKey, new TranspositionFrontier(next));
             ObserveTranspositionEntries();
             ObserveSearchPath(node, SearchPathObservationStage.ExpansionTransposition, "accepted_new_state");
+            ObserveRetentionAdmission(node, "accepted_new_state");
             return true;
         }
         if (frontier.TryAccept(next))
         {
             ObserveSearchPath(node, SearchPathObservationStage.ExpansionTransposition, "accepted_label");
+            ObserveRetentionAdmission(node, "accepted_label");
             return true;
         }
         _run.TranspositionBranchesPruned++;
         ObserveSearchPath(node, SearchPathObservationStage.ExpansionTransposition, "rejected_dominated");
+            ObserveRetentionAdmission(node, "rejected_dominated");
         return false;
     }
 

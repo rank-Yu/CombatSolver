@@ -222,3 +222,72 @@ plan 每项的字段：`label`（必填，简单目录名）、`request`（必�
 ## Flash 差分探针
 
 设置 `OFFLINE_HARNESS_FLASH_DIFF=1` 后，宿主在到达玩家第一回合（M1）时比较现有引擎与 Flash 内核：先投影根，再对全部合法动作各执行一步、并按固定种子做多回合随机游走，逐步比较投影后的字节。每个根状态、K1 子状态与 K2 状态还比较动作集合：现有求解器计划动作与 Flash 合法动作按（种类、卡牌/药水、目标、药水槽位、药水是否需要选择）去重后的键集合；差异计入 `actionSetFailed`，并写出首例。结果写入 `flash-diff.txt` 与 `harness-result.json` 的 `flashDiff` 字段。根含 Flash 尚不支持的内容时报告准入拒绝原因，并在下一行 `MISSING` 列出根上全部没有 Flash 定义的卡牌、遗物、药水与怪物，不做比较。命令与当前证据见 [Flash 测试记录](flash-search/testing.md)。
+
+## Flash 逐层保留集合对照（K6）
+
+设置 `OFFLINE_HARNESS_RETENTION_DIFF=1` 后，宿主在 M1 用同一个根、同一份 `SearchPolicySnapshot`、同一个目的、宽度、开关、节点上限、软时间、incumbent 与药水政策分别运行 `CombatBeamSolver` 和 `FlashRouteMaterializer`，在每个保留边界记录有序选中集合，按边界键对齐后比较第一处分歧。该模式只读、不改选择；不设置时所有新回调均为 null，生产路径逐位相同。
+
+### 选项
+
+| 环境变量 | 含义 |
+|---|---|
+| `OFFLINE_HARNESS_RETENTION_DIFF=1` | 打开本模式 |
+| `OFFLINE_HARNESS_RETENTION_OUT` | 输出 JSON（默认 `<out>/retention-diff.json`） |
+| `OFFLINE_HARNESS_RETENTION_LABEL` | 报告里的成员标签 |
+| `OFFLINE_HARNESS_RETENTION_FLAGS` | 逗号列表 `band,base,power`，映射 `SecondRankBand`/`BaseScoreOnly`/`AggressivePowerCommitment` |
+| `OFFLINE_HARNESS_RETENTION_BEAM_WEIGHT` | `Term:Scale`，例如 `EnemyHp:1.5`，映射 `BeamWeightPerturbation` |
+| `OFFLINE_HARNESS_RETENTION_NODE_BUDGET` | 精确覆盖 `MaxExpandedNodes`；用于成员预算小于设置校验下限 100 的组合（例如有界精炼成员） |
+| `OFFLINE_HARNESS_RETENTION_TOP` | 第一处分歧每侧报告的前若干个状态（默认 8） |
+| `OFFLINE_HARNESS_RETENTION_PURPOSE` | `DirectSearchPurpose`，默认 `PrimaryBeam` |
+| `OFFLINE_HARNESS_RETENTION_POTION_POLICY` | 可选 `SolverPotionPolicy` 覆盖；缺省沿用请求策略 |
+
+宽度与节点仍用现有 `--beam`/`--nodes`，软时间用 `--budget-ms`。`tools/search/FlashRegression/flash_regression.py retention` 会按 `off120-base` 各根 `PortfolioMembers` 的实际运行成员逐项设置这些参数。
+
+### 跨引擎状态键
+
+状态键是规范文本投影的 128 位哈希：现有引擎的 `SimulationSnapshot` 先经 `FlashStateImporter.Import` 投影成 `FlashBattle`，两边都用 `FlashBattleDump.Lines` 得到与 K2 差分/路线核对相同的逐行字段投影，再对带版本前缀的 UTF-8 行文本取 SHA-256 前 16 字节。`FlashBattleDump` 覆盖：
+
+- 回合、玩家回合、洗牌事件/跨洗牌、下一战斗 Id、能量、星能、金币、side/phase/outcome/flags、手牌上限、药水槽数；
+- 玩家与 Osty 的生命/格挡/flags，全部敌人的怪物 Id、行动、AI、死亡阶段、近期行动、steam；
+- 全部 Power 的 owner/applier/target/amount/flags/aux，全部牌堆逐张卡牌（Id、升级、flags、关键字、费用、变量、私有值等）、detached 卡、HistoryCourse 卡；
+- 遗物与药水槽、球、计数器、九条 RNG 流。
+
+它**不**覆盖只属于搜索路线的值：药水使用次数、`FutureSoldHp`、动作深度、route traits、power commitment、评分与父节点。这些值在报告里单独按分数/排名/必保标签/最后动作比较；因此同一个状态键可以对应多条路线历史。现有快照无法投影（`FlashImportException`/`FlashCapacityException` 等）时该状态键记为空并计入 `unprojectable`，不参与集合比较；成员只要出现不可投影状态就不会判为 `identical`。
+
+### 边界对应
+
+| 常规搜索 | Flash | 对齐键 |
+|---|---|---|
+| 动作层展开后 `PruneAtMemoryBoundary` → `Prune` | `next.CopyTopTo(current, width, ...)` + `PrunePool(current)` | `ActionLayer:turnLayer:playDepth` |
+| `AnnotateTurnOutcomes` 后的非终局 `ended` 再 `Prune` | `ended.CopyTopTo(turnFrontier, width, ..., turnBoundary:true)` + `PrunePool(turnFrontier)` | `TurnBoundary:turnLayer:0` |
+| 回合起点 `frontier`（来自上一回合保留） | `turnFrontier`（来自上一回合保留） | 不单独计边界 |
+
+`turnLayer` 从 0 开始，`playDepth` 是回合内动作层深度。两边的输入池大小分别记录：常规侧是 `Prune` 的原始候选池，Flash 侧是字节去重后的 `next`/`ended`，所以数值不同本身不是分歧。某侧缺少某个边界键时，若节点/时间/容量上限能解释则记为 F，否则记为 G。
+
+### 每个边界记录
+
+- 边界键、输入池大小、宽度、选中数；
+- 选中顺序、状态键、分数、排名、是否必保、常规侧 `requiredLabel`、Flash 侧泳道标签、到达路线的最后一个动作；Flash 标签优先取 `AddRequired` 的显式组名（`potion.*`/`global.*`/`lineage.*`/`routing` 等），没有显式组名的保留席位回退 `TraceLeadingLanes` 重建；
+- 常规侧 `GlobalRetention` 与最终 `PruneFinal` 分开记录，最终选中包含资源/循环/ordered 组合追加的席位；Flash 侧在 `SelectTop` 记录全部输入状态并标记 `selected`，再应用 `PrunePool` 的 incumbent/Smart 药水剔除。
+
+`FlashBeamSolver.Pool` 的并集事件、现有引擎的 `Generated`/`AdmissionTransposition`/`ExpansionTransposition` 也记录候选生成、去重、转置拒绝和容量丢弃，供 A/B 分类使用。
+
+### 第一处分歧与分类
+
+从边界序列起点比较选中多重集；集合相同但顺序不同只记 `orderOnly`（两边“有序”语义不同：常规最终列表是 `SortRetained` 顺序，Flash 是 rank 位置顺序，因此不把顺序差当第一处分歧）。第一处集合不同输出两侧独有状态及每个状态在另一侧的情况，并按以下优先序给主类别，同时保留所有类别计数：
+
+- **A**：另一侧没有该状态键的生成/准入/拒绝记录（候选生成不同：动作枚举、选牌分支顺序或上限）；
+- **B**：另一侧生成过但被转置支配、条目上限或等价拒绝；
+- **C**：两侧都生成、分数相同，但排名、同分顺序或边界池成员不同；
+- **D**：两侧都在池中但分数不同（保留分数位差与最后动作；例如 `FutureSoldHp` 罚分未覆盖时会落在这一类，K4 不覆盖路线历史）；
+- **E**：必保/分组选择不同（输出常规侧 `requiredLabel` 与 Flash 泳道）；
+- **F**：边界数量/节点上限/容量压缩/时间上限在不同位置结束；
+- **G**：边界键无法对应。
+
+全程选中集合一致且最终路线相同才输出 `identical`。某侧出现不可投影的保留池/选中状态时 `unprojectable` 非零，`retention` 摘要把该成员运行标为 `incomparable`，不进入 A–G 统计；生成阶段不可投影但不进入保留池的状态不影响该标记。
+
+当前模式覆盖 `PrimaryBeam` 的普通回合搜索：不包含 turn-setup 根、novelty、fixed-prefix continuation 与 incumbent 审计成员；这些路径需要后续扩展观察器。
+
+### 产物
+
+`retention-diff.json` 包含成员身份、profile、两边边界/选中/生成/容量计数、最终路线、边界逐项 `sameSet/sameOrder`、第一处分歧详情与类别计数。`flash_regression.py retention` 再汇总为 `SUMMARY.txt` / `SUMMARY.json`（成员级一致数、类别分布、第一处分歧的回合/层深、按类别的具体原因与代表根）。

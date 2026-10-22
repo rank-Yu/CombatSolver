@@ -940,6 +940,21 @@ def build_parser() -> argparse.ArgumentParser:
     trace.add_argument('--timeout', type=float, default=480)
     trace.set_defaults(func=cmd_trace)
 
+    retention = sub.add_parser('retention',
+                                help='K6 per-boundary retained-set comparison on the quality corpus')
+    add_common(retention)
+    add_root_options(retention)
+    retention.set_defaults(jobs=8)
+    retention.add_argument('--baseline', type=Path, default=RETENTION_BASELINE,
+                           help='off120 coordinator baseline with <id>/Off/harness-result.json')
+    retention.add_argument('--ids', nargs='+', default=None, help='quality corpus directory names')
+    retention.add_argument('--budget-ms', type=int, default=120000)
+    retention.add_argument('--top', type=int, default=8, help='divergent states reported per side (default 8)')
+    retention.add_argument('--timeout', type=float, default=900, help='per-run timeout seconds (default 900)')
+    retention.add_argument('--merge', nargs='+', type=Path, default=None,
+                           help='merge existing retention SUMMARY.json directories instead of running')
+    retention.set_defaults(func=cmd_retention)
+
     table = sub.add_parser('table', help='read-only Off/On quality table under the solver comparison key')
     table.add_argument('run_dir', type=Path, help='a coordinator output directory with <id>/{Off,On}/quality.json')
     table.add_argument('--corpus', type=Path, default=None,
@@ -964,6 +979,375 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, 'jobs', 1) < 1:
         parser.error('--jobs must be >= 1')
     return args.func(args)
+
+
+# ---------------------------------------------------------------------------
+# K6 retention-set comparison
+# ---------------------------------------------------------------------------
+
+RETENTION_BASELINE = DEFAULT_OUT / 'off120-base'
+
+
+def _retention_member_label(member: dict) -> str:
+    label = f"w{int(member['BeamWidth'])}"
+    if member.get('AggressivePowerCommitment'):
+        label += '+power'
+    if member.get('SecondRankBand'):
+        label += '+band'
+    if member.get('BaseScoreOnly'):
+        label += '+base'
+    if member.get('OffensiveRefinement'):
+        label += '+offense'
+    if member.get('BoundedRefinement'):
+        label += '+bounded'
+    return label
+
+
+def _retention_members(baseline: Path, root_id: str) -> list[dict]:
+    path = baseline / root_id / 'Off' / 'harness-result.json'
+    if not path.is_file():
+        return []
+    data = json.loads(path.read_text(encoding='utf-8-sig'))
+    members = (data.get('solverMetrics') or {}).get('PortfolioMembers') or []
+    return [member for member in members if member.get('Ran')]
+
+
+def _retention_env(member: dict, label: str, outdir: Path, top: int) -> dict[str, str]:
+    env = baseline_environment()
+    env['OFFLINE_HARNESS_RETENTION_NODE_BUDGET'] = str(int(member.get('NodeBudget') or 120000))
+    env['OFFLINE_HARNESS_RETENTION_DIFF'] = '1'
+    env['OFFLINE_HARNESS_RETENTION_LABEL'] = label
+    env['OFFLINE_HARNESS_RETENTION_OUT'] = str((outdir / 'retention-diff.json').resolve())
+    env['OFFLINE_HARNESS_RETENTION_TOP'] = str(top)
+    env['OFFLINE_HARNESS_RETENTION_PURPOSE'] = 'PrimaryBeam'
+    flags = []
+    if member.get('SecondRankBand'):
+        flags.append('band')
+    if member.get('BaseScoreOnly'):
+        flags.append('base')
+    if member.get('AggressivePowerCommitment'):
+        flags.append('power')
+    if flags:
+        env['OFFLINE_HARNESS_RETENTION_FLAGS'] = ','.join(flags)
+    if member.get('OffensiveRefinement'):
+        env['OFFLINE_HARNESS_RETENTION_BEAM_WEIGHT'] = 'EnemyHp:1.5'
+    return env
+
+
+def _reason_key(category: str, detail: dict) -> str:
+    last = (detail.get('lastAction') or '-').replace(' ', '')
+    if category == 'A':
+        card = last.split(':', 3)[-1] if last.count(':') >= 2 else ''
+        copies = (detail.get('rootHandCounts') or {}).get(card, 0)
+        suffix = ':duplicate-card-copy' if copies > 1 else ':action-enumeration'
+        return f'A:not-generated:{last}{suffix}'
+    if category == 'B':
+        return f"B:{detail.get('otherStatus') or 'rejected'}:{last}"
+    if category == 'C':
+        if detail.get('otherRank') is None:
+            return f'C:generated-not-in-pool:{last}'
+        return f'C:rank-or-tie:{last}'
+    if category == 'D':
+        left = detail.get('presentScore')
+        right = detail.get('otherScore')
+        if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+            return f'D:score-differs:{last}:delta={left - right:g}'
+        return f'D:score-differs:{last}'
+    if category == 'E':
+        return ('E:required:' + str(detail.get('presentLabel') or '-')
+                + '->' + str(detail.get('otherLabel') or '-'))
+    return f'{category}:{detail.get("reason") or "-"}'
+
+
+def _retention_record_from_payload(root_id: str, label: str, code: int, payload: dict) -> dict:
+    record = {
+        'root': root_id,
+        'member': label,
+        'exit': code,
+        'status': 'missing',
+        'firstCategory': None,
+        'firstKind': None,
+        'turn': None,
+        'depth': None,
+        'routeIdentical': None,
+        'unprojectable': payload.get('unprojectable', 0),
+        'reasons': [],
+        'error': None,
+    }
+    comparison = payload.get('comparison') or {}
+    record['status'] = payload.get('status') or comparison.get('status') or 'unknown'
+    record['error'] = payload.get('error')
+    record['routeIdentical'] = comparison.get('routeIdentical') if isinstance(comparison, dict) else None
+    first = comparison.get('firstDivergence') if isinstance(comparison, dict) else None
+    if isinstance(first, dict):
+        record['firstCategory'] = first.get('category')
+        record['firstKind'] = first.get('kind')
+        record['turn'] = first.get('turn')
+        record['depth'] = first.get('depth')
+        for side in ('oldOnly', 'flashOnly'):
+            for detail in first.get(side) or []:
+                category = detail.get('category') or record['firstCategory']
+                detail['rootHandCounts'] = payload.get('rootHandCounts') or {}
+                record['reasons'].append(_reason_key(category, detail))
+    if record['unprojectable']:
+        record['observedCategory'] = record['firstCategory']
+        record['status'] = 'incomparable'
+        record['firstCategory'] = None
+        record['firstKind'] = None
+        record['turn'] = None
+        record['depth'] = None
+        record['reasons'] = []
+    rest = {key: value for key, value in payload.items()
+            if key not in ('label', 'member', 'comparison', 'rootHandCounts')}
+    record['summary'] = rest
+    return record
+
+
+def _retention_record(root_id: str, member: dict, outdir: Path, code: int) -> dict:
+    label = _retention_member_label(member)
+    path = outdir / 'retention-diff.json'
+    if not path.is_file():
+        return {
+            'root': root_id, 'member': label, 'exit': code, 'status': 'missing',
+            'firstCategory': None, 'firstKind': None, 'turn': None, 'depth': None,
+            'routeIdentical': None, 'unprojectable': None, 'reasons': [],
+            'error': 'missing retention-diff.json',
+        }
+    payload = json.loads(path.read_text(encoding='utf-8-sig'))
+    return _retention_record_from_payload(root_id, label, code, payload)
+
+
+def _retention_aggregate(records: list[dict]) -> dict:
+    members: dict[str, dict] = {}
+    categories: dict[str, int] = {}
+    turns: dict[str, int] = {}
+    depths: dict[str, int] = {}
+    reasons: dict[str, dict] = {}
+    for record in records:
+        member = record['member']
+        entry = members.setdefault(member, {
+            'runs': 0, 'identical': 0, 'divergent': 0, 'incomparable': 0, 'error': 0,
+            'routeIdentical': 0, 'categories': {}, 'turns': {}, 'depths': {},
+        })
+        entry['runs'] += 1
+        status = record['status']
+        if status != 'incomparable' and record.get('routeIdentical'):
+            entry['routeIdentical'] += 1
+        if status == 'identical':
+            entry['identical'] += 1
+        elif status == 'incomparable':
+            entry['incomparable'] += 1
+            continue
+        elif status == 'error' or record['exit'] != 0:
+            entry['error'] += 1
+        else:
+            entry['divergent'] += 1
+        category = record.get('firstCategory')
+        if category:
+            entry['categories'][category] = entry['categories'].get(category, 0) + 1
+            categories[category] = categories.get(category, 0) + 1
+            turn_key = str(record.get('turn'))
+            depth_key = str(record.get('depth'))
+            entry['turns'][turn_key] = entry['turns'].get(turn_key, 0) + 1
+            entry['depths'][depth_key] = entry['depths'].get(depth_key, 0) + 1
+        if record.get('turn') is not None:
+            key = str(record['turn'])
+            turns[key] = turns.get(key, 0) + 1
+        if record.get('depth') is not None:
+            key = str(record['depth'])
+            depths[key] = depths.get(key, 0) + 1
+        for reason in record.get('reasons') or []:
+            bucket = reasons.setdefault(reason, {'count': 0, 'members': set(), 'roots': set()})
+            bucket['count'] += 1
+            bucket['members'].add(member)
+            bucket['roots'].add(record['root'])
+    reason_rows = [
+        {
+            'reason': reason,
+            'count': value['count'],
+            'members': sorted(value['members']),
+            'roots': sorted(value['roots']),
+            'representativeRoot': sorted(value['roots'])[0],
+        }
+        for reason, value in sorted(reasons.items(), key=lambda item: (-item[1]['count'], item[0]))
+    ]
+    return {
+        'members': members,
+        'categories': categories,
+        'turns': turns,
+        'depths': depths,
+        'reasons': reason_rows,
+    }
+
+
+def _retention_summary_lines(records: list[dict], aggregate: dict) -> list[str]:
+    lines = []
+    lines.append('MEMBER SUMMARY')
+    lines.append('member\truns\tidentical\trouteSame\tdivergent\tincomparable\terror\tA\tB\tC\tD\tE\tF\tG')
+    for member, entry in sorted(aggregate['members'].items()):
+        categories = entry['categories']
+        lines.append('\t'.join([
+            member, str(entry['runs']), str(entry['identical']), str(entry['routeIdentical']),
+            str(entry['divergent']), str(entry['incomparable']), str(entry['error']),
+            *[str(categories.get(category, 0)) for category in 'ABCDEFG'],
+        ]))
+    lines.append('')
+    lines.append('FIRST DIVERGENCE CATEGORY')
+    lines.append('category\tcount')
+    for category, count in sorted(aggregate['categories'].items()):
+        lines.append(f'{category}\t{count}')
+    lines.append('')
+    lines.append('TURN / LAYER DEPTH OF FIRST DIVERGENCE')
+    lines.append('turn\tcount')
+    for turn, count in sorted(aggregate['turns'].items(), key=lambda item: int(item[0])):
+        lines.append(f'{turn}\t{count}')
+    lines.append('depth\tcount')
+    for depth, count in sorted(aggregate['depths'].items(), key=lambda item: int(item[0])):
+        lines.append(f'{depth}\t{count}')
+    lines.append('')
+    lines.append('MEMBER TURN / DEPTH')
+    lines.append('member\tturn:count\tdepth:count')
+    for member, entry in sorted(aggregate['members'].items()):
+        turns = ','.join(f'{key}:{value}' for key, value in sorted(
+            entry['turns'].items(), key=lambda item: int(item[0])))
+        depths = ','.join(f'{key}:{value}' for key, value in sorted(
+            entry['depths'].items(), key=lambda item: int(item[0])))
+        lines.append(f"{member}\t{turns or '-'}\t{depths or '-'}")
+    lines.append('')
+    lines.append('MOST COMMON CONCRETE REASONS (top-N per first divergence)')
+    lines.append('count\tmembers\troots\treason\trepresentative')
+    for row in aggregate['reasons'][:40]:
+        lines.append('\t'.join([
+            str(row['count']), str(len(row['members'])), str(len(row['roots'])),
+            row['reason'], row['representativeRoot'],
+        ]))
+    lines.append('')
+    lines.append('PER RUN')
+    lines.append('root\tmember\texit\tstatus\tcategory\tkind\tturn\tdepth\treasons\terror')
+    for record in sorted(records, key=lambda item: (item['root'], item['member'])):
+        lines.append('\t'.join([
+            record['root'], record['member'], str(record['exit']), record['status'],
+            str(record.get('firstCategory') or '-'), str(record.get('firstKind') or '-'),
+            str(record.get('turn') if record.get('turn') is not None else '-'),
+            str(record.get('depth') if record.get('depth') is not None else '-'),
+            ','.join(record.get('reasons') or []) or '-', record.get('error') or '-',
+        ]))
+    return lines
+
+
+def cmd_retention(args: argparse.Namespace) -> int:
+    if args.merge:
+        out = output_dir(args, 'k6-retention-merged')
+        out.mkdir(parents=True, exist_ok=True)
+        records: list[dict] = []
+        for directory in args.merge:
+            directory = Path(directory).resolve()
+            runs = sorted(directory.glob('*/*/retention-diff.json'))
+            if runs:
+                for path in runs:
+                    payload = json.loads(path.read_text(encoding='utf-8-sig'))
+                    record = _retention_record_from_payload(
+                        path.parent.parent.name, path.parent.name, 0, payload)
+                    records.append({key: value for key, value in record.items() if key != 'summary'})
+                continue
+            path = directory / 'SUMMARY.json'
+            if not path.is_file():
+                raise SystemExit(f'missing retention runs or SUMMARY.json: {directory}')
+            payload = json.loads(path.read_text(encoding='utf-8-sig'))
+            records.extend(payload.get('records') or [])
+        aggregate = _retention_aggregate(records)
+        lines = _retention_summary_lines(records, aggregate)
+        write_summary(out / 'SUMMARY.txt', lines + ['DONE'])
+        (out / 'SUMMARY.json').write_text(json.dumps({
+            'jobs': args.jobs,
+            'budgetMilliseconds': args.budget_ms,
+            'tasks': len(records),
+            'aggregate': aggregate,
+            'records': records,
+        }, indent=1, ensure_ascii=False) + '\n', encoding='utf-8')
+        print(f'merged {len(records)} runs under {out}')
+        return 0 if all(record['exit'] == 0 and record['status'] != 'error' for record in records) else 1
+    if args.only == 'fixtures':
+        raise SystemExit('retention 只支持质量语料（--only quality 或 all）')
+    roots = quality_roots(args.quality_walks)
+    if args.ids:
+        wanted = set(args.ids)
+        roots = [root for root in roots if root.request.parent.name in wanted]
+    if args.root:
+        roots = [root for root in roots if any(token in root.name for token in args.root)]
+    shards = max(1, args.shards)
+    if args.shard is not None:
+        if not 0 <= args.shard < shards:
+            raise SystemExit(f'--shard must be in [0, {shards})')
+        roots = [root for index, root in enumerate(roots) if index % shards == args.shard]
+    out = output_dir(args, 'k6-retention')
+    if not prepare(args, out, k0=True):
+        return 1
+
+    baseline = args.baseline.resolve()
+    tasks: list[tuple[Root, dict]] = []
+    missing: list[str] = []
+    for root in roots:
+        root_id = root.request.parent.name
+        members = _retention_members(baseline, root_id)
+        if not members:
+            missing.append(root_id)
+            continue
+        for member in members:
+            tasks.append((root, member))
+    if missing:
+        write_summary(out / 'SUMMARY.txt', [f'BASELINE MISSING {root}' for root in missing])
+        print(f'baseline missing for {len(missing)} roots', file=sys.stderr)
+        return 1
+
+    records: list[dict] = []
+    lock = __import__('threading').Lock()
+    started = time.time()
+
+    def work(task: tuple[Root, dict]) -> dict:
+        root, member = task
+        root_id = root.request.parent.name
+        label = _retention_member_label(member)
+        outdir = fresh_dir(out / root_id / label)
+        env = _retention_env(member, label, outdir, args.top)
+        command = [
+            args.dotnet, str(args.harness), '--request', str(root.request),
+            '--label', f'{root_id}-{label}', '--profile', 'Medium',
+            '--beam', str(int(member['BeamWidth'])),
+            '--nodes', str(max(100, int(member.get('NodeBudget') or 120000))),
+            '--budget-ms', str(args.budget_ms), '--dop', '1',
+            '--search-mode', 'Evaluate', '--milestone', 'M1', '--out', str(outdir),
+        ]
+        code = run_command(command, cwd=ROOT, env=env, timeout=args.timeout,
+                           log=outdir / 'stdout.txt')
+        return _retention_record(root_id, member, outdir, code)
+
+    total = len(tasks)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as executor:
+        futures = {executor.submit(work, task): task for task in tasks}
+        for done, future in enumerate(concurrent.futures.as_completed(futures), 1):
+            record = future.result()
+            records.append(record)
+            elapsed = time.time() - started
+            print(f"[{done}/{total}] {record['root']} {record['member']} "
+                  f"{record['status']} {elapsed:7.1f}s", flush=True)
+
+    aggregate = _retention_aggregate(records)
+    lines = _retention_summary_lines(records, aggregate)
+    write_summary(out / 'SUMMARY.txt', lines + ['DONE'])
+    payload = {
+        'baseline': _relative(baseline),
+        'jobs': args.jobs,
+        'budgetMilliseconds': args.budget_ms,
+        'tasks': len(records),
+        'aggregate': aggregate,
+        'records': [{key: value for key, value in record.items() if key != 'summary'}
+                     for record in records],
+    }
+    (out / 'SUMMARY.json').write_text(json.dumps(payload, indent=1, ensure_ascii=False) + '\n',
+                                      encoding='utf-8')
+    print(f'wrote {len(records)} runs under {out}')
+    return 0 if all(record['exit'] == 0 and record['status'] != 'error' for record in records) else 1
 
 
 if __name__ == '__main__':

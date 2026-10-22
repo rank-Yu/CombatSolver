@@ -117,7 +117,8 @@ internal static partial class FlashRouteMaterializer
         int earlyTurnScoutDepth = 0,
         Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null,
         FlashBeamTrace? trace = null,
-        Func<FlashTraceContext, FlashBeamTrace?>? traceFactory = null)
+        Func<FlashTraceContext, FlashBeamTrace?>? traceFactory = null,
+        FlashRetentionObserver? retentionObserver = null)
     {
         FlashWorkAccounting accounting = new(policy.RequestWorkTotals, purpose, continuationPurpose,
             policy.FramePressureSignal, policy.Diagnostics);
@@ -129,7 +130,7 @@ internal static partial class FlashRouteMaterializer
                 primaryIncumbent, fixedPrefixActions, maximumPotionUses, minimumPotionUses,
                 earliestPotionTurn, continuationPurpose, potionFreePolicyBaseline,
                 resetFixedPrefixSchedulingBaseline, planCommitment, earlyTurnScoutDepth,
-                earlyTurnScoutObserver, trace, traceFactory);
+                earlyTurnScoutObserver, trace, traceFactory, retentionObserver);
         }
         catch (FlashVerificationException ex)
         {
@@ -171,7 +172,8 @@ internal static partial class FlashRouteMaterializer
         int earlyTurnScoutDepth = 0,
         Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null,
         FlashBeamTrace? trace = null,
-        Func<FlashTraceContext, FlashBeamTrace?>? traceFactory = null)
+        Func<FlashTraceContext, FlashBeamTrace?>? traceFactory = null,
+        FlashRetentionObserver? retentionObserver = null)
     {
         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
         Player player = root.PlayerIdentity;
@@ -405,6 +407,7 @@ internal static partial class FlashRouteMaterializer
             PreserveReplayAllocatorOpening = root.HasUnusedCardReplayAllocator,
             PowerCommitments = powerCommitments,
             Novelty = policy.NoveltySearch is { } novelty ? FlashNoveltyOptions.From(novelty) : null,
+            Retention = retentionObserver,
         };
         trace ??= traceFactory?.Invoke(new FlashTraceContext(
             probe, player, searchRootSnapshot, battles[0], rules, prefix));

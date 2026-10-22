@@ -175,21 +175,28 @@ internal sealed partial class CombatBeamSolver
         int boundaryId)
     {
         SearchPathObserver? observer = policy.Diagnostics.PathObserver;
-        if (observer == null || !observer.ObservesRetentionPools)
+        SearchRetentionObserver? retention = policy.Diagnostics.Retention;
+        if (observer == null && retention == null)
             return null;
-        bool matched = false;
-        foreach (SearchNode node in pool)
+        bool matched = retention != null;
+        if (observer != null && observer.ObservesRetentionPools)
         {
-            if (!observer.WantsRetentionPool(node.StateKey))
-                continue;
-            matched = true;
-            break;
+            foreach (SearchNode node in pool)
+            {
+                if (!observer.WantsRetentionPool(node.StateKey))
+                    continue;
+                matched = true;
+                break;
+            }
         }
         if (!matched)
             return null;
 
-        ObserveSearchPathRetentionPool(
-            pool, SearchPathObservationStage.RetentionPoolInput, "outer_prune_pool", boundaryId);
+        if (observer != null && observer.ObservesRetentionPools)
+        {
+            ObserveSearchPathRetentionPool(
+                pool, SearchPathObservationStage.RetentionPoolInput, "outer_prune_pool", boundaryId);
+        }
         return CreateMatchedGlobalRetentionCallback(boundaryId);
     }
 
@@ -220,12 +227,33 @@ internal sealed partial class CombatBeamSolver
 
     private void ObserveGlobalRetentionDecision(GlobalRetentionDecision decision, int boundaryId)
     {
-        SearchPathObserver observer = policy.Diagnostics.PathObserver
-            ?? throw new InvalidOperationException("全局保路诊断缺少显式观察器。");
+        SearchPathObserver? pathObserver = policy.Diagnostics.PathObserver;
+        SearchRetentionObserver? retention = policy.Diagnostics.Retention;
+        if (pathObserver == null && retention == null)
+            throw new InvalidOperationException("全局保路诊断缺少显式观察器。");
         for (int index = 0; index < decision.OrderedPool.Count; index++)
         {
             SearchNode node = decision.OrderedPool[index];
             SimulationSnapshot snapshot = node.Snapshot;
+            string? requiredLabel = decision.RequiredLabels?.GetValueOrDefault(node);
+            bool selected = ObservedReferenceIndex(decision.Selected, node) != null;
+            if (retention != null)
+            {
+                retention.PoolState(new SearchRetentionPoolState(
+                    boundaryId,
+                    node.StateKey,
+                    retention.Project(node.StateKey, snapshot),
+                    node.Score,
+                    index,
+                    requiredLabel != null,
+                    requiredLabel,
+                    selected,
+                    ObservedLastAction(node),
+                    node.Turn,
+                    node.ActionCount));
+            }
+            if (pathObserver == null || !pathObserver.WantsState(node.StateKey))
+                continue;
             SearchPathRoutingChoiceSignature? routingSignature = null;
             if (decision.RoutingSignatures != null
                 && decision.RoutingSignatures.TryGetValue(node, out RoutingChoiceSignature signature))
@@ -236,13 +264,13 @@ internal sealed partial class CombatBeamSolver
                     signature.ContextId, signature.StateContext, signature.EnemyCombatDistributionKey,
                     signature.EnemyControlDistributionKey, signature.UnorderedPileKey);
             }
-            observer.Observe(CaptureSearchPathObservation(
+            pathObserver.Observe(CaptureSearchPathObservation(
                 node, SearchPathObservationStage.GlobalRetention, "outer_rank_best", boundaryId) with
             {
                 Retention = new SearchPathRetentionDetails(
                     RawRank: index,
                     RequiredIndex: ObservedReferenceIndex(decision.Required, node),
-                    RequiredLabel: decision.RequiredLabels?.GetValueOrDefault(node),
+                    RequiredLabel: requiredLabel,
                     RoutingIndex: ObservedReferenceIndex(decision.Routing, node),
                     SelectedIndex: ObservedReferenceIndex(decision.Selected, node),
                     BeamRankScore: decision.BeamRankScore(node),
@@ -272,6 +300,43 @@ internal sealed partial class CombatBeamSolver
         }
     }
 
+    private static string ObservedLastAction(SearchNode node)
+        => node.Action is { } action ? PolicyActionToken(action) : "";
+
+    /// <summary>K6: one generated child, projected once by the opt-in retention observer.</summary>
+    private void ObserveRetentionGenerated(SearchNode child)
+    {
+        SearchRetentionObserver? retention = policy.Diagnostics.Retention;
+        if (retention == null)
+            return;
+        retention.Generation(new SearchRetentionGeneration(
+            child.StateKey,
+            child.Parent?.StateKey,
+            retention.Project(child.StateKey, child.Snapshot),
+            child.Score,
+            child.Turn,
+            child.ActionCount,
+            ObservedLastAction(child),
+            "generated"));
+    }
+
+    /// <summary>K6: the admission verdict of an already generated child.</summary>
+    private void ObserveRetentionAdmission(SearchNode node, string status)
+    {
+        SearchRetentionObserver? retention = policy.Diagnostics.Retention;
+        if (retention == null)
+            return;
+        retention.Generation(new SearchRetentionGeneration(
+            node.StateKey,
+            node.Parent?.StateKey,
+            retention.Project(node.StateKey, node.Snapshot),
+            node.Score,
+            node.Turn,
+            node.ActionCount,
+            ObservedLastAction(node),
+            status));
+    }
+
     private static int? ObservedReferenceIndex(IReadOnlyList<SearchNode> nodes, SearchNode candidate)
     {
         for (int index = 0; index < nodes.Count; index++)
@@ -287,7 +352,7 @@ internal sealed partial class CombatBeamSolver
         SearchPathObservationStage stage,
         string reason)
     {
-        if (policy.Diagnostics.PathObserver == null)
+        if (policy.Diagnostics.PathObserver == null && policy.Diagnostics.Retention == null)
             return 0;
         int boundaryId = ++_run.PathDiagnosticsBoundaryId;
         ObserveSearchPathBoundary(nodes, stage, reason, boundaryId);
