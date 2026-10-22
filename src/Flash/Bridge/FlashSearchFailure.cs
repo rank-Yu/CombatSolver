@@ -43,9 +43,6 @@ internal enum FlashSearchFailureReason
     /// <summary>Admission rejected deprecated content.</summary>
     AdmissionDeprecatedContent,
 
-    /// <summary>Admission rejected a third-party gameplay subscriber or modifier.</summary>
-    AdmissionThirdParty,
-
     /// <summary>Admission rejected a card, power, relic, potion, orb, monster, enchantment or affliction.</summary>
     AdmissionUnsupportedContent,
 
@@ -80,7 +77,6 @@ internal static class FlashSearchFailureReasons
             FlashSearchFailureReason.AdmissionMultiPlayer => "admission-multiplayer",
             FlashSearchFailureReason.AdmissionTestContent => "admission-test-content",
             FlashSearchFailureReason.AdmissionDeprecatedContent => "admission-deprecated-content",
-            FlashSearchFailureReason.AdmissionThirdParty => "admission-third-party",
             FlashSearchFailureReason.AdmissionUnsupportedContent => "admission-unsupported-content",
             FlashSearchFailureReason.AdmissionUnsupportedRequest => "admission-unsupported-request",
             FlashSearchFailureReason.AdmissionCapacity => "admission-capacity",
@@ -100,7 +96,6 @@ internal static class FlashSearchFailureReasons
             FlashRejection.MultiPlayer => FlashSearchFailureReason.AdmissionMultiPlayer,
             FlashRejection.TestContent => FlashSearchFailureReason.AdmissionTestContent,
             FlashRejection.DeprecatedContent => FlashSearchFailureReason.AdmissionDeprecatedContent,
-            FlashRejection.ThirdParty => FlashSearchFailureReason.AdmissionThirdParty,
             FlashRejection.UnsupportedCard
                 or FlashRejection.UnsupportedPower
                 or FlashRejection.UnsupportedRelic
@@ -114,6 +109,7 @@ internal static class FlashSearchFailureReasons
             FlashRejection.Capacity => FlashSearchFailureReason.AdmissionCapacity,
             FlashRejection.UnrepresentableState => FlashSearchFailureReason.AdmissionUnrepresentableState,
             FlashRejection.PendingChoice => FlashSearchFailureReason.AdmissionPendingChoice,
+            FlashRejection.RootPhase => FlashSearchFailureReason.RootPhase,
             FlashRejection.DevelopmentStrategy => FlashSearchFailureReason.DevelopmentStrategy,
             _ => FlashSearchFailureReason.AdmissionOther,
         };

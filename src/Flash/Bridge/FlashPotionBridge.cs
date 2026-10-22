@@ -63,8 +63,8 @@ internal static class FlashPotionBridge
 
     /// <summary>
     /// Verifies the potion constraints on the materialized route. Returns a stable failure description, or
-    /// null when the route is acceptable. A failure falls back to the existing solver; the Flash search's
-    /// "no route" is never presented as the existing search's <c>PotionPolicyUnsatisfiedException</c>.
+    /// null when the route is acceptable. The dispatch point classifies a failure as a two-sided
+    /// potion-policy mismatch; the Flash search's own "no route" is never presented as this verdict.
     /// </summary>
     public static string? VerifyRoute(
         SolverResult result,

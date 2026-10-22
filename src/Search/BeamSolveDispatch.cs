@@ -15,15 +15,13 @@ internal enum FlashSearchMode
     /// <summary>Only the existing <see cref="CombatBeamSolver"/> runs.</summary>
     Off,
 
-    /// <summary>Both run; the existing result is returned and one comparison line is logged.</summary>
-    Shadow,
-
     /// <summary>
     /// Flash only. A no-route result is returned in the existing search's shape; unsupported content,
     /// capacity, root-phase, verification and development-strategy cases stop the search with
     /// <see cref="FlashSearchFailedException"/>. The existing solver is never constructed in this mode.
+    /// The explicit value keeps persisted <c>On</c> readable after the removed <c>Shadow</c> value (1).
     /// </summary>
-    On,
+    On = 2,
 }
 
 /// <summary>The arguments of one coordinator Beam solve, independent of the backend that runs it.</summary>
@@ -63,8 +61,7 @@ internal sealed record BeamSolveRequest(
 /// direct audit members consult <see cref="SearchPolicySnapshot.FlashMode"/>; fixed-prefix continuations
 /// go through <see cref="SolveContinuation"/> under the same mode.
 /// <para>
-/// Off runs only the existing solver. Shadow runs both, returns the existing result and logs one
-/// comparison. On runs only Flash: a potion-policy no-route is reported with the existing
+/// Off runs only the existing solver. On runs only Flash: a potion-policy no-route is reported with the existing
 /// <see cref="PotionPolicyUnsatisfiedException"/> shape, and every other refusal becomes one stable
 /// <c>FLASH_SEARCH_FAILED</c> event plus <see cref="FlashSearchFailedException"/>. On mode never
 /// constructs <see cref="CombatBeamSolver"/> and never writes a legacy search line.
@@ -74,25 +71,12 @@ internal static class BeamSolveDispatch
 {
     public static SolverResult Solve(BeamSolveRequest request)
     {
-        bool auditable = request.Purpose is DirectSearchPurpose.PrimaryBeam
-            or DirectSearchPurpose.RefinementBeam
-            or DirectSearchPurpose.SmartPotionGradient
-            or DirectSearchPurpose.PotionFreeAudit
-            or DirectSearchPurpose.RequiredPotionAudit
-            or DirectSearchPurpose.NarrowOpeningIncumbent
-            or DirectSearchPurpose.TurnBoundaryDiscovery
-            or DirectSearchPurpose.EarlyTurnScout
-            or DirectSearchPurpose.NoveltyExploration
-            or DirectSearchPurpose.AdaptiveNoveltyRefinement;
-        FlashSearchMode mode = auditable ? request.Policy.FlashMode : FlashSearchMode.Off;
+        FlashSearchMode mode = ModeFor(request.Purpose, request.Policy);
         string? rootPhase = RootPhaseBoundary(request);
         if (rootPhase is not null)
         {
             // Only the ordinary play-phase root and the captured player/Start turn-setup root are
-            // modeled. Shadow keeps its comparison behavior; On refuses explicitly instead of
-            // searching a state the kernel would misinterpret.
-            if (mode == FlashSearchMode.Shadow)
-                return SolveExisting(request);
+            // modeled. On refuses explicitly instead of searching a state the kernel would misinterpret.
             if (mode == FlashSearchMode.On)
                 throw Failure(request.Policy, FlashSearchFailureReason.RootPhase, $"root-phase:{rootPhase}");
         }
@@ -100,26 +84,6 @@ internal static class BeamSolveDispatch
         {
             case FlashSearchMode.Off:
                 return SolveExisting(request);
-            case FlashSearchMode.Shadow:
-            {
-                Stopwatch watch = Stopwatch.StartNew();
-                SolverResult existing = SolveExisting(request);
-                TimeSpan existingTime = watch.Elapsed;
-                watch.Restart();
-                FlashAttempt flash = SolveFlash(request with
-                {
-                    Policy = Isolated(request.Policy),
-                    ProgressCallback = null,
-                    // The existing solve already reported to the observer; publishing the isolated
-                    // Flash frontier too would report every candidate twice.
-                    EarlyTurnScoutObserver = null,
-                });
-                request.Policy.Diagnostics.Info(
-                    $"[CombatSolver/Flash] FLASH_SHADOW purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} "
-                    + $"existing=[{Describe(existing, existingTime)}] flash=[{Describe(flash, watch.Elapsed)}] "
-                    + $"same_route={SameRoute(existing, flash.Outcome?.Result)}");
-                return existing;
-            }
             case FlashSearchMode.On:
             {
                 // The existing solver rejects these arguments in SolveCore before any search runs.
@@ -147,8 +111,7 @@ internal static class BeamSolveDispatch
     /// A fixed-prefix continuation solve. Every continuation shape FlashBeam models goes through the
     /// Flash backend: plan members (including any early-turn scout, potion baseline, earliest-turn bound,
     /// forced directive and potion bounds), the plan pass's own scout, and the Smart potion posterior.
-    /// Off runs only the existing solver; Shadow runs both and returns the existing result. On runs only
-    /// Flash and either returns the existing no-route shape or throws
+    /// Off runs only the existing solver. On runs only Flash and either returns the existing no-route shape or throws
     /// <see cref="FlashSearchFailedException"/>; an unsupported root phase is one of those explicit
     /// failures.
     /// </summary>
@@ -159,9 +122,6 @@ internal static class BeamSolveDispatch
         FlashSearchMode mode = effectivePolicy.FlashMode;
         if (rootPhase is not null)
         {
-            // Shadow keeps the prior comparison boundary: the existing solver runs alone here.
-            if (mode == FlashSearchMode.Shadow)
-                return SolveExistingContinuation(request);
             if (mode == FlashSearchMode.On)
                 throw Failure(effectivePolicy, FlashSearchFailureReason.RootPhase,
                     $"root-phase:{rootPhase} prefix={request.Prefix.Length}");
@@ -170,22 +130,6 @@ internal static class BeamSolveDispatch
         {
             case FlashSearchMode.Off:
                 return SolveExistingContinuation(request);
-            case FlashSearchMode.Shadow:
-            {
-                Stopwatch watch = Stopwatch.StartNew();
-                SolverResult existing = SolveExistingContinuation(request);
-                TimeSpan existingTime = watch.Elapsed;
-                watch.Restart();
-                FlashAttempt flash = SolveFlashContinuation(request with
-                {
-                    PolicyOverride = Isolated(EffectivePolicy(request)),
-                });
-                effectivePolicy.Diagnostics.Info(
-                    $"[CombatSolver/Flash] FLASH_SHADOW purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} prefix={request.Prefix.Length} "
-                    + $"existing=[{Describe(existing, existingTime)}] flash=[{Describe(flash, watch.Elapsed)}] "
-                    + $"same_route={SameRoute(existing, flash.Outcome?.Result)}");
-                return existing;
-            }
             case FlashSearchMode.On:
             {
                 // SolveCore rejects these arguments before any search runs; reproduce that failure.
@@ -211,6 +155,38 @@ internal static class BeamSolveDispatch
 
     private static SearchPolicySnapshot EffectivePolicy(ContinuationSearchRequest request)
         => request.PolicyOverride ?? request.Context.Policy;
+
+    /// <summary>
+    /// The Flash backend is audited for the listed direct purposes only. Every other purpose is an
+    /// ordinary existing-solver request in Off mode; in On mode it is an explicit failure instead of a
+    /// silent Off fallback, because a new purpose that forgets this list would otherwise bypass the
+    /// On-mode no-fallback contract. Continuation requests are audited through
+    /// <see cref="SolveContinuation"/>'s continuation purposes.
+    /// </summary>
+    private static FlashSearchMode ModeFor(DirectSearchPurpose purpose, SearchPolicySnapshot policy)
+    {
+        switch (purpose)
+        {
+            case DirectSearchPurpose.PrimaryBeam:
+            case DirectSearchPurpose.RefinementBeam:
+            case DirectSearchPurpose.SmartPotionGradient:
+            case DirectSearchPurpose.PotionFreeAudit:
+            case DirectSearchPurpose.RequiredPotionAudit:
+            case DirectSearchPurpose.NarrowOpeningIncumbent:
+            case DirectSearchPurpose.TurnBoundaryDiscovery:
+            case DirectSearchPurpose.EarlyTurnScout:
+            case DirectSearchPurpose.NoveltyExploration:
+            case DirectSearchPurpose.AdaptiveNoveltyRefinement:
+                return policy.FlashMode;
+            default:
+                if (policy.FlashMode == FlashSearchMode.On)
+                {
+                    throw Failure(policy, FlashSearchFailureReason.AdmissionUnsupportedRequest,
+                        $"direct-purpose:{purpose}");
+                }
+                return FlashSearchMode.Off;
+        }
+    }
 
     /// <summary>
     /// The existing solver's argument validation for the exact-use bounds (<c>CombatBeamSolver.SolveCore</c>):
@@ -345,20 +321,7 @@ internal static class BeamSolveDispatch
         return failure;
     }
 
-    /// <summary>
-    /// The policy a Shadow Flash solve runs under. Nothing it does may reach the request's shared
-    /// state: work totals, the shared incumbent table, takeover requests and the replay solvers'
-    /// own diagnostics stay with the existing search, so Shadow returns what Off would.
-    /// </summary>
-    private static SearchPolicySnapshot Isolated(SearchPolicySnapshot policy) => policy with
-    {
-        RequestWorkTotals = null,
-        PrimaryIncumbents = null,
-        Interaction = null,
-        Diagnostics = new SearchDiagnosticsSink(static _ => { }, static _ => { }),
-    };
-
-    /// <summary>The existing solver, used only by Off mode and by Shadow's existing-side comparison.</summary>
+    /// <summary>The existing solver, used only by Off mode.</summary>
     private static SolverResult SolveExisting(BeamSolveRequest request)
         => new CombatBeamSolver(
                 request.Root,
@@ -378,8 +341,8 @@ internal static class BeamSolveDispatch
                 directSearchPurpose: request.Purpose).Solve();
 
     /// <summary>
-    /// The existing solver's fixed-prefix continuation path, used only by Off mode and by Shadow's
-    /// existing-side comparison. Off must stay byte-identical.
+    /// The existing solver's fixed-prefix continuation path, used only by Off mode. Off must stay
+    /// byte-identical.
     /// </summary>
     private static SolverResult SolveExistingContinuation(ContinuationSearchRequest request)
     {
@@ -412,8 +375,6 @@ internal static class BeamSolveDispatch
     {
         try
         {
-            if (TakeInjectedAttempt(request.Purpose) is { } injected)
-                return injected;
             FlashSolveOutcome outcome = FlashRouteMaterializer.Solve(
                 request.Root,
                 request.DisplayNames,
@@ -452,52 +413,10 @@ internal static class BeamSolveDispatch
         }
     }
 
-    /// <summary>
-    /// Test-only single-shot fault. It throws the real exception types inside the same try block as a
-    /// real Flash solve so the production catch/mapping paths are what the contract exercises.
-    /// </summary>
-    private static FlashAttempt? TakeInjectedAttempt(DirectSearchPurpose? purpose = null)
-    {
-        FlashFailureInjection injection = FlashFailureInjectionForTesting.Take(purpose);
-        if (injection == FlashFailureInjection.PotionPolicyMismatch)
-        {
-            const string detail = "route-minimum-potions explicit_uses=0 minimum=1";
-            return new FlashAttempt(new FlashSolveOutcome(
-                null, FlashRejection.None, detail,
-                null, [], TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero)
-            {
-                ConstraintFailure = detail,
-            }, null);
-        }
-        Apply(injection);
-        return null;
-    }
-
-    private static void Apply(FlashFailureInjection injection)
-    {
-        switch (injection)
-        {
-            case FlashFailureInjection.None:
-                return;
-            case FlashFailureInjection.VerificationMismatch:
-                throw new FlashVerificationException(0, ["测试注入：强制核对不一致"]);
-            case FlashFailureInjection.KernelUnsupported:
-                throw new FlashUnsupportedException("测试注入：强制内核不支持");
-            case FlashFailureInjection.KernelCapacity:
-                throw new FlashCapacityException("Cards", 1);
-            case FlashFailureInjection.AdmissionMultiPlayer:
-                throw new FlashImportException(FlashRejection.MultiPlayer, "测试注入：强制多人专用拒绝");
-            default:
-                throw new ArgumentOutOfRangeException(nameof(injection), injection, null);
-        }
-    }
-
     private static FlashAttempt SolveFlashContinuation(ContinuationSearchRequest request)
     {
         try
         {
-            if (TakeInjectedAttempt() is { } injected)
-                return injected;
             FlashSolveOutcome outcome = FlashRouteMaterializer.Solve(
                 request.Context.Root,
                 request.Context.DisplayNames,
@@ -603,23 +522,6 @@ internal static class BeamSolveDispatch
         => incumbent is { } value
             ? string.Create(CultureInfo.InvariantCulture, $"{value.StrategicHpDeficit}@{value.CombatEndedTurn}")
             : "-";
-
-    private static string SameRoute(SolverResult existing, SolverResult? flash)
-    {
-        if (flash == null)
-            return "n/a";
-        IReadOnlyList<PlanAction> left = existing.BestNode.Actions;
-        IReadOnlyList<PlanAction> right = flash.BestNode.Actions;
-        if (left.Count != right.Count)
-            return "false";
-        for (int index = 0; index < left.Count; index++)
-        {
-            if (left[index].Kind != right[index].Kind || left[index].CardId != right[index].CardId
-                || left[index].TargetIndex != right[index].TargetIndex)
-                return "false";
-        }
-        return "true";
-    }
 
     /// <summary>
     /// One Flash attempt. <paramref name="BoundaryReason"/> is set when the Flash search itself reached

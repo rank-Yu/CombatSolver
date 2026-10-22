@@ -435,12 +435,12 @@ internal static class ModRuntime
                 ?? policy.Profile.BoundedOffensiveRefinementPortfolio,
             StopPortfolioAtHpTarget = options.StopPortfolioAtHpTarget ?? policy.Profile.StopPortfolioAtHpTarget,
         } };
-        // OFFLINE_HARNESS_FLASH_MODE=Off|Shadow|On 覆盖设置里的 Flash 档位（主搜索分发点，见 BeamSolveDispatch）。
+        // OFFLINE_HARNESS_FLASH_MODE=Off|On 覆盖设置里的 Flash 档位（主搜索分发点，见 BeamSolveDispatch）。
         string? flashModeValue = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_MODE");
         if (flashModeValue is { Length: > 0 } flashMode)
             policy = policy with { FlashMode = Enum.Parse<FlashSearchMode>(flashMode, ignoreCase: true) };
         // 与游戏内 SolverController.CaptureSearchPolicy 同一替换规则：On 取当前档位的 Flash 宽度与
-        // 节点上限，Off/Shadow 不变，Custom 沿用 --beam/--nodes 或设置里的值。
+        // 节点上限，Off 不变，Custom 沿用 --beam/--nodes 或设置里的值。
         policy = SolverSettings.ApplyFlashPerformance(policy, ProfilePreset(options.Profile));
         // SR2 强制用药矩阵的复跑入口：Forced 把根上的每瓶可搜索药水标为 Force，Req 打开
         // RequireAtLeastOne。生产策略不受影响，只供离线矩阵对照。

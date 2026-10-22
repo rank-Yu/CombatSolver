@@ -369,7 +369,7 @@ StrategicEffectMirrors.Register<TYourPower>(requirements, evaluate, host);
 | `SimulatedCombatState.AddTurnStartStates` 的 `switch (power)` | 原版 Power 隐藏计数按类型写死。第三方走 §2.6 的登记表进同一份指纹，本行只是记下原版那个 `switch` 本身仍然封闭 | 第三方已有入口 |
 | `RelicPredictionStateSupport` 的原版类型分支 | 内置遗物状态仍按原实现处理；第三方遗物与 Modifier 的独立状态通过 §2.9 登记，不修改原版分支 | 第三方已有入口 |
 | `GrowthSource` 枚举与 `SolverGrowthStrategyPanel.SourceCard` 的 `switch` | 原版十类成长来源按类型写死。第三方走 §2.7 的 `GrowthSourceMirrors` 拿独立额度、侧栏行和指纹，本行只是记下原版那个枚举本身仍然封闭 | 第三方已有入口 |
-| `SearchPolicySnapshot.FlashMode` / `BeamSolveDispatch` | Flash 快速搜索是封闭开发开关，没有第三方公开 API；Flash 内容定义编译在模组内，卡牌、遗物、Power 与怪物都没有登记入口。第三方卡牌、遗物、Power、怪物在开启模式按未支持内容拒绝（`FLASH_SEARCH_FAILED reason=admission-unsupported-content`）；第三方 gameplay 订阅者、BaseLib 卡牌修饰或未登记模型按 `reason=admission-third-party` 拒绝。两者都在准入阶段停止部署并提示切回关闭模式，不回落原搜索；关闭/对照模式行为不变 | 封闭开发开关 |
+| `SearchPolicySnapshot.FlashMode` / `BeamSolveDispatch` | Flash 快速搜索是封闭开发开关，没有第三方公开 API；Flash 内容定义编译在模组内，卡牌、遗物、Power 与怪物都没有登记入口。第三方未知内容没有单独失败类别：未定义的卡牌、Power、遗物、药水、球、怪物、附魔、苦难与生成闭包按 `FlashRejection.UnsupportedCard`/`UnsupportedPower`/`UnsupportedRelic`/`UnsupportedPotion`/`UnsupportedOrb`/`UnsupportedMonster`/`UnsupportedEnchantment`/`UnsupportedAffliction`/`UnsupportedClosure` 拒绝，统一写成 `FLASH_SEARCH_FAILED reason=admission-unsupported-content`；第三方 gameplay 订阅者或 BaseLib 卡牌修饰留下无法投影的状态时按 `UnrepresentableState` 拒绝，写成 `reason=admission-unrepresentable-state`。原先的 `admission-third-party` token 已删除。两者都在准入阶段停止部署并提示切回关闭模式，不回落原搜索；关闭模式行为不变 | 封闭开发开关 |
 
 **这些开关新增或改动时，必须在同一个提交里更新这张表和本文档对应章节。** 见
 [AGENTS.md](../../AGENTS.md) 第 9 节。

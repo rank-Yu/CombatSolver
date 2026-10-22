@@ -232,7 +232,7 @@ internal static class SolverSettings
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() },
+        Converters = { new FlashSearchModeJsonConverter(), new JsonStringEnumConverter() },
     };
     private static SolverSettingsData _current = new();
 
@@ -546,6 +546,9 @@ internal static class SolverSettings
     internal static SolverSettingsData DeserializeForTesting(string json)
         => JsonSerializer.Deserialize<SolverSettingsData>(json, JsonOptions)
            ?? throw new InvalidDataException("CombatSolver settings test JSON returned null.");
+
+    internal static string SerializeForTesting(SolverSettingsData data)
+        => JsonSerializer.Serialize(data, JsonOptions);
 
     public static void ResetToDefaults() => Update(CreateCurrentDefaults());
 

@@ -42,9 +42,6 @@ internal sealed partial class SimulatedCombatState
         return (state.Current, state.Previous);
     }
 
-    internal bool IsPrimaryEnemyForFlash(Creature creature)
-        => ((CombatSolver.Engine.Common.ICombatPredictionCreatureSemantics)this).IsPrimaryEnemy(creature);
-
     /// <summary>Native encounter slot names (<c>_encounterSlots</c>), for the Flash rules table.</summary>
     internal IReadOnlyList<string> EncounterSlotsForFlash => _encounterSlots;
 

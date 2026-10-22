@@ -11,7 +11,6 @@
   "升级": "Upgrade",
   "复制": "Duplicate",
   "抽": "Draw",
-
   "遗物": "Relics",
   "未持有": "Not owned",
   "已持有": "Owned",
@@ -256,7 +255,6 @@
   "预计战损 未知": "Projected HP loss unknown",
   "搜索前沿预览 · 已规划至第 {0} 回合": "Search preview · through turn {0}",
   "求解器当前考虑 · 已演化至第 {0} 回合": "Current candidate · through turn {0}",
-  "已查阅 {0:N0} 条世界线": "Explored {0:N0} timelines",
   "已查阅 {0:N0} 条世界线（{1:N0} 条/s）": "Explored {0:N0} timelines ({1:N0} /s)",
   "等待回合开始选择": "Waiting for turn-start choice",
   "重算后战损上升": "HP loss increased after recalculation",
@@ -274,10 +272,6 @@
   "，击杀 {0}": ", kills {0}",
   "直接结束": "End now",
   "结束回合": "End turn",
-  "弃": "Discard",
-  "耗尽": "Exhaust",
-  "变换": "Transform",
-  "选择": "Choose",
   "[color={0}]搜索[/color]  战斗状态一致，恢复已记录路线  │  本次 0 节点": "[color={0}]Search[/color]  Combat state matched; recorded route restored  │  0 nodes",
   "[color={0}]搜索[/color]  跨回合状态一致，复用既有路线  │  本回合 0 节点": "[color={0}]Search[/color]  Turn state matched; prior route reused  │  0 nodes",
   "[color={0}]搜索[/color]  {1} 节点  │  置换剪枝 {2}  │  {3:F0} ms": "[color={0}]Search[/color]  {1} nodes  │  {2} transpositions pruned  │  {3:F0} ms",
@@ -467,9 +461,8 @@
   "未启用多核回收；当前使用备用的暂缓回收策略。": "Multicore cleanup is off; currently using fallback pause-during-search strategy.",
   "未能修改游戏启动配置，详情见日志；本次继续使用备用回收。": "Failed to modify startup config (see logs); continuing with fallback mode.",
   "本次未启用多核内存回收，搜索按下方暂缓回收设置运行。": "Multicore cleanup is not active this session; search runs with the pause-during-search setting below.",
-  "实验性的高速搜索内核，支持单人模式下的原版内容。关闭：只用常规搜索。对照：常规搜索结束后再用 Flash 搜索一遍并写入日志，仍采用常规搜索的路线，会增加耗时。启用：支持的战斗只由 Flash 搜索，不再改用常规搜索；路线的每一步都由常规模拟逐步核对。遇到不支持的内容、超容量或核对不一致时会停止本回合部署并提示切换为关闭模式。下次搜索生效。启用时各性能预设改用 Flash 自己的 Beam 宽度与节点上限（低 180 / 240,000，中 240 / 480,000，高 360 / 1,000,000，极高 540 / 2,000,000），时间上限不变；自定义预设使用填写的数值。": "Experimental high-speed search kernel for single-player vanilla content. Off: regular search only. Shadow: after the regular search, Flash searches again and writes a comparison to the log; the regular route is still used, at extra time cost. On: supported combats are searched by Flash only and never fall back to the regular search; every step of the route is re-checked by the regular simulation. Unsupported content, capacity limits or a verification mismatch stop this turn's deployment and prompt you to switch to Off. Takes effect on the next search. In On mode each preset uses Flash's own beam width and node limit (Low 180 / 240,000, Medium 240 / 480,000, High 360 / 1,000,000, Very High 540 / 2,000,000); the time limit is unchanged, and Custom uses the values you entered.",
+  "实验性的高速搜索内核，支持单人模式下的原版内容。关闭：只用常规搜索。启用：支持的战斗只由 Flash 搜索，不再改用常规搜索；路线的每一步都由常规模拟逐步核对。遇到不支持的内容、超容量或核对不一致时会停止本回合部署并提示切换为关闭模式。下次搜索生效。启用时各性能预设改用 Flash 自己的 Beam 宽度与节点上限（低 180 / 240,000，中 240 / 480,000，高 360 / 1,000,000，极高 540 / 2,000,000），时间上限不变；自定义预设使用填写的数值。": "Experimental high-speed search kernel for single-player vanilla content. Off: regular search only. On: supported combats are searched by Flash only and never fall back to the regular search; every step of the route is re-checked by the regular simulation. Unsupported content, capacity limits or a verification mismatch stop this turn's deployment and prompt you to switch to Off. Takes effect on the next search. In On mode each preset uses Flash's own beam width and node limit (Low 180 / 240,000, Medium 240 / 480,000, High 360 / 1,000,000, Very High 540 / 2,000,000); the time limit is unchanged, and Custom uses the values you entered.",
   "Flash 快速搜索（实验）": "Flash fast search (experimental)",
   "关闭（默认）": "Off (default)",
-  "对照（只记录）": "Shadow (log only)",
   "启用": "On"
 }

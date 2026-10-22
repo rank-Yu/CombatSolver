@@ -119,7 +119,7 @@
 - 原第 1 节在运行时值意图段写：“HS4 审计原版全部攻击意图，另外两个运行时值意图
   （TheForgotten DREAD、WaterfallGiant PRESSURE_GUN）在根上不重复计入。”HS4 的完整证据
   （三类超时原因、TestSubject MULTI_CLAW 多打一下、`_extraMultiClawCount`、16 条游走失败到 0）
-  保留在 [测试记录 2.2](../../flash-search/testing.md#22-批次记录)。
+  保留在 [测试记录 2.3](../../flash-search/testing.md#23-已完成批次)。
 - 原 2.1 的显式类别证据：“事件卡组对照中把 `BEACON_OF_HOPE` 注入战斗牌堆，`flash-diff.txt`
   首行为 `REJECTED MultiPlayer: BEACON_OF_HOPE 是多人专用内容…`”。
 - 原 2 节的批次段落标题：P16（实例型 Power 与卡值投影）、DF（球与卡牌私有状态投影）、

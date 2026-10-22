@@ -8,9 +8,10 @@ using MegaCrit.Sts2.Core.Combat;
 namespace OfflineSearchHarness;
 
 /// <summary>
-/// Flash end-to-end comparison (OFFLINE_HARNESS_FLASH_SOLVE=1): solves the harness root once with
-/// the existing <c>CombatBeamSolver</c> and once through the Flash backend (search, verification
-/// replay, fixed-prefix materialization) under the same profile, and reports time and route quality.
+/// Flash end-to-end scan (OFFLINE_HARNESS_FLASH_SOLVE=1): solves the harness root once through the
+/// Flash backend (search, verification replay, fixed-prefix materialization) under the requested
+/// profile, then replays at most N final candidates on the existing engine. It reports admission,
+/// time, route quality and candidate mismatches; it does not run the existing search side.
 /// </summary>
 internal static class FlashSolveProbe
 {
@@ -24,14 +25,6 @@ internal static class FlashSolveProbe
             settings, combat, includeTurnSetup: false, theftPolicy: SolverController.ResolveTheftPolicy(combat));
         SolverSearchProfile profile = policy.Profile with { SoftTimeBudgetMilliseconds = options.BudgetMilliseconds };
 
-        Stopwatch watch = Stopwatch.StartNew();
-        Task<SolverResult> existingTask = Task.Run(() => new CombatBeamSolver(
-            root, names, damage, policy with { Profile = profile }, searchProfile: profile).Solve());
-        loop.RunUntilCompleted(existingTask, TimeSpan.FromSeconds(660), "CombatBeamSolver.Solve");
-        SolverResult existing = existingTask.GetAwaiter().GetResult();
-        double existingMs = watch.Elapsed.TotalMilliseconds;
-
-        double offensiveShare = double.TryParse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_OFFENSIVE_SHARE"), out double share) ? share : 0.25d;
         int candidateScan = int.TryParse(
             Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_CANDIDATE_SCAN"), out int scan) ? scan : 0;
         FlashBeamOptions flashOptions = new(
@@ -41,40 +34,20 @@ internal static class FlashSolveProbe
             TimeSpan.FromMilliseconds(profile.SoftTimeBudgetMilliseconds),
             root.InitialPlayerMaxHp)
         {
-            OffensiveShare = offensiveShare,
             CandidateScanCount = Math.Max(0, candidateScan),
         };
-        FlashSolveOutcome flash = default!;
-        double flashMs = 0;
-        List<double> warmRuns = [];
-        List<long> warmAllocatedBytes = [];
-        for (int run = 0; run < 3; run++)
-        {
-            long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
-            watch.Restart();
-            Task<FlashSolveOutcome> flashTask = Task.Run(() => FlashRouteMaterializer.Solve(
-                root, names, damage, policy with { Profile = profile }, profile, CancellationToken.None, flashOptions));
-            loop.RunUntilCompleted(flashTask, TimeSpan.FromSeconds(660), "FlashRouteMaterializer.Solve");
-            flash = flashTask.GetAwaiter().GetResult();
-            if (run == 0)
-            {
-                flashMs = watch.Elapsed.TotalMilliseconds;
-            }
-            else
-            {
-                warmRuns.Add(watch.Elapsed.TotalMilliseconds);
-                warmAllocatedBytes.Add(GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore);
-            }
-        }
+        Stopwatch watch = Stopwatch.StartNew();
+        Task<FlashSolveOutcome> flashTask = Task.Run(() => FlashRouteMaterializer.Solve(
+            root, names, damage, policy with { Profile = profile }, profile, CancellationToken.None, flashOptions));
+        loop.RunUntilCompleted(flashTask, TimeSpan.FromSeconds(660), "FlashRouteMaterializer.Solve");
+        FlashSolveOutcome flash = flashTask.GetAwaiter().GetResult();
+        double flashMs = watch.Elapsed.TotalMilliseconds;
 
         Dictionary<string, object?> summary = new()
         {
             ["profile"] = new { profile.BeamWidth, profile.MaxExpandedNodes, profile.SoftTimeBudgetMilliseconds },
-            ["existing"] = Describe(existing, existingMs),
             ["flashAdmitted"] = flash.Rejection == FlashRejection.None,
-            ["flashOptions"] = new { flashOptions.BeamWidth, flashOptions.MaxExpandedNodes, flashOptions.OffensiveShare },
-            ["flashWarmWallMs"] = warmRuns,
-            ["flashWarmAllocatedBytes"] = warmAllocatedBytes,
+            ["flashOptions"] = new { flashOptions.BeamWidth, flashOptions.MaxExpandedNodes },
         };
         if (flash.Rejection != FlashRejection.None)
         {

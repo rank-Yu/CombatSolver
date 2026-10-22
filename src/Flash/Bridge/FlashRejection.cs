@@ -11,7 +11,6 @@ internal enum FlashRejection
     MultiPlayer,
     RootPhase,
     PendingChoice,
-    ThirdParty,
     UnsupportedCard,
     UnsupportedPower,
     UnsupportedRelic,
@@ -40,7 +39,7 @@ internal enum FlashRejection
 
 /// <summary>
 /// Admission cannot express the existing engine's root in Flash. In On mode this is an explicit
-/// <see cref="FlashSearchFailedException"/>; Off and Shadow keep their existing behavior.
+/// <see cref="FlashSearchFailedException"/>; Off keeps its existing behavior.
 /// </summary>
 internal sealed class FlashImportException(FlashRejection reason, string detail)
     : Exception($"Flash 准入拒绝 {reason}：{detail}")

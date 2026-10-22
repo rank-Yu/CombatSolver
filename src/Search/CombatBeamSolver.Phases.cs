@@ -995,9 +995,7 @@ internal sealed partial class CombatBeamSolver
             int inputCount,
             string reason,
             int playDepth,
-            int endedNodes,
-            SearchRetentionBoundaryKind retentionKind,
-            int turnLayer)
+            int endedNodes)
         {
             if (_run.EnsurePruneMemory != null)
                 throw new InvalidOperationException("剪枝内存边界不能嵌套。");
@@ -1036,7 +1034,7 @@ internal sealed partial class CombatBeamSolver
             };
             try
             {
-                return Prune(nodes, retentionKind, turnLayer, playDepth);
+                return Prune(nodes);
             }
             finally
             {
@@ -1637,8 +1635,7 @@ internal sealed partial class CombatBeamSolver
                     break;
                 }
                 List<SearchNode> prunedPlays = PruneAtMemoryBoundary(
-                    nextPlays, nextPlays.Count, "before_play_prune", playDepth, ended.Count,
-                    SearchRetentionBoundaryKind.ActionLayer, searchedTurnLayers);
+                    nextPlays, nextPlays.Count, "before_play_prune", playDepth, ended.Count);
                 ReleaseDroppedSnapshots(nextPlays, prunedPlays);
                 nextPlays.Clear();
                 active = prunedPlays;
@@ -1711,8 +1708,7 @@ internal sealed partial class CombatBeamSolver
             frontier = acceptableBattleHpLossReached
                 ? []
                 : PruneAtMemoryBoundary(ended.Where(node => !node.IsTerminal),
-                    turnPruneCandidateCount, "before_turn_prune", playDepth: 0, ended.Count,
-                    SearchRetentionBoundaryKind.TurnBoundary, searchedTurnLayers);
+                    turnPruneCandidateCount, "before_turn_prune", playDepth: 0, ended.Count);
             // 续用戳只供最终选中路线，淘汰候选无需提前拼接字符串。
             List<SearchNode> retainedAfterRound = [.. completed, .. frontier];
             ReleaseDroppedSnapshots(ended, retainedAfterRound);

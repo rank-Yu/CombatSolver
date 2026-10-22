@@ -1,7 +1,7 @@
 # Flash 回归工具
 
 `flash_regression.py` 是 Flash 搜索后端已提交的回归入口。它把原先散在
-`.local/tool-tasks/flash-search/` 的构建、差分、候选扫描、基准、协调器对照与牌组生成
+`.local/tool-tasks/flash-search/` 的构建、差分、候选扫描、基准、协调器对照、设置兼容检查与牌组生成
 收进一个跨平台 Python 入口，供审阅者在仓库内复跑证据。工具只调用
 `OfflineSearchHarness`，不重新实现搜索或战斗语义。
 
@@ -24,6 +24,9 @@
 # Release 模组 + OfflineSearchHarness + K0 纯内核合同
 python3 -B tools/search/FlashRegression/flash_regression.py build
 
+# 设置持久化兼容（旧 Shadow/数值形式读成 Off，On 序列化不变）
+python3 -B tools/search/FlashRegression/flash_regression.py compat --label compat
+
 # 全量差分回归（410 根；输出 .local/flash-regression/diff）
 python3 -B tools/search/FlashRegression/flash_regression.py diff --label diff --jobs 8
 
@@ -40,11 +43,6 @@ python3 -B tools/search/FlashRegression/flash_regression.py scan --label scan --
 python3 -B tools/search/FlashRegression/flash_regression.py coordinator --label coord --jobs 8
 python3 -B tools/search/FlashRegression/flash_regression.py coordinator \
   --label coord-on --off-baseline .local/flash-regression/coord
-
-# K6：逐层保留集合对照（120 根 × 实际运行成员；默认 8 个并行进程）
-python3 -B tools/search/FlashRegression/flash_regression.py retention --label k6 --jobs 8
-python3 -B tools/search/FlashRegression/flash_regression.py retention \
-  --label k6-b0 --jobs 8 --shards 3 --shard 0
 
 # 只读已有协调器结果的合计/按角色/按幕/按遭遇类型表（不重跑协调器）
 python3 -B tools/search/FlashRegression/flash_regression.py table \
@@ -81,7 +79,8 @@ K1 单步穷举与 K2 随机游走的差分回归，默认根集合：
 逐行比较：非零退出、缺少首行、`failed`/`walkFailed`/`scoreFailed`/`boundFailed`/`traitFailed`/
 `pocketwatchFailed`/`declinedFailed`/`unsupported` 非零、以及 `pureRefMismatch` 增加都记为 `BAD`，
 写入 `BASELINE.txt`，有 `BAD` 时进程退出 1。`diff` 在任一根退出非零、首行不是
-`SUMMARY failed=0 walkFailed=0` 时退出 1；`scan` 在任一根退出非零或 `mismatches` 非零时退出 1。
+`SUMMARY failed=0 walkFailed=0` 时退出 1。`--steps <N>` 设置每条游走的步数上限
+（`OFFLINE_HARNESS_FLASH_DIFF_STEPS`，默认 60）；`--debug` 打印 K4 参考差异的非 pure 历史条目。
 
 分片与并发：`--jobs` 控制同时运行的宿主进程数（默认 4）；`--shards N` 按
 “每组根的下标 mod N”分片，`--shard k` 只跑第 k 片。默认 `--shards 1`、不筛选。
@@ -100,16 +99,19 @@ python3 -B tools/search/FlashRegression/flash_regression.py trace \
   --nodes 120000 --budget-ms 120000 --side both
 ```
 
-输出 `flash-trace.txt`。`--flags` 接受 `band,base,power`，药水/incumbent 参数见
-`--help`；`--skip-build` 复用现有 Release 构建。
+输出 `flash-trace.txt`。`--flags` 接受 `band,base,power`；药水参数用 `--max-potions` /
+`--min-potions` / `--potion-policy`，incumbent 用 `--incumbent-deficit`+`--incumbent-turn`，
+固定前缀调度基线用 `--reset-baseline`。`trace` 只运行宿主，不构建、不跑 K0；它不接受
+`--jobs`/`--skip-build`/`--no-k0`。
 
 ### `scan`
 
-与 `diff` 相同的根集合与分片规则，但每根改为 Flash 求解后把排序前 N 条最终候选路线交现有
-引擎逐条核对：`OFFLINE_HARNESS_FLASH_SOLVE=1`、
-`OFFLINE_HARNESS_FLASH_CANDIDATE_SCAN=<N>`，`--milestone M1 --budget-ms 10000 --profile Low
---beam 24 --nodes 2000 --dop 1`，单根超时 300 秒。`SUMMARY.txt` 每行记录
-`exit=`、`routes=`、`mismatches=` 与首个错误。验收要求 `mismatches=0`。
+与 `diff` 相同的根集合与分片规则，但每根只运行一次 Flash：`OFFLINE_HARNESS_FLASH_SOLVE=1`、
+`OFFLINE_HARNESS_FLASH_CANDIDATE_SCAN=<N>`，把排序前 N 条最终候选路线交现有引擎逐条核对，
+不再运行常规侧或暖跑。参数为 `--milestone M1 --budget-ms 10000 --profile Low --beam 24
+--nodes 2000 --dop 1`，单根超时 300 秒。`SUMMARY.txt` 每行记录
+`exit=`、`admitted=`、`rejection=`、`routes=`、`mismatches=` 与首个错误。验收要求
+`admitted=true` 且 `mismatches=0`；准入拒绝或缺少准入结果都按失败处理。
 
 ### `coordinator`
 
@@ -133,40 +135,26 @@ python3 -B tools/search/FlashRegression/flash_regression.py trace \
 `better/same/worse`，末行给出 `cost_delta`（On−Off 的合计）、`potion_cost_diff`（药水成本
 不同的根数）、胜负合计与墙钟合计；`STRATEGIC.txt` 逐根列出同一键下的
 `strategic`/`potion`/`deathSaves`/`turn`/`lost` 变化；`TABLE-GROUPS.txt` 是 `table` 的
-按角色/按幕/按遭遇类型表。
+按角色/按幕/按遭遇类型表。单模式运行（`--off-baseline` 默认只跑 `On`，或 `--modes Off`）
+只写 `TABLE.txt` 的单模式逐根汇总，不生成 `STRATEGIC.txt`/`TABLE-GROUPS.txt`。
 
 `--off-baseline <dir>` 复用旧结果的 `<id>/Off`（复制到新输出目录），此时默认只跑 `On`；
 `--ids` 限定根；`--modes Off,On` 可显式覆盖；`--quality-dir` 改用别的语料目录；
 `--compare <dir> --compare-mode On` 逐根比较两份输出在同一 `PotionPolicy` 键下的结果。
+有失败根（`FLASH_SEARCH_FAILED`）或缺失 `quality.json` 的根时命令以非 0 退出（缺失与失败
+计数也写在 `TABLE-GROUPS.txt` 的合计行）。
 
-### `retention`
+### `compat`
 
-K6 逐层保留集合对照：对质量语料的每个根，读取 `--baseline`（默认
-`.local/flash-regression/off120-base`）里该根 `Off` 的 `PortfolioMembers`，只取 `Ran=true`
-的成员，按成员的 `BeamWidth`/`SecondRankBand`/`BaseScoreOnly`/`AggressivePowerCommitment`/
-`OffensiveRefinement`/`BoundedRefinement`/`NodeBudget` 重建同一请求，在 M1 分别运行常规
-`CombatBeamSolver` 与 `FlashRouteMaterializer`。每次运行打开
-`OFFLINE_HARNESS_RETENTION_DIFF=1`，工具只读 `retention-diff.json`，不重算搜索或状态键。
+设置持久化兼容合同：用离线宿主加载旧设置 JSON、检查点/问题包策略 JSON 与设置序列化器，断言
+`"Shadow"`、大小写变体与任何数值枚举形式都读成 `Off` 且不抛反序列化异常，`On` 仍序列化为
+字符串 `"On"` 并可往返。命令先执行 Release 构建（`--skip-build` 可复用），然后运行
+`OfflineSearchHarness --check-flash-mode-compat`；输出末行 `FLASH_MODE_COMPAT status=Passed
+assertions=<N>`，非 0 退出或缺少该行即失败。不启动游戏搜索，可重复运行。
 
 ```bash
-python3 -B tools/search/FlashRegression/flash_regression.py retention \
-  --label k6 --jobs 8 --shards 3 --shard 0 \
-  --baseline .local/flash-regression/off120-base
+python3 -B tools/search/FlashRegression/flash_regression.py compat --label compat
 ```
-
-- `--ids` 限定质量语料目录名；`--root` 仍按子串过滤；`--shards/--shard` 与 `diff` 相同。
-- `--top` 控制第一处分歧两侧各报告多少个状态（默认 8）；`--budget-ms` 默认 120000，
-  两边使用同一条软时间。
-- 有界精炼成员的 `NodeBudget` 可能小于设置校验下限 100：工具把 CLI `--nodes` 抬到 100，
-  再用 `OFFLINE_HARNESS_RETENTION_NODE_BUDGET` 给两边精确预算，保证成员身份不被设置校验改写。
-- 输出在 `--out` 或 `.local/flash-regression/<label>/`：每根/成员一个目录，含
-  `retention-diff.json`；汇总写 `SUMMARY.txt` 与 `SUMMARY.json`，成员表列为
-  `runs/identical/routeSame/divergent/incomparable/error` 和 A–G 分布。
-  `incomparable` 表示该运行出现不可投影状态，不进入类别和回合/层深统计。
-- `--merge <dir>...` 不重跑，直接从已有每根/成员 `retention-diff.json` 重新汇总；
-  适合分片跑完后合并。
-- 通过条件：所有进程 `exit=0` 且 `status` 不是 `error`。保留集合不同是测量结果，不是命令失败。
-- 工具默认先构建 Release + 宿主 + K0；`--skip-build` 复用现有构建。
 
 ### `table`
 
@@ -210,11 +198,11 @@ python3 -B tools/search/FlashRegression/flash_regression.py table \
 | 子命令 | 输出 | 通过条件 |
 | --- | --- | --- |
 | `diff` | `SUMMARY.txt`、每根 `stdout.txt` / `flash-diff.txt`、可选 `BASELINE.txt` | 每根 `exit=0`，首行 `SUMMARY failed=0 walkFailed=0`，`actionSetFailed=0`，`unsupported=0`；有 `--baseline` 时 `bad=0` |
-| `scan` | `SUMMARY.txt`、每根 `harness-result.json` | 每根 `exit=0`，`mismatches=0` |
-| `coordinator` | `TABLE.txt`、`STRATEGIC.txt`、`TABLE-GROUPS.txt`、每根 `Off`/`On` | 每根 `FLASH_ADOPTED`，没有 `FLASH_SEARCH_FAILED`；数字按 `PotionPolicy` 键计入 |
+| `scan` | `SUMMARY.txt`、每根 `harness-result.json` | 每根 `exit=0`、`admitted=true`、`mismatches=0` |
+| `coordinator` | `TABLE.txt`、`STRATEGIC.txt`、`TABLE-GROUPS.txt`、每根 `Off`/`On` | 每根 `FLASH_ADOPTED`，没有 `FLASH_SEARCH_FAILED`，没有缺失根；数字按 `PotionPolicy` 键计入；不满足时退出码非 0 |
+| `compat` | `compat.txt` | `FLASH_MODE_COMPAT status=Passed` |
 | `table` | 标准输出的合计/分组/变差列表 | 只读；缺 `spec.json` 时归入 `unknown`，不伪造分组 |
 | `trace` | `flash-trace.txt`、`stdout.txt` | 目标路线可映射；同指纹去重会 `re-anchored` 后继续，真正丢失点写 `cut`/`first-missing`（`seat replaced` 保持原语义） |
-| `retention` | `SUMMARY.txt`、`SUMMARY.json`、每根/成员 `retention-diff.json` | 每进程 `exit=0` 且无 `status=error`；集合分歧按 A–G 汇总 |
 | `survey` | 每根 `spec.json` / `request.json`、`SUMMARY.txt` | 路径可解析；`--run` 时探针输出可读 |
 
 默认输出根目录是 `.local/flash-regression/<label>/`；`--out` 可指定别处。结果、日志与构建
@@ -222,7 +210,6 @@ python3 -B tools/search/FlashRegression/flash_regression.py table \
 
 ## 已知边界
 
-- `retention` 只比较同请求、同目的、同宽度/开关/节点/软时间/incumbent/药水政策时的逐边界保留集合与最终路线；当前覆盖 `PrimaryBeam` 普通回合搜索，不含 turn-setup 根、novelty、fixed-prefix continuation 与 incumbent 审计成员。它不修改搜索行为，也不构成正确性验收。第一处分歧的类别与具体原因见 `docs/OFFLINE_SEARCH_HARNESS.md`。
 - `diff`/`scan` 只证明 Flash 与现有引擎一致；现有引擎与原版是否一致由既有的 actual/simulated
   严格差分负责。`diff` 的 `actionSetFailed` 是动作集合核对：同一状态下现有求解器计划动作与
   Flash 合法动作的规范化键（种类、卡牌/药水、目标、药水槽位、药水是否需要选择）；卡牌选择在

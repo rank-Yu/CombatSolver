@@ -751,7 +751,7 @@ internal static class UnattendedTestFiles
         PropertyNameCaseInsensitive = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() },
+        Converters = { new FlashSearchModeJsonConverter(), new JsonStringEnumConverter() },
     };
 
     public static string GlobalPath(string uri) => ProjectSettings.GlobalizePath(uri);

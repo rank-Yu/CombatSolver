@@ -556,7 +556,7 @@ internal static partial class SolverController
         }
         SolverSearchProfile profile = UnattendedTestRunner.CheckpointProfileOverride ?? settings.Profile;
         // 记录下来的检查点 profile 是精确输入，按自定义档位对待；其余情况按当前性能档位取
-        // Flash 自己的 Beam 宽度与节点上限，关闭与对照模式不变。
+        // Flash 自己的 Beam 宽度与节点上限，关闭模式不变。
         SolverPerformancePreset performancePreset =
             UnattendedTestRunner.CheckpointProfileOverride is null
                 ? settings.PerformancePreset

@@ -307,7 +307,6 @@ internal sealed partial class UnattendedTestRunner
             try { ReleaseB015OriginalPrefix(); }
             finally
             {
-                FlashFailureInjectionForTesting.Reset();
                 if (monitor != null)
                     await monitor.DisposeAsync();
                 _releaseAdaptedOnPlayIntegration?.Invoke();

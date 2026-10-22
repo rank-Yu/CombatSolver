@@ -51,10 +51,10 @@
 | `Probes/SearchRouteMaterializer.cs` | 原搜索与 Flash 共用的最终路线物化：按既有顺序标注、可选的 Afterimage/格挡药水调整，并构建 `SolverResult`、计划与快照 |
 | `Probes/SearchEvaluator.cs` | 原搜索与探针共用的状态评分、指纹与威胁投影；不持有搜索前沿 |
 | `PrimaryIncumbentTable` / `ResourceIncumbentPolicy` | 同根同政策的资源桶见证、未来收益上界与认证回退 |
-| `BeamSolveDispatch` | 协调器主搜索成员与固定前缀续接的后端分发（Off/Shadow/On）与 Shadow 隔离。Off/Shadow 的现有侧构造原求解器；On 只跑 Flash，只有 `flash-potion-policy-no-route` 返回 `PotionPolicyUnsatisfiedException`；物化后两侧药水约束不一致（`potion-policy-mismatch`）、准入/容量/内核/核对/根阶段/开发策略拒绝写稳定 `FLASH_SEARCH_FAILED` 事件并抛 `FlashSearchFailedException`，不回落 |
+| `BeamSolveDispatch` | 协调器主搜索成员与固定前缀续接的后端分发（Off/On）。Off 构造原求解器；On 只跑 Flash，只有 `flash-potion-policy-no-route` 返回 `PotionPolicyUnsatisfiedException`；物化后两侧药水约束不一致（`potion-policy-mismatch`）、准入/容量/内核/核对/根阶段/开发策略拒绝写稳定 `FLASH_SEARCH_FAILED` 事件并抛 `FlashSearchFailedException`，不回落 |
 | `CardChoiceSupport.Flash.cs` / `CombatBeamSolver.Flash.cs` / `SimulatedCombatState.FlashProjection.cs` / `StrategicHpRecoveryBound.Flash.cs` | 原搜索类给 Flash 桥接开放的读取接口：分部文件，用到原类的私有成员，随原类维护；协调器只经 `BeamSolveDispatch` 进入 [Flash 模块](#flash-模块srcflash) |
 
-Flash 的批量回归入口在 `tools/search/FlashRegression/`：全量差分、候选扫描、120 根协调器 Off/On 质量对照与质量语料生成都调用 `OfflineSearchHarness`，不进入生产搜索路径；用法见 [工具入口](../tools/README.md) 与 [回归工具](../tools/search/FlashRegression/README.md)。
+Flash 的批量回归入口在 `tools/search/FlashRegression/`：全量差分、候选扫描、设置持久化兼容、120 根协调器 Off/On 质量对照与质量语料生成都调用 `OfflineSearchHarness`，不进入生产搜索路径；用法见 [工具入口](../tools/README.md) 与 [回归工具](../tools/search/FlashRegression/README.md)。
 
 探针与现有搜索通过 `SearchEvaluator` 共用评分和指纹，并共用 `SearchReplayCore` 的完整动作/准备/选择回放（检查点、续接帧、证据与计量按调用方注入）；`OpeningProbe` 不引用 `CombatBeamSolver`，其产出仍由协调器交给 `BeamSolveDispatch` 求解。Flash 的固定前缀与最终物化同样使用该回放核心和共享物化器，不实例化原搜索类。成员共享原请求账本；预算准入、候选合法性和取优由所属策略决定。分支状态不承担 Beam 政策；中途保路和终局比较保持明确入口。药水反事实与强制用药的硬准入先于质量比较。终局可选用药遵守机会成本门槛，获胜且减少复活消耗或追回资源时保留对应政策例外；`RouteQualityPolicy.PotionPolicy` 为审计、组合成员和后置搜索统一比较战略战损加可选药水成本，成长与回合数在其后比较。固定前缀构造实际父链，EndTurn 从模拟前后状态生成 `TurnOutcome`。
 

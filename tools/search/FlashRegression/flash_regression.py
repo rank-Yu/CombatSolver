@@ -79,9 +79,9 @@ def resolve_roots(args: argparse.Namespace) -> list[Root]:
     only = args.only
     roots: list[Root] = []
     if only in ('all', 'fixtures'):
-        roots += fixture_roots(args.walks)
+        roots += fixture_roots(getattr(args, 'walks', 32))
     if only in ('all', 'quality'):
-        roots += quality_roots(args.quality_walks)
+        roots += quality_roots(getattr(args, 'quality_walks', 48))
     shards = max(1, args.shards)
     for root in roots:
         root.shard = root.category_index % shards
@@ -237,8 +237,12 @@ def scan_line_failed(line: str) -> bool:
     match = re.match(r'\S+ exit=(\d+) ', line)
     if not match or int(match.group(1)) != 0:
         return True
+    admitted = re.search(r'\badmitted=(true|false)\b', line)
     mismatches = re.search(r'\bmismatches=(\d+)', line)
-    return not mismatches or int(mismatches.group(1)) != 0
+    routes = re.search(r'\broutes=(\d+)', line)
+    return (admitted is None or admitted.group(1) != 'true'
+            or mismatches is None or int(mismatches.group(1)) != 0
+            or routes is None)
 
 
 def compare_baseline(new_path: Path, base_path: Path) -> tuple[list[str], str]:
@@ -270,14 +274,15 @@ def write_summary(path: Path, lines: list[str]) -> None:
     path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
-def add_common(parser: argparse.ArgumentParser) -> None:
+def add_common(parser: argparse.ArgumentParser, *, no_k0: bool = True) -> None:
     parser.add_argument('--label', default=None, help='output directory name under .local/flash-regression')
     parser.add_argument('--out', type=Path, default=None, help='explicit output directory (wins over --label)')
     parser.add_argument('--jobs', type=int, default=4, help='maximum concurrent harness processes (default 4)')
     parser.add_argument('--dotnet', default=DOTNET, help='dotnet executable')
     parser.add_argument('--harness', type=Path, default=HARNESS, help='OfflineSearchHarness.dll')
     parser.add_argument('--skip-build', action='store_true', help='use the existing Release build')
-    parser.add_argument('--no-k0', action='store_true', help='skip FlashKernelChecks')
+    if no_k0:
+        parser.add_argument('--no-k0', action='store_true', help='skip FlashKernelChecks')
 
 
 def output_dir(args: argparse.Namespace, suffix: str) -> Path:
@@ -287,9 +292,13 @@ def output_dir(args: argparse.Namespace, suffix: str) -> Path:
     return (DEFAULT_OUT / label).resolve()
 
 
-def add_root_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument('--walks', type=int, default=32, help='random walks per root (default 32)')
-    parser.add_argument('--quality-walks', type=int, default=48, help='walks per quality-corpus root (default 48)')
+def add_root_options(parser: argparse.ArgumentParser, *, walks: bool = True,
+                     quality_walks: bool = True) -> None:
+    if walks:
+        parser.add_argument('--walks', type=int, default=32, help='random walks per root (default 32)')
+    if quality_walks:
+        parser.add_argument('--quality-walks', type=int, default=48,
+                            help='walks per quality-corpus root (default 48)')
     parser.add_argument('--only', choices=('all', 'fixtures', 'quality'), default='all')
     parser.add_argument('--shards', type=int, default=1, help='split roots into this many shards')
     parser.add_argument('--shard', type=int, default=None, help='run only this shard (0-based)')
@@ -329,6 +338,9 @@ def cmd_diff(args: argparse.Namespace) -> int:
         env = baseline_environment()
         env['OFFLINE_HARNESS_FLASH_DIFF'] = '1'
         env['OFFLINE_HARNESS_FLASH_DIFF_WALKS'] = str(root.walks)
+        env['OFFLINE_HARNESS_FLASH_DIFF_STEPS'] = str(args.steps)
+        if args.debug:
+            env['OFFLINE_HARNESS_FLASH_DEBUG'] = '1'
         return env
 
     lines = run_roots(roots, out, args.jobs,
@@ -359,8 +371,11 @@ def scan_row(path: Path) -> str:
         data = json.loads(path.read_text(encoding='utf-8-sig'))
         solve = data.get('flashSolve') or {}
         scan = solve.get('flashCandidateScan') or {}
+        admitted = solve.get('flashAdmitted') is True
+        rejection = str(solve.get('flashRejection') or '-')[:160].replace('\n', ' ')
         error = str(solve.get('error') or data.get('error') or '')[:160].replace('\n', ' ')
-        return f"routes={scan.get('routes', 0)} mismatches={scan.get('mismatches', 0)} error={error}"
+        return (f"admitted={str(admitted).lower()} rejection={rejection} "
+                f"routes={scan.get('routes', 0)} mismatches={scan.get('mismatches', 0)} error={error}")
     except (OSError, ValueError) as error:
         return f'NO-RESULT {type(error).__name__}'
 
@@ -683,10 +698,58 @@ def qcompare(left: Path, right: Path, mode: str) -> tuple[int, int]:
     return total, diff
 
 
+def cmd_compat(args: argparse.Namespace) -> int:
+    """Run the persisted Flash-mode compatibility contract (removed Shadow -> Off; On unchanged)."""
+    out = output_dir(args, 'compat')
+    if not prepare(args, out, k0=False):
+        return 1
+    log = out / 'compat.txt'
+    code = run_command([args.dotnet, str(args.harness), '--check-flash-mode-compat'],
+                       cwd=ROOT, env=baseline_environment(), timeout=120, log=log)
+    text = log.read_text(encoding='utf-8', errors='replace') if log.is_file() else ''
+    print(text.strip())
+    return 0 if code == 0 and 'status=Passed' in text else 1
+
+
 def cmd_table(args: argparse.Namespace) -> int:
     corpus = args.corpus.resolve() if args.corpus else None
     print(quality_table(args.run_dir.resolve(), corpus))
     return 0
+
+
+def single_mode_table(out: Path, mode: str) -> str:
+    """Read-only per-root quality for a coordinator run that executed only one mode."""
+    rows: list[str] = []
+    total_wall = 0.0
+    total_cost = 0
+    for root in sorted(path for path in out.iterdir() if path.is_dir()):
+        try:
+            wall, quality, _ = load_quality(root / mode)
+        except (OSError, ValueError, KeyError) as error:
+            rows.append(f'{root.name:40} MISSING {error}')
+            continue
+        total_wall += wall
+        total_cost += solver_cost(quality)
+        rows.append(f"{root.name:40} cost={solver_cost(quality):>3} "
+                    f"strategic={quality['strategicHpDeficit']:>3} "
+                    f"potion={int(quality.get('potionStrategicCost') or 0):>3} "
+                    f"turn={quality['combatEndedTurn']!s:>3} "
+                    f"won={str(bool(quality.get('won'))).lower():5} wall={wall:6.2f}s")
+    summary = f'mode={mode} roots={len(rows)} cost_total={total_cost} wall={total_wall:.1f}s'
+    rows.append(summary)
+    (out / 'TABLE.txt').write_text('\n'.join(rows) + '\n', encoding='utf-8')
+    return summary
+
+
+def coordinator_missing(out: Path, roots: list[tuple[str, Path]], modes: list[str]) -> list[str]:
+    return [name for name, _ in roots
+            if any(not (out / name / mode / 'quality.json').is_file() for mode in modes)]
+
+
+def coordinator_failed(out: Path, roots: list[tuple[str, Path]], modes: list[str]) -> list[str]:
+    if 'On' not in modes:
+        return []
+    return [name for name, _ in roots if flash_failed(out / name)]
 
 
 def coordinator_roots(args: argparse.Namespace) -> list[tuple[str, Path]]:
@@ -752,15 +815,21 @@ def cmd_coordinator(args: argparse.Namespace) -> int:
             future.result()
             done += 1
             print(f'[{done}/{total}] {time.time() - started:7.1f}s', flush=True)
-    print(coordinator_table(out))
-    print(strategic_table(out))
-    corpus = Path(args.quality_dir).resolve() if args.quality_dir else None
-    table = quality_table(out, corpus)
-    (out / 'TABLE-GROUPS.txt').write_text(table + '\n', encoding='utf-8')
-    print(table)
     if args.compare:
         qcompare(out, Path(args.compare).resolve(), args.compare_mode)
-    return 0
+    if len(modes) == 1:
+        print(single_mode_table(out, modes[0]))
+    else:
+        print(coordinator_table(out))
+        print(strategic_table(out))
+        corpus = Path(args.quality_dir).resolve() if args.quality_dir else None
+        table = quality_table(out, corpus)
+        (out / 'TABLE-GROUPS.txt').write_text(table + '\n', encoding='utf-8')
+        print(table)
+    missing = coordinator_missing(out, roots, modes)
+    failed = coordinator_failed(out, roots, modes)
+    print(f'missing_roots={len(missing)} failed_roots={len(failed)}')
+    return 1 if missing or failed else 0
 
 
 def survey_spec(character: str, index: int, act: int) -> dict:
@@ -864,6 +933,14 @@ def cmd_trace(args: argparse.Namespace) -> int:
         env['OFFLINE_HARNESS_FLASH_TRACE_MIN_POTIONS'] = str(args.min_potions)
     if args.potion_policy:
         env['OFFLINE_HARNESS_FLASH_TRACE_POTION_POLICY'] = args.potion_policy
+    if args.incumbent_deficit is not None:
+        env['OFFLINE_HARNESS_FLASH_TRACE_INCUMBENT_DEFICIT'] = str(args.incumbent_deficit)
+        if args.incumbent_turn is None:
+            raise SystemExit('--incumbent-deficit requires --incumbent-turn')
+    if args.incumbent_turn is not None:
+        env['OFFLINE_HARNESS_FLASH_TRACE_INCUMBENT_TURN'] = str(args.incumbent_turn)
+    if args.reset_baseline:
+        env['OFFLINE_HARNESS_FLASH_TRACE_RESET_BASELINE'] = '1'
     command = [args.dotnet, str(args.harness), '--request', str(request),
                '--label', args.id, '--profile', 'Medium', '--beam', str(args.beam),
                '--nodes', str(args.nodes), '--budget-ms', str(args.budget_ms),
@@ -896,17 +973,21 @@ def build_parser() -> argparse.ArgumentParser:
     add_root_options(diff)
     diff.add_argument('--baseline', type=Path, default=None,
                       help='previous SUMMARY.txt; compare failures and pureRefMismatch row by row')
+    diff.add_argument('--steps', type=int, default=60,
+                      help='OFFLINE_HARNESS_FLASH_DIFF_STEPS per walk (default 60)')
+    diff.add_argument('--debug', action='store_true',
+                      help='OFFLINE_HARNESS_FLASH_DEBUG: print non-pure history entries on a K4 mismatch')
     diff.set_defaults(func=cmd_diff)
 
     scan = sub.add_parser('scan', help='Flash solve plus candidate-route replay scan')
     add_common(scan)
-    add_root_options(scan)
+    add_root_options(scan, walks=False, quality_walks=False)
     scan.add_argument('--candidates', type=int, default=8, help='OFFLINE_HARNESS_FLASH_CANDIDATE_SCAN (default 8)')
     scan.add_argument('--budget-ms', type=int, default=10000, help='per-root search budget (default 10000)')
     scan.set_defaults(func=cmd_scan)
 
     coordinator = sub.add_parser('coordinator', help='Off/On coordinator comparison on the quality corpus')
-    add_common(coordinator)
+    add_common(coordinator, no_k0=False)
     coordinator.add_argument('--quality-dir', type=Path, default=QUALITY,
                              help='quality corpus (default coverage/corpora/flash-quality, 120 roots)')
     coordinator.add_argument('--ids', nargs='+', default=None, help='run only these directory names')
@@ -921,7 +1002,9 @@ def build_parser() -> argparse.ArgumentParser:
     coordinator.set_defaults(func=cmd_coordinator)
 
     trace = sub.add_parser('trace', help='trace a target route through one Flash request')
-    add_common(trace)
+    trace.add_argument('--dotnet', default=DOTNET)
+    trace.add_argument('--harness', type=Path, default=HARNESS)
+    trace.add_argument('--out', type=Path, default=None)
     trace.add_argument('--id', required=True, help='quality corpus directory name (for request/route)')
     trace.add_argument('--quality-dir', type=Path, default=QUALITY)
     trace.add_argument('--request', type=Path, default=None, help='override request json')
@@ -936,24 +1019,24 @@ def build_parser() -> argparse.ArgumentParser:
     trace.add_argument('--max-potions', type=int, default=None)
     trace.add_argument('--min-potions', type=int, default=None)
     trace.add_argument('--potion-policy', default=None, help='SolverPotionPolicy override')
+    trace.add_argument('--incumbent-deficit', type=int, default=None,
+                       help='primary incumbent strategic HP deficit for the traced request')
+    trace.add_argument('--incumbent-turn', type=int, default=None,
+                       help='primary incumbent combat-end turn (required with --incumbent-deficit)')
+    trace.add_argument('--reset-baseline', action='store_true',
+                       help='reset the fixed-prefix scheduling baseline')
     trace.add_argument('--side', default='both', choices=('both', 'flash', 'existing'))
     trace.add_argument('--timeout', type=float, default=480)
     trace.set_defaults(func=cmd_trace)
 
-    retention = sub.add_parser('retention',
-                                help='K6 per-boundary retained-set comparison on the quality corpus')
-    add_common(retention)
-    add_root_options(retention)
-    retention.set_defaults(jobs=8)
-    retention.add_argument('--baseline', type=Path, default=RETENTION_BASELINE,
-                           help='off120 coordinator baseline with <id>/Off/harness-result.json')
-    retention.add_argument('--ids', nargs='+', default=None, help='quality corpus directory names')
-    retention.add_argument('--budget-ms', type=int, default=120000)
-    retention.add_argument('--top', type=int, default=8, help='divergent states reported per side (default 8)')
-    retention.add_argument('--timeout', type=float, default=900, help='per-run timeout seconds (default 900)')
-    retention.add_argument('--merge', nargs='+', type=Path, default=None,
-                           help='merge existing retention SUMMARY.json directories instead of running')
-    retention.set_defaults(func=cmd_retention)
+    compat = sub.add_parser('compat',
+                            help='FlashSearchMode persistence contract: legacy Shadow/numeric values read Off, On round-trips')
+    compat.add_argument('--label', default=None)
+    compat.add_argument('--out', type=Path, default=None)
+    compat.add_argument('--dotnet', default=DOTNET)
+    compat.add_argument('--harness', type=Path, default=HARNESS)
+    compat.add_argument('--skip-build', action='store_true')
+    compat.set_defaults(func=cmd_compat)
 
     table = sub.add_parser('table', help='read-only Off/On quality table under the solver comparison key')
     table.add_argument('run_dir', type=Path, help='a coordinator output directory with <id>/{Off,On}/quality.json')
@@ -962,7 +1045,11 @@ def build_parser() -> argparse.ArgumentParser:
     table.set_defaults(func=cmd_table)
 
     survey = sub.add_parser('survey', help='generate quality-corpus decks (coverage/corpora/flash-quality)')
-    add_common(survey)
+    survey.add_argument('--label', default=None)
+    survey.add_argument('--out', type=Path, default=None)
+    survey.add_argument('--dotnet', default=DOTNET)
+    survey.add_argument('--harness', type=Path, default=HARNESS)
+    survey.add_argument('--skip-build', action='store_true')
     survey.add_argument('--character', required=True, help='IRONCLAD/SILENT/DEFECT/REGENT/NECROBINDER')
     survey.add_argument('--count', type=int, default=24, help='decks per character, split into Acts 1/2/3 (default 24)')
     survey.add_argument('--run', action='store_true', help='also run a 1-walk differential probe per root')
@@ -979,377 +1066,6 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, 'jobs', 1) < 1:
         parser.error('--jobs must be >= 1')
     return args.func(args)
-
-
-# ---------------------------------------------------------------------------
-# K6 retention-set comparison
-# ---------------------------------------------------------------------------
-
-RETENTION_BASELINE = DEFAULT_OUT / 'off120-base'
-
-
-def _retention_member_label(member: dict) -> str:
-    label = f"w{int(member['BeamWidth'])}"
-    if member.get('AggressivePowerCommitment'):
-        label += '+power'
-    if member.get('SecondRankBand'):
-        label += '+band'
-    if member.get('BaseScoreOnly'):
-        label += '+base'
-    if member.get('OffensiveRefinement'):
-        label += '+offense'
-    if member.get('BoundedRefinement'):
-        label += '+bounded'
-    return label
-
-
-def _retention_members(baseline: Path, root_id: str) -> list[dict]:
-    path = baseline / root_id / 'Off' / 'harness-result.json'
-    if not path.is_file():
-        return []
-    data = json.loads(path.read_text(encoding='utf-8-sig'))
-    members = (data.get('solverMetrics') or {}).get('PortfolioMembers') or []
-    return [member for member in members if member.get('Ran')]
-
-
-def _retention_env(member: dict, label: str, outdir: Path, top: int) -> dict[str, str]:
-    env = baseline_environment()
-    env['OFFLINE_HARNESS_RETENTION_NODE_BUDGET'] = str(int(member.get('NodeBudget') or 120000))
-    env['OFFLINE_HARNESS_RETENTION_DIFF'] = '1'
-    env['OFFLINE_HARNESS_RETENTION_LABEL'] = label
-    env['OFFLINE_HARNESS_RETENTION_OUT'] = str((outdir / 'retention-diff.json').resolve())
-    env['OFFLINE_HARNESS_RETENTION_TOP'] = str(top)
-    env['OFFLINE_HARNESS_RETENTION_PURPOSE'] = 'PrimaryBeam'
-    flags = []
-    if member.get('SecondRankBand'):
-        flags.append('band')
-    if member.get('BaseScoreOnly'):
-        flags.append('base')
-    if member.get('AggressivePowerCommitment'):
-        flags.append('power')
-    if flags:
-        env['OFFLINE_HARNESS_RETENTION_FLAGS'] = ','.join(flags)
-    if member.get('OffensiveRefinement'):
-        env['OFFLINE_HARNESS_RETENTION_BEAM_WEIGHT'] = 'EnemyHp:1.5'
-    return env
-
-
-def _reason_key(category: str, detail: dict) -> str:
-    last = (detail.get('lastAction') or '-').replace(' ', '')
-    if category == 'A':
-        card = last.split(':', 3)[-1] if last.count(':') >= 2 else ''
-        copies = (detail.get('rootHandCounts') or {}).get(card, 0)
-        suffix = ':duplicate-card-copy' if copies > 1 else ':action-enumeration'
-        return f'A:not-generated:{last}{suffix}'
-    if category == 'B':
-        return f"B:{detail.get('otherStatus') or 'rejected'}:{last}"
-    if category == 'C':
-        if detail.get('otherRank') is None:
-            return f'C:generated-not-in-pool:{last}'
-        return f'C:rank-or-tie:{last}'
-    if category == 'D':
-        left = detail.get('presentScore')
-        right = detail.get('otherScore')
-        if isinstance(left, (int, float)) and isinstance(right, (int, float)):
-            return f'D:score-differs:{last}:delta={left - right:g}'
-        return f'D:score-differs:{last}'
-    if category == 'E':
-        def one_line(value: object) -> str:
-            text = ' '.join(str(value or '-').split())
-            return text if len(text) <= 96 else text[:93] + '...'
-        return 'E:required:' + one_line(detail.get('presentLabel')) + '->' + one_line(detail.get('otherLabel'))
-    return f'{category}:{detail.get("reason") or "-"}'
-
-
-def _retention_record_from_payload(root_id: str, label: str, code: int, payload: dict) -> dict:
-    record = {
-        'root': root_id,
-        'member': label,
-        'exit': code,
-        'status': 'missing',
-        'firstCategory': None,
-        'firstKind': None,
-        'turn': None,
-        'depth': None,
-        'routeIdentical': None,
-        'unprojectable': payload.get('unprojectable', 0),
-        'reasons': [],
-        'error': None,
-    }
-    comparison = payload.get('comparison') or {}
-    record['status'] = payload.get('status') or comparison.get('status') or 'unknown'
-    record['error'] = payload.get('error')
-    record['routeIdentical'] = comparison.get('routeIdentical') if isinstance(comparison, dict) else None
-    first = comparison.get('firstDivergence') if isinstance(comparison, dict) else None
-    if isinstance(first, dict):
-        record['firstCategory'] = first.get('category')
-        record['firstKind'] = first.get('kind')
-        record['turn'] = first.get('turn')
-        record['depth'] = first.get('depth')
-        for side in ('oldOnly', 'flashOnly'):
-            for detail in first.get(side) or []:
-                category = detail.get('category') or record['firstCategory']
-                detail['rootHandCounts'] = payload.get('rootHandCounts') or {}
-                record['reasons'].append(_reason_key(category, detail))
-    if record['unprojectable']:
-        record['observedCategory'] = record['firstCategory']
-        record['status'] = 'incomparable'
-        record['firstCategory'] = None
-        record['firstKind'] = None
-        record['turn'] = None
-        record['depth'] = None
-        record['reasons'] = []
-    rest = {key: value for key, value in payload.items()
-            if key not in ('label', 'member', 'comparison', 'rootHandCounts')}
-    record['summary'] = rest
-    return record
-
-
-def _retention_record(root_id: str, member: dict, outdir: Path, code: int) -> dict:
-    label = _retention_member_label(member)
-    path = outdir / 'retention-diff.json'
-    if not path.is_file():
-        return {
-            'root': root_id, 'member': label, 'exit': code, 'status': 'missing',
-            'firstCategory': None, 'firstKind': None, 'turn': None, 'depth': None,
-            'routeIdentical': None, 'unprojectable': None, 'reasons': [],
-            'error': 'missing retention-diff.json',
-        }
-    payload = json.loads(path.read_text(encoding='utf-8-sig'))
-    return _retention_record_from_payload(root_id, label, code, payload)
-
-
-def _retention_aggregate(records: list[dict]) -> dict:
-    members: dict[str, dict] = {}
-    categories: dict[str, int] = {}
-    turns: dict[str, int] = {}
-    depths: dict[str, int] = {}
-    reasons: dict[str, dict] = {}
-    for record in records:
-        member = record['member']
-        entry = members.setdefault(member, {
-            'runs': 0, 'identical': 0, 'divergent': 0, 'incomparable': 0, 'error': 0,
-            'routeIdentical': 0, 'categories': {}, 'turns': {}, 'depths': {},
-        })
-        entry['runs'] += 1
-        status = record['status']
-        if status != 'incomparable' and record.get('routeIdentical'):
-            entry['routeIdentical'] += 1
-        if status == 'identical':
-            entry['identical'] += 1
-        elif status == 'incomparable':
-            entry['incomparable'] += 1
-            continue
-        elif status == 'error' or record['exit'] != 0:
-            entry['error'] += 1
-        else:
-            entry['divergent'] += 1
-        category = record.get('firstCategory')
-        if category:
-            entry['categories'][category] = entry['categories'].get(category, 0) + 1
-            categories[category] = categories.get(category, 0) + 1
-            turn_key = str(record.get('turn'))
-            depth_key = str(record.get('depth'))
-            entry['turns'][turn_key] = entry['turns'].get(turn_key, 0) + 1
-            entry['depths'][depth_key] = entry['depths'].get(depth_key, 0) + 1
-        if record.get('turn') is not None:
-            key = str(record['turn'])
-            turns[key] = turns.get(key, 0) + 1
-        if record.get('depth') is not None:
-            key = str(record['depth'])
-            depths[key] = depths.get(key, 0) + 1
-        for reason in record.get('reasons') or []:
-            bucket = reasons.setdefault(reason, {'count': 0, 'members': set(), 'roots': set()})
-            bucket['count'] += 1
-            bucket['members'].add(member)
-            bucket['roots'].add(record['root'])
-    reason_rows = [
-        {
-            'reason': reason,
-            'count': value['count'],
-            'members': sorted(value['members']),
-            'roots': sorted(value['roots']),
-            'representativeRoot': sorted(value['roots'])[0],
-        }
-        for reason, value in sorted(reasons.items(), key=lambda item: (-item[1]['count'], item[0]))
-    ]
-    return {
-        'members': members,
-        'categories': categories,
-        'turns': turns,
-        'depths': depths,
-        'reasons': reason_rows,
-    }
-
-
-def _retention_summary_lines(records: list[dict], aggregate: dict) -> list[str]:
-    lines = []
-    lines.append('MEMBER SUMMARY')
-    lines.append('member\truns\tidentical\trouteSame\tdivergent\tincomparable\terror\tA\tB\tC\tD\tE\tF\tG')
-    for member, entry in sorted(aggregate['members'].items()):
-        categories = entry['categories']
-        lines.append('\t'.join([
-            member, str(entry['runs']), str(entry['identical']), str(entry['routeIdentical']),
-            str(entry['divergent']), str(entry['incomparable']), str(entry['error']),
-            *[str(categories.get(category, 0)) for category in 'ABCDEFG'],
-        ]))
-    lines.append('')
-    lines.append('FIRST DIVERGENCE CATEGORY')
-    lines.append('category\tcount')
-    for category, count in sorted(aggregate['categories'].items()):
-        lines.append(f'{category}\t{count}')
-    lines.append('')
-    lines.append('TURN / LAYER DEPTH OF FIRST DIVERGENCE')
-    lines.append('turn\tcount')
-    for turn, count in sorted(aggregate['turns'].items(), key=lambda item: int(item[0])):
-        lines.append(f'{turn}\t{count}')
-    lines.append('depth\tcount')
-    for depth, count in sorted(aggregate['depths'].items(), key=lambda item: int(item[0])):
-        lines.append(f'{depth}\t{count}')
-    lines.append('')
-    lines.append('MEMBER TURN / DEPTH')
-    lines.append('member\tturn:count\tdepth:count')
-    for member, entry in sorted(aggregate['members'].items()):
-        turns = ','.join(f'{key}:{value}' for key, value in sorted(
-            entry['turns'].items(), key=lambda item: int(item[0])))
-        depths = ','.join(f'{key}:{value}' for key, value in sorted(
-            entry['depths'].items(), key=lambda item: int(item[0])))
-        lines.append(f"{member}\t{turns or '-'}\t{depths or '-'}")
-    lines.append('')
-    lines.append('MOST COMMON CONCRETE REASONS (top-N per first divergence)')
-    lines.append('count\tmembers\troots\treason\trepresentative')
-    for row in aggregate['reasons'][:40]:
-        lines.append('\t'.join([
-            str(row['count']), str(len(row['members'])), str(len(row['roots'])),
-            row['reason'], row['representativeRoot'],
-        ]))
-    lines.append('')
-    lines.append('PER RUN')
-    lines.append('root\tmember\texit\tstatus\tcategory\tkind\tturn\tdepth\treasons\terror')
-    for record in sorted(records, key=lambda item: (item['root'], item['member'])):
-        lines.append('\t'.join([
-            record['root'], record['member'], str(record['exit']), record['status'],
-            str(record.get('firstCategory') or '-'), str(record.get('firstKind') or '-'),
-            str(record.get('turn') if record.get('turn') is not None else '-'),
-            str(record.get('depth') if record.get('depth') is not None else '-'),
-            ','.join(record.get('reasons') or []) or '-', record.get('error') or '-',
-        ]))
-    return lines
-
-
-def cmd_retention(args: argparse.Namespace) -> int:
-    if args.merge:
-        out = output_dir(args, 'k6-retention-merged')
-        out.mkdir(parents=True, exist_ok=True)
-        records: list[dict] = []
-        for directory in args.merge:
-            directory = Path(directory).resolve()
-            runs = sorted(directory.glob('*/*/retention-diff.json'))
-            if runs:
-                for path in runs:
-                    payload = json.loads(path.read_text(encoding='utf-8-sig'))
-                    record = _retention_record_from_payload(
-                        path.parent.parent.name, path.parent.name, 0, payload)
-                    records.append({key: value for key, value in record.items() if key != 'summary'})
-                continue
-            path = directory / 'SUMMARY.json'
-            if not path.is_file():
-                raise SystemExit(f'missing retention runs or SUMMARY.json: {directory}')
-            payload = json.loads(path.read_text(encoding='utf-8-sig'))
-            records.extend(payload.get('records') or [])
-        aggregate = _retention_aggregate(records)
-        lines = _retention_summary_lines(records, aggregate)
-        write_summary(out / 'SUMMARY.txt', lines + ['DONE'])
-        (out / 'SUMMARY.json').write_text(json.dumps({
-            'jobs': args.jobs,
-            'budgetMilliseconds': args.budget_ms,
-            'tasks': len(records),
-            'aggregate': aggregate,
-            'records': records,
-        }, indent=1, ensure_ascii=False) + '\n', encoding='utf-8')
-        print(f'merged {len(records)} runs under {out}')
-        return 0 if all(record['exit'] == 0 and record['status'] != 'error' for record in records) else 1
-    if args.only == 'fixtures':
-        raise SystemExit('retention 只支持质量语料（--only quality 或 all）')
-    roots = quality_roots(args.quality_walks)
-    if args.ids:
-        wanted = set(args.ids)
-        roots = [root for root in roots if root.request.parent.name in wanted]
-    if args.root:
-        roots = [root for root in roots if any(token in root.name for token in args.root)]
-    shards = max(1, args.shards)
-    if args.shard is not None:
-        if not 0 <= args.shard < shards:
-            raise SystemExit(f'--shard must be in [0, {shards})')
-        roots = [root for index, root in enumerate(roots) if index % shards == args.shard]
-    out = output_dir(args, 'k6-retention')
-    if not prepare(args, out, k0=True):
-        return 1
-
-    baseline = args.baseline.resolve()
-    tasks: list[tuple[Root, dict]] = []
-    missing: list[str] = []
-    for root in roots:
-        root_id = root.request.parent.name
-        members = _retention_members(baseline, root_id)
-        if not members:
-            missing.append(root_id)
-            continue
-        for member in members:
-            tasks.append((root, member))
-    if missing:
-        write_summary(out / 'SUMMARY.txt', [f'BASELINE MISSING {root}' for root in missing])
-        print(f'baseline missing for {len(missing)} roots', file=sys.stderr)
-        return 1
-
-    records: list[dict] = []
-    lock = __import__('threading').Lock()
-    started = time.time()
-
-    def work(task: tuple[Root, dict]) -> dict:
-        root, member = task
-        root_id = root.request.parent.name
-        label = _retention_member_label(member)
-        outdir = fresh_dir(out / root_id / label)
-        env = _retention_env(member, label, outdir, args.top)
-        command = [
-            args.dotnet, str(args.harness), '--request', str(root.request),
-            '--label', f'{root_id}-{label}', '--profile', 'Medium',
-            '--beam', str(int(member['BeamWidth'])),
-            '--nodes', str(max(100, int(member.get('NodeBudget') or 120000))),
-            '--budget-ms', str(args.budget_ms), '--dop', '1',
-            '--search-mode', 'Evaluate', '--milestone', 'M1', '--out', str(outdir),
-        ]
-        code = run_command(command, cwd=ROOT, env=env, timeout=args.timeout,
-                           log=outdir / 'stdout.txt')
-        return _retention_record(root_id, member, outdir, code)
-
-    total = len(tasks)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as executor:
-        futures = {executor.submit(work, task): task for task in tasks}
-        for done, future in enumerate(concurrent.futures.as_completed(futures), 1):
-            record = future.result()
-            records.append(record)
-            elapsed = time.time() - started
-            print(f"[{done}/{total}] {record['root']} {record['member']} "
-                  f"{record['status']} {elapsed:7.1f}s", flush=True)
-
-    aggregate = _retention_aggregate(records)
-    lines = _retention_summary_lines(records, aggregate)
-    write_summary(out / 'SUMMARY.txt', lines + ['DONE'])
-    payload = {
-        'baseline': _relative(baseline),
-        'jobs': args.jobs,
-        'budgetMilliseconds': args.budget_ms,
-        'tasks': len(records),
-        'aggregate': aggregate,
-        'records': [{key: value for key, value in record.items() if key != 'summary'}
-                     for record in records],
-    }
-    (out / 'SUMMARY.json').write_text(json.dumps(payload, indent=1, ensure_ascii=False) + '\n',
-                                      encoding='utf-8')
-    print(f'wrote {len(records)} runs under {out}')
-    return 0 if all(record['exit'] == 0 and record['status'] != 'error' for record in records) else 1
 
 
 if __name__ == '__main__':

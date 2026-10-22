@@ -22,6 +22,8 @@ internal static class Program
     {
         if (rawArgs.Length == 1 && rawArgs[0] == "--check-primary-incumbents")
             return PrimaryIncumbentChecks.Run();
+        if (rawArgs.Length == 1 && rawArgs[0] == "--check-flash-mode-compat")
+            return FlashModeCompatChecks.Run();
         if (rawArgs.Length == 1 && rawArgs[0] == "--check-early-turn-continuation-bound")
         {
             return EarlyTurnContinuationChecks.Run();
@@ -184,14 +186,10 @@ internal static class Program
                 payload["flashDiff"] = FlashDifferentialProbe.Run(
                     combat!, options, options.OutputDirectory, generated?.Request.FlashPrefixActions,
                     TurnSetupRootCapture.Captured, generated?.Request.FlashPrefixPlan);
-            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_RETENTION_DIFF") == "1")
-                payload["retentionDiff"] = RetentionDiffProbe.Run(combat!, options, loop);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_TRACE_ROUTE") is { Length: > 0 } traceRoute)
                 payload["flashTrace"] = FlashRouteTraceProbe.Run(combat!, options, traceRoute, loop);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_SOLVE") == "1")
                 payload["flashSolve"] = FlashSolveProbe.Run(combat!, options, loop);
-            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_FAILURE_CHECKS") == "1")
-                payload["flashFailureChecks"] = FlashFailureChecks.Run(combat!, TurnSetupRootCapture.Captured);
             payload["budget"] = DescribeBudget(options);
             payload["root"] = OfflineCombat.DescribeRoot(combat!);
             string diagnostics = ModRuntime.DescribeStart(combat!);

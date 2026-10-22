@@ -10,19 +10,30 @@
 
 ### Flash 搜索后端（默认关闭）
 
-新增可选的结构体状态内核（`src/Flash/Kernel/`、`src/Flash/Content/`）与旧引擎衔接层（`src/Flash/Bridge/`）。默认关闭；设置 > 性能 > 搜索预算 >「Flash 快速搜索（实验）」可选择关闭、对照或启用。关闭时玩家可见行为不变；对照只记录一行对照日志，结果、工作量和诊断与关闭相同。启用模式只运行 Flash，不回落现有搜索：Flash 判定没有满足药水策略的路线时，返回与现有搜索同形的无路线结果；遇到不支持的内容、根状态超容量、内核边界、逐步回放核对不一致或药水约束复核不一致时，停止本回合部署、关闭全自动、提示切回关闭模式，问题包标注 `FlashSearchFailed` 与具体失败类别；回合准备搜索失败按同一约定处理，原生选择留给玩家作答。无人测试在这些失败上直接判 Failed。覆盖五个角色卡池、296 个遗物、65 种药水、三幕已实现遭遇与第三幕首领策略，以及事件卡牌与事件遭遇；未支持的内容在准入阶段按类别拒绝。开启模式使用 Flash 自己的档位预算：低/中/高/极高档的 Beam 宽度与节点上限分别为 180/240/360/540 与 240,000/480,000/1,000,000/2,000,000，软时间与分支上限等其余字段沿用常规档位；关闭与对照模式不变，自定义档位沿用玩家填写的数值。当前同政策、同预算的质量对照（五个角色、三幕均衡的 120 个生成牌组）：开启相对关闭 31 好 / 72 同 / 17 差，胜场 87 → 91，总耗时约为关闭模式的 44%；按角色与幕次的细分和变差根见测试记录。旧 100 根语料为 29/60/11、胜场 70 → 74。规格、失败类别与请求参数见 [Flash 搜索](flash-search/README.md) 与 [搜索与接入](flash-search/search.md)，覆盖、逐根证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
+新增可选的结构体状态内核（`src/Flash/Kernel/`、`src/Flash/Content/`）与旧引擎衔接层（`src/Flash/Bridge/`）。默认关闭；设置 > 性能 > 搜索预算 >「Flash 快速搜索（实验）」可选择关闭或启用。关闭时玩家可见行为不变。启用模式只运行 Flash，不回落现有搜索：Flash 判定没有满足药水策略的路线时，返回与现有搜索同形的无路线结果；遇到不支持的内容、根状态超容量、内核边界、逐步回放核对不一致或药水约束复核不一致时，停止本回合部署、关闭全自动、提示切回关闭模式，问题包标注 `FlashSearchFailed` 与具体失败类别；回合准备搜索失败按同一约定处理，原生选择留给玩家作答。无人测试在这些失败上直接判 Failed。覆盖五个角色卡池、296 个遗物、65 种药水、三幕已实现遭遇与第三幕首领策略，以及事件卡牌与事件遭遇；未支持的内容在准入阶段按类别拒绝。开启模式使用 Flash 自己的档位预算：低/中/高/极高档的 Beam 宽度与节点上限分别为 180/240/360/540 与 240,000/480,000/1,000,000/2,000,000，软时间与分支上限等其余字段沿用常规档位；关闭模式不变，自定义档位沿用玩家填写的数值。当前同政策、同预算的质量对照（五个角色、三幕均衡的 120 个生成牌组）：开启相对关闭 31 好 / 72 同 / 17 差，胜场 87 → 91，总耗时约为关闭模式的 44%；按角色与幕次的细分和变差根见测试记录。旧 100 根语料为 29/60/11、胜场 70 → 74。规格、失败类别与请求参数见 [Flash 搜索](flash-search/README.md) 与 [搜索与接入](flash-search/search.md)，覆盖、逐根证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
+
+### Flash 精简与清理（CL1）
+
+按只读审计删除不再维护的 Flash 分支与工具，生产搜索行为保持不变：
+
+- `FlashSearchMode` 只保留 `Off`/`On`（`On` 的持久化值仍为 `2`/字符串 `"On"`）。旧设置、检查点与问题包里的 `"Shadow"` 和任何数值形式在读取时归一化为 `Off`，新增 `flash_regression.py compat` 合同覆盖两条；设置界面只剩关闭/启用。
+- 删除 25% 进攻席位（`OffensiveShare`、`ShortSearchOffensiveShareBudgetMs`、敌人 HP 比较器与调用点参数），层内保留按排名取满 Beam。
+- 删除 K6 逐层保留集合工具（`RetentionDiffProbe`、`FlashRetention`、`flash_regression.py retention`、`FlashBeamOptions.Retention`、常规搜索的保留集合观察器与 `OFFLINE_HARNESS_RETENTION_*`）；路线追踪仍用的 `SearchPathObserver` 与 `RetentionLabels` 保留。源码从 `5365e89d` 找回。
+- 删除失败注入测试（`FlashFailureInjection`、`FlashFailureChecks`、`OFFLINE_HARNESS_FLASH_FAILURE_CHECKS`）；保留 `UnattendedTestRunner.FlashFailure` 的 DevelopmentStrategy 端到端失败合同。
+- 删除零调用方成员与 10 个 `Search` 反向 `using CombatSolver.Flash.Bridge`；删除未抛出的 `FlashRejection.ThirdParty`/`admission-third-party` token（第三方未知内容按具体对象走 `admission-unsupported-content`，无法投影的订阅者状态走 `admission-unrepresentable-state`）；`FromRejection` 补 `RootPhase` 映射；`auditable` 白名单改为穷举，On 模式下新的 `DirectSearchPurpose` 明确失败。
+- 离线工具：`scan` 每根只跑一次 Flash 并输出准入结果（拒绝即失败）；`coordinator` 有失败或缺失根时退出码非 0；删除各子命令接受但不生效的选项；`FLASH_DIFF_STEPS`/`FLASH_DEBUG` 接入 `diff --steps/--debug`，`TRACE_INCUMBENT_*`/`TRACE_RESET_BASELINE` 接入 `trace` 的 CLI。K6 已删除，`testing.md` 的已完成批次移入 [批次测试记录](archive/flash-search/testing-batches-2026-10-22.md)。验证：Release 构建 0 警告，K0 与结构、文档、工具、覆盖四项门禁通过；开启模式 120 根与 FW 基线的 route/quality/`SelectedExpanded`/`SelectedTransitions` 逐根相同，关闭模式 120 根质量逐根相同、工作量仅 IRONCLAD-013 与 REGENT-013 两个时间预算根有出入；候选扫描 410 根 / 2,008 条候选 / 0 不一致；设置兼容合同 23 项断言通过。
 
 ### Flash 开启模式使用自己的档位宽度与节点上限（FW）
 
-开启模式不再沿用常规档位的 Beam 宽度与节点上限。`SolverPerformanceValues` 旁增加每个档位的 Flash profile（只替换 `BeamWidth`/`MaxExpandedNodes`，软时间与分支上限等沿用常规 profile）；`SolverSettingsSnapshot` 带上当前档位，`SolverController.CaptureSearchPolicy` 在快照构造完成后用 `SolverSettings.ApplyFlashPerformance` 替换，协调器按替换后的 profile 计算成员宽度和共享节点预算，FlashBeam 直接使用请求 profile（QW 已是如此）。关闭与对照模式原样返回；自定义档位不替换，沿用玩家填写的值；检查点录制的精确 profile 也按自定义处理。离线宿主在 `OFFLINE_HARNESS_FLASH_MODE=On` 时用同一函数按 `--profile` 替换，`--profile Custom`/`Off`/`Shadow` 不变。
+开启模式不再沿用常规档位的 Beam 宽度与节点上限。`SolverPerformanceValues` 旁增加每个档位的 Flash profile（只替换 `BeamWidth`/`MaxExpandedNodes`，软时间与分支上限等沿用常规 profile）；`SolverSettingsSnapshot` 带上当前档位，`SolverController.CaptureSearchPolicy` 在快照构造完成后用 `SolverSettings.ApplyFlashPerformance` 替换，协调器按替换后的 profile 计算成员宽度和共享节点预算，FlashBeam 直接使用请求 profile（QW 已是如此）。关闭模式原样返回；自定义档位不替换，沿用玩家填写的值；检查点录制的精确 profile 也按自定义处理。离线宿主在 `OFFLINE_HARNESS_FLASH_MODE=On` 时用同一函数按 `--profile` 替换，`--profile Custom`/`Off` 不变。
 
-关闭模式对照：替换只在 `FlashMode == On` 执行，Off/Shadow 的 profile 选择不变。用关闭模式重跑 IRONCLAD-020、SILENT-007 两个根，`quality.json` 与主线 `off120-base` 逐字段相同；`SearchWorkAttributions` 的 `ExpandedNodes`/`Transitions`/`ChoiceBranches`/`RecordedSolverCount` 合计分别为 16,189/58,720/0/8 与 21,274/73,045/4,571/14，逐项相同。
+关闭模式对照：替换只在 `FlashMode == On` 执行，Off 的 profile 选择不变。用关闭模式重跑 IRONCLAD-020、SILENT-007 两个根，`quality.json` 与主线 `off120-base` 逐字段相同；`SearchWorkAttributions` 的 `ExpandedNodes`/`Transitions`/`ChoiceBranches`/`RecordedSolverCount` 合计分别为 16,189/58,720/0/8 与 21,274/73,045/4,571/14，逐项相同。
 
 120 根：31/72/17、失血 + 药水成本差 +100、胜场 87 → 91、总耗时 1671 s → 735 s；旧 100 根：29/60/11、+241、70 → 74、2030 s → 680 s。与 QW 宽度（120 根 19/78/23、−8、87 → 85、241 s；旧 100 根无结果）和 QF5 的宽度实验（120 根 29/74/17、−17、87 → 89、701 s；旧 100 根按旧口径 31/60/9、−165、647 s）并列见测试记录 2.1/2.2。Release 构建 0 警告，K0 与四项门禁通过；未改 Flash 内核、内容与搜索策略。
 
 ### Flash 逐层复刻常规搜索：尝试后撤回（K6、R1–R3）
 
-为了让同档位下 Flash 每根都不劣于常规搜索，先做了逐层保留集合一致检查 K6，再分三批照常规移植候选生成、卖血惩罚、同分顺序、首步谱系分组与路由签名。同档位 120 根“同”由 78 增到 87–90，“差”只由 23 降到 21，部分批次的“好”由 19 降到 8，耗时最多增加约 40%。用户决定暂停这条路线，搜索策略撤回到 QW；K6 工具与其来源标签修正保留，以便以后逐项评估单个机制。细节见 [Flash 测试记录](flash-search/testing.md) 2.2。
+为了让同档位下 Flash 每根都不劣于常规搜索，先做了逐层保留集合一致检查 K6，再分三批照常规移植候选生成、卖血惩罚、同分顺序、首步谱系分组与路由签名。同档位 120 根“同”由 78 增到 87–90，“差”只由 23 降到 21，部分批次的“好”由 19 降到 8，耗时最多增加约 40%。用户决定暂停这条路线，搜索策略撤回到 QW。K6 工具与保留集合观察器已在后续清理中删除，源码可从提交 `5365e89d` 找回；路线追踪仍使用的 `SearchPathObserver` 与 `SearchDiagnosticsSink.RetentionLabels` 保留。细节见 [Flash 批次测试记录](archive/flash-search/testing-batches-2026-10-22.md)。
 
 ### Flash 内核：Anger 复制与 Dampen 恢复顺序（QF5）
 
@@ -56,7 +67,7 @@ Flash 不再把请求 profile 的 Beam 宽度与全局节点上限乘以桥接�
 `BeamSolveDispatch.ProfileScale` 一并删除。窄开局、早期侦察与两个新颖度成员原本就不放大，行为不变。
 离线宿主删除 `OFFLINE_HARNESS_FLASH_PROFILE_SCALE`、`OFFLINE_HARNESS_FLASH_TRACE_PROFILE_SCALE` 与
 `OFFLINE_HARNESS_FLASH_WIDTH_SCALE`；宽度实验改用已有的 `--profile`/`--beam`/`--nodes`/`--budget-ms`。
-Flash 特有的 25% 进攻席位不变，仍只在软时间预算不超过 30 秒的请求中保留。
+Flash 特有的 25% 进攻席位当时保持不变；后续 CL1 已删除该泳道，层内保留按排名取满 Beam。
 
 验收：120 根协调器开启模式与同代码旧开关 `PROFILE_SCALE=1` 的结果逐根相同（`cmp-runs.py` 120/120；
 路线、完整 `quality.json`、`SelectedExpanded`、`SelectedTransitions` 与 `FLASH_ADOPTED` 的逐根
@@ -64,7 +75,7 @@ Flash 特有的 25% 进攻席位不变，仍只在软时间预算不超过 30 �
 质量表 19 好 / 78 同 / 23 差、`cost_delta=-8`、胜场 87 → 85、总耗时 1671 s → 241 s，没有
 `FLASH_SEARCH_FAILED`。Release 构建 0 警告；K0 通过，结构、文档、工具与覆盖四项门禁通过。文档与设置界面
 同步改为“与常规搜索使用同一档位”，界面支持范围按当前单人原版内容更新。该“同一档位”口径已被 FW 取代：
-开启模式现在使用 Flash 自己的档位宽度与节点上限，关闭与对照模式仍保持本文的常规档位口径。
+开启模式现在使用 Flash 自己的档位宽度与节点上限，关闭模式仍保持本文的常规档位口径。
 
 ### Flash 选牌药水 X 费筛选（QF4）
 

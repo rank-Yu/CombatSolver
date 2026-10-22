@@ -29,7 +29,6 @@ internal sealed partial class CombatBeamSolver
         ObserveCycleExitProgress(child);
         child = AttachCrossTurnSchedulingEvidence(child);
         ObserveSearchPath(child, SearchPathObservationStage.Generated, "resolved_transition");
-        ObserveRetentionGenerated(child);
         return child;
     }
 

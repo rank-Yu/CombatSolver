@@ -55,8 +55,9 @@ internal sealed record FlashSolveOutcome(
 {
     /// <summary>
     /// Set when the audited Flash search found no route satisfying the request's potion policy, or the
-    /// materialized route failed the post-materialization potion checks. The caller falls back to the
-    /// existing solver without treating this as the existing search's potion-policy verdict.
+    /// materialized route failed the post-materialization potion checks. The dispatch point maps the
+    /// Flash no-route verdict to the existing search's <c>PotionPolicyUnsatisfiedException</c> shape;
+    /// any other constraint is an explicit two-sided mismatch and an On-mode failure.
     /// </summary>
     public string? ConstraintFailure { get; init; }
 
@@ -76,8 +77,7 @@ internal sealed record FlashTraceContext(
     Player Player,
     SimulationSnapshot SearchRoot,
     FlashBattle Root,
-    FlashRules Rules,
-    IReadOnlyList<PlanAction> Prefix);
+    FlashRules Rules);
 
 /// <summary>
 /// Runs one Flash solve for a <see cref="the existing search"/> request: admission and root import,
@@ -87,13 +87,6 @@ internal sealed record FlashTraceContext(
 /// </summary>
 internal static partial class FlashRouteMaterializer
 {
-    /// <summary>
-    /// Requests at or below this soft budget keep the 25% offensive diversity lane. The 10 s
-    /// natural-root benchmark and short player budgets use it; the 120 s Medium coordinator path
-    /// ranks the whole beam by the existing rank order.
-    /// </summary>
-    internal const int ShortSearchOffensiveShareBudgetMs = 30_000;
-
     public static FlashSolveOutcome Solve(
         CombatRootSnapshot root,
         SolverDisplayNames displayNames,
@@ -116,9 +109,7 @@ internal static partial class FlashRouteMaterializer
         PlanCommitment? planCommitment = null,
         int earlyTurnScoutDepth = 0,
         Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null,
-        FlashBeamTrace? trace = null,
-        Func<FlashTraceContext, FlashBeamTrace?>? traceFactory = null,
-        FlashRetentionObserver? retentionObserver = null)
+        Func<FlashTraceContext, FlashBeamTrace?>? traceFactory = null)
     {
         FlashWorkAccounting accounting = new(policy.RequestWorkTotals, purpose, continuationPurpose,
             policy.FramePressureSignal, policy.Diagnostics);
@@ -130,7 +121,7 @@ internal static partial class FlashRouteMaterializer
                 primaryIncumbent, fixedPrefixActions, maximumPotionUses, minimumPotionUses,
                 earliestPotionTurn, continuationPurpose, potionFreePolicyBaseline,
                 resetFixedPrefixSchedulingBaseline, planCommitment, earlyTurnScoutDepth,
-                earlyTurnScoutObserver, trace, traceFactory, retentionObserver);
+                earlyTurnScoutObserver, traceFactory);
         }
         catch (FlashVerificationException ex)
         {
@@ -171,9 +162,7 @@ internal static partial class FlashRouteMaterializer
         PlanCommitment? planCommitment = null,
         int earlyTurnScoutDepth = 0,
         Action<int, IReadOnlyList<EarlyTurnFrontierCandidate>>? earlyTurnScoutObserver = null,
-        FlashBeamTrace? trace = null,
-        Func<FlashTraceContext, FlashBeamTrace?>? traceFactory = null,
-        FlashRetentionObserver? retentionObserver = null)
+        Func<FlashTraceContext, FlashBeamTrace?>? traceFactory = null)
     {
         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
         Player player = root.PlayerIdentity;
@@ -407,20 +396,11 @@ internal static partial class FlashRouteMaterializer
             PreserveReplayAllocatorOpening = root.HasUnusedCardReplayAllocator,
             PowerCommitments = powerCommitments,
             Novelty = policy.NoveltySearch is { } novelty ? FlashNoveltyOptions.From(novelty) : null,
-            Retention = retentionObserver,
         };
-        trace ??= traceFactory?.Invoke(new FlashTraceContext(
-            probe, player, searchRootSnapshot, battles[0], rules, prefix));
-        options = options with { Trace = trace };
-        // The offensive-reserved lane is a Flash-specific diversity seat (the existing RankBest has
-        // no such lane). Short searches rely on it to keep aggressive lines; the production Medium
-        // coordinator budget has enough rank seats without reserving a quarter of the beam.
         options = options with
         {
-            OffensiveShare = policy.Profile.SoftTimeBudgetMilliseconds
-                <= ShortSearchOffensiveShareBudgetMs
-                    ? 0.25d
-                    : 0d,
+            Trace = traceFactory?.Invoke(new FlashTraceContext(
+                probe, player, searchRootSnapshot, battles[0], rules)),
         };
         FlashProgressBridge progressBridge = new(probe, player, root, displayNames, battleDamage,
             policy, profile, searchRoots, battles, rules, prefix, potionUsage.PotionUseCount,
@@ -556,7 +536,8 @@ internal static partial class FlashRouteMaterializer
         catch (PotionPolicyUnsatisfiedException ex)
         {
             // The existing final ordering rejected the materialized route under the request's own
-            // potion policy. That is a fallback reason, not a Flash verification failure.
+            // potion policy. That is a two-sided potion-policy mismatch, not a Flash verification
+            // failure.
             return new FlashSolveOutcome(null, FlashRejection.None, ex.Message, search, plan,
                 admission, verification, watch.Elapsed)
             {
@@ -599,8 +580,7 @@ internal static partial class FlashRouteMaterializer
             };
         }
         // Publish the scout frontier only after the whole Flash attempt, including materialization,
-        // succeeded. A later failure falls back to the existing solver, whose observer must be the only
-        // one that reports to the coordinator.
+        // succeeded. A later failure discards the whole Flash attempt, so no candidate is published.
         if (earlyTurnScoutObserver != null && search.ScoutLayers.Count > 0)
         {
             List<(int Turns, IReadOnlyList<EarlyTurnFrontierCandidate> Candidates)> layers = new(
