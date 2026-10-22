@@ -12,6 +12,10 @@
 
 新增可选的结构体状态内核（`src/Flash/Kernel/`、`src/Flash/Content/`）与旧引擎衔接层（`src/Flash/Bridge/`）。默认关闭；设置 > 性能 > 搜索预算 >「Flash 快速搜索（实验）」可选择关闭、对照或启用。关闭时玩家可见行为不变；对照只记录一行对照日志，结果、工作量和诊断与关闭相同。启用模式只运行 Flash，不回落现有搜索：Flash 判定没有满足药水策略的路线时，返回与现有搜索同形的无路线结果；遇到不支持的内容、根状态超容量、内核边界、逐步回放核对不一致或药水约束复核不一致时，停止本回合部署、关闭全自动、提示切回关闭模式，问题包标注 `FlashSearchFailed` 与具体失败类别；回合准备搜索失败按同一约定处理，原生选择留给玩家作答。无人测试在这些失败上直接判 Failed。覆盖五个角色卡池、296 个遗物、65 种药水、三幕已实现遭遇与第三幕首领策略，以及事件卡牌与事件遭遇；未支持的内容在准入阶段按类别拒绝。Flash 直接使用玩家所选档位的 Beam 宽度、节点上限与软时间，与常规搜索相同。当前同政策、同预算的质量对照（五个角色、三幕均衡的 120 个生成牌组）：开启相对关闭 19 好 / 78 同 / 23 差，胜场 87 → 85，总耗时约为关闭模式的 14%；按角色与幕次的细分和变差根见测试记录。规格、失败类别与请求参数见 [Flash 搜索](flash-search/README.md) 与 [搜索与接入](flash-search/search.md)，覆盖、逐根证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
 
+### Flash 逐层复刻常规搜索（K6、R1、R2）
+
+目标：同一档位下 Flash 在每一根上都不劣于常规搜索。K6 是逐层保留集合一致检查（离线宿主 `OFFLINE_HARNESS_RETENTION_DIFF`，`flash_regression.py retention`），用 K2 规范状态投影的哈希作跨引擎状态键，报告每个成员第一处分歧与分类。R1 照常规移植：同名牌按 `BuildPlayableCardKey` 去重（`FlashCardKey`）、选牌分支按 `BuildChoices` 的排序与档位上限生成（`FlashChoiceOrderer`）、出牌准入照 `SelectActionCandidates`、回合边界按 `AnnotateTurnOutcomes` 计算 `FutureSoldHp` 并施加 `SoldHpPenalty`。R2 照常规移植保留边界的同分顺序（`CompareBeamRankOrder` 不加下标决胜、候选数不超过宽度时全收、`DiversifyOrdinaryBeamBoundary`、`RetentionRank`、回合结束状态的分组顺序）与首步谱系签名分组，删除 Flash 特有的谱系泳道与排序值里的药水成本项，终局排序加入卖血。120 根“同”由 78 增到 90、“差”22 根、胜场 85（常规 87）；逐批数字与剩余分歧见 [Flash 测试记录](flash-search/testing.md) 2.1 与 2.2。常规搜索行为没有改动。
+
 ### Flash 内核：Anger 复制与 Dampen 恢复顺序（QF5）
 
 档位宽度（当时用已移除的 `OFFLINE_HARNESS_FLASH_PROFILE_SCALE=1` 得到与现行档位相同的宽度）下 `quality-IRONCLAD-019` 的协调器开启模式在第 18 步
