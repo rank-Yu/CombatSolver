@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[3]
 HARNESS = ROOT / ".local/tool-build/OfflineSearchHarness/bin/Release/net9.0/OfflineSearchHarness.dll"
 DEFAULT_OUT = ROOT / ".local/flash-regression"
 FIXTURES = ROOT / "coverage/fixtures/cards"
+FALLBACK_FIXTURE = ROOT / "coverage/fixtures/search/flash-fallback-soulbound-power.json"
 QUALITY = ROOT / "coverage/corpora/flash-quality"
 KERNEL_CHECKS = ROOT / "tools/testing/checks/FlashKernelChecks"
 DOTNET = shutil.which("dotnet") or "dotnet"
@@ -717,6 +718,69 @@ def qcompare(left: Path, right: Path, mode: str) -> tuple[int, int]:
     return total, diff
 
 
+def cmd_fallback(args: argparse.Namespace) -> int:
+    """On-mode admission fallback contract on a root with Flash-unsupported content.
+
+    One On harness process runs the Off baseline, the On fallback and a non-admission rejection
+    through the real dispatch point; the check JSON reports route/quality/work equality and the
+    stable event lines. The host log of the normal On search must contain FLASH_FALLBACK and no
+    FLASH_SEARCH_FAILED.
+    """
+    out = output_dir(args, 'fallback')
+    if not prepare(args, out, k0=True):
+        return 1
+    outdir = fresh_dir(out / 'On')
+    env = baseline_environment()
+    env['OFFLINE_HARNESS_FLASH_MODE'] = 'On'
+    env['OFFLINE_HARNESS_FLASH_FALLBACK_CHECKS'] = '1'
+    command = [args.dotnet, str(args.harness), '--request', str(args.fixture),
+               '--label', 'fallback', '--profile', args.profile, '--beam', str(args.beam),
+               '--nodes', str(args.nodes), '--budget-ms', str(args.budget_ms),
+               '--search-mode', 'Coordinator', '--out', str(outdir)]
+    code = run_command(command, cwd=ROOT, env=env, timeout=args.timeout,
+                       log=outdir / 'stdout.txt')
+    checks: dict = {}
+    check_path = outdir / 'flash-fallback-checks.json'
+    if check_path.is_file():
+        checks = json.loads(check_path.read_text(encoding='utf-8-sig'))
+    log_text = ''
+    logs = outdir / 'logs'
+    if logs.is_dir():
+        log_text = '\n'.join(path.read_text(encoding='utf-8', errors='replace')
+                             for path in logs.rglob('process.jsonl'))
+    fallback_count = log_text.count('FLASH_FALLBACK')
+    fallback_failed = 'FLASH_SEARCH_FAILED' in log_text
+    passed = (code == 0
+              and checks.get('status') == 'Passed'
+              and checks.get('routeSame') is True
+              and checks.get('qualitySame') is True
+              and checks.get('workSame') is True
+              and checks.get('sensitivityDiffers') is True
+              and checks.get('publishedFallbackBlocked') is True
+              and len(checks.get('fallbackLines') or []) == 1
+              and checks.get('fallbackNoticeCount') == 1
+              and checks.get('rejectionToken') == 'admission-unsupported-request'
+              and fallback_count == 1
+              and not fallback_failed)
+    off_work = checks.get('offWork') or {}
+    flash_work = checks.get('sensitivityWork') or {}
+    line = (f"fallback exit={code} status={checks.get('status', 'Missing')} "
+            f"route={checks.get('routeSame')} quality={checks.get('qualitySame')} "
+            f"work={checks.get('workSame')} fallback_lines={fallback_count} "
+            f"off_work={off_work.get('ExpandedNodes', '-')}/{off_work.get('TransitionCount', '-')} "
+            f"flash_profile_work={flash_work.get('ExpandedNodes', '-')}/"
+            f"{flash_work.get('TransitionCount', '-')} sensitivity={checks.get('sensitivityDiffers')} "
+            f"published_blocked={checks.get('publishedFallbackBlocked')} "
+            f"failed={fallback_failed} rejection={checks.get('rejectionToken', '-')}")
+    write_summary(out / 'SUMMARY.txt', [line, 'DONE'])
+    print(line)
+    if checks.get('fallbackLines'):
+        for fallback in checks['fallbackLines']:
+            print(f'  {fallback}')
+    print(f'wrote {out / "SUMMARY.txt"}')
+    return 0 if passed else 1
+
+
 def cmd_compat(args: argparse.Namespace) -> int:
     """Run the persisted Flash-mode compatibility contract (removed Shadow -> Off; On unchanged)."""
     out = output_dir(args, 'compat')
@@ -1047,6 +1111,20 @@ def build_parser() -> argparse.ArgumentParser:
     trace.add_argument('--side', default='both', choices=('both', 'flash', 'existing'))
     trace.add_argument('--timeout', type=float, default=480)
     trace.set_defaults(func=cmd_trace)
+
+    fallback = sub.add_parser(
+        'fallback',
+        help='On-mode admission fallback contract: unsupported content uses the regular search, other rejection stays failed')
+    add_common(fallback)
+    fallback.add_argument('--fixture', type=Path, default=FALLBACK_FIXTURE,
+                          help='request with Flash-unsupported content (default coverage/fixtures/search/...)')
+    fallback.add_argument('--profile', default='Low',
+                          help='performance preset controlling the regular/Flash profile split (default Low)')
+    fallback.add_argument('--beam', type=int, default=45, help='regular profile beam width before the Flash swap')
+    fallback.add_argument('--nodes', type=int, default=5000, help='regular profile node cap before the Flash swap')
+    fallback.add_argument('--budget-ms', type=int, default=20000, help='per-process search budget (default 20000)')
+    fallback.add_argument('--timeout', type=float, default=480, help='harness process timeout seconds (default 480)')
+    fallback.set_defaults(func=cmd_fallback)
 
     compat = sub.add_parser('compat',
                             help='FlashSearchMode persistence contract: legacy Shadow/numeric values read Off, On round-trips')

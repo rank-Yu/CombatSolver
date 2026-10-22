@@ -138,4 +138,12 @@ internal sealed record SearchPolicySnapshot(
 
     /// <summary>Backend for primary Beam solves; see <see cref="BeamSolveDispatch"/>.</summary>
     public FlashSearchMode FlashMode { get; init; }
+
+    /// <summary>
+    /// The pre-swap profile for an On-mode request. <see cref="SolverSettings.ApplyFlashPerformance"/>
+    /// saves it before installing Flash's beam width and node cap so an On-mode admission fallback can
+    /// re-run the whole coordinator search with the exact closed-mode budgets. Null in Off mode; an
+    /// On-mode fallback without it is a defect and fails explicitly instead of guessing a profile.
+    /// </summary>
+    internal SolverSearchProfile? RegularProfile { get; init; }
 }

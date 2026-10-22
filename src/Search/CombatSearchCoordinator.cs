@@ -6,7 +6,11 @@ namespace CombatSolver;
 
 internal static partial class CombatSearchCoordinator
 {
-    public static SolverResult Solve(
+    /// <summary>
+    /// One complete search attempt with its own request clock, budget ledger and publication state.
+    /// A fallback re-enters here instead of reusing any of those locals.
+    /// </summary>
+    private static SolverResult SolveOnce(
         CombatRootSnapshot root,
         SolverDisplayNames displayNames,
         BattleDamageSnapshot battleDamage,
@@ -140,6 +144,14 @@ internal static partial class CombatSearchCoordinator
                     RouteAdoptionSeed = currentRouteAdoptionSeed,
                 });
             };
+        bool HasPublishedResult()
+            => currentCompleteAdoptableResult != null
+               || currentDisplayedResult != null
+               || currentTurnPreview != null
+               || speculativeRoutePreview != null
+               || currentRouteAdoptionSeed != null
+               || interaction?.CurrentTakeoverRequest != null;
+
         SearchPlanDiscoveryState planDiscovery = new();
         SolverResult RunPostSearch(SolverResult result)
         {
@@ -203,6 +215,15 @@ internal static partial class CombatSearchCoordinator
             PopulateRequestWorkTotals(currentCompleteAdoptableResult, requestWorkTotals);
             currentCompleteAdoptableResult.PortfolioTelemetry = portfolioTelemetry;
             return currentCompleteAdoptableResult;
+        }
+        catch (FlashFallbackRequiredException fallback)
+        {
+            // A fallback after any adoptable route/seed/preview was published cannot be reconciled by
+            // rerunning from scratch without mixing two attempts. Keep the original failure contract.
+            if (!HasPublishedResult())
+                throw;
+            FlashFallbackFailure.ThrowPublished(fallback, policy);
+            throw;
         }
     }
 

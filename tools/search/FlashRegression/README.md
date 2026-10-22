@@ -158,6 +158,33 @@ assertions=<N>`，非 0 退出或缺少该行即失败。不启动游戏搜索�
 python3 -B tools/search/FlashRegression/flash_regression.py compat --label compat
 ```
 
+### `fallback`
+
+开启模式准入改用合同。固定输入为
+`coverage/fixtures/search/flash-fallback-soulbound-power.json`：玩家携带原版尚无 Flash 定义的
+`SOULBOUND_POWER`，根展开量超过常规 Beam 宽度，能区分常规与 Flash 档位。命令先执行 Release
+构建与 K0（`--skip-build`/`--no-k0` 可复用），然后跑一次 On 离线宿主；宿主在正常搜索前通过
+真实的 `CombatSearchCoordinator.Solve` 依次执行：
+
+- Off：常规档位基线（默认 Low 档、Beam 45 / 5,000 节点）；
+- On：`BeamSolveDispatch` 抛 `FlashFallbackRequiredException`，协调器写一行 `FLASH_FALLBACK`
+  后用 `RegularProfile`（45 / 5,000）整次重跑；
+- 敏感性：`FlashMode = Off` 但 `Profile` 使用 Flash 档位（180 / 240,000），工作量必须与 Off 不同；
+- 已发布：预置路线采纳种子后再触发回落，必须写同一 reason 的 `FLASH_SEARCH_FAILED`、不写
+  `FLASH_FALLBACK`、不重跑；
+- On + 未登记 `DirectSearchPurpose`：断言仍抛 `FlashSearchFailedException`
+  （`admission-unsupported-request`），且不写 `FLASH_FALLBACK`。
+
+通过条件是 `flash-fallback-checks.json` 的 `status=Passed`、`routeSame`/`qualitySame`/`workSame`
+全为 true、`sensitivityDiffers=true`、`publishedFallbackBlocked=true`、恰好一条 `FLASH_FALLBACK`、
+失败类别为 `admission-unsupported-request`；同时正常 On 搜索的宿主日志必须恰好一行
+`FLASH_FALLBACK` 且不含 `FLASH_SEARCH_FAILED`。输出 `SUMMARY.txt` 与
+`flash-fallback-checks.json`。
+
+```bash
+python3 -B tools/search/FlashRegression/flash_regression.py fallback --label fallback --jobs 8
+```
+
 ### `table`
 
 只读一个已有协调器输出目录（`<id>/{Off,On}/quality.json`、`harness-result.json` 与 On 日志），
@@ -203,6 +230,7 @@ python3 -B tools/search/FlashRegression/flash_regression.py table \
 | `scan` | `SUMMARY.txt`、每根 `harness-result.json` | 每根 `exit=0`、`admitted=true`、`mismatches=0` |
 | `coordinator` | `TABLE.txt`、`STRATEGIC.txt`、`TABLE-GROUPS.txt`、每根 `Off`/`On` | 每根 `FLASH_ADOPTED`，没有 `FLASH_SEARCH_FAILED`，没有缺失根；数字按 `PotionPolicy` 键计入；不满足时退出码非 0 |
 | `compat` | `compat.txt` | `FLASH_MODE_COMPAT status=Passed` |
+| `fallback` | `SUMMARY.txt`、`flash-fallback-checks.json`、On `logs/` | `status=Passed`，Off/On 路线、质量与工作量相同，`sensitivityDiffers=true`，恰好一行 `FLASH_FALLBACK` 且不写 `FLASH_SEARCH_FAILED`，已发布回落不重跑，未登记搜索用途仍失败 |
 | `table` | 标准输出的合计/分组/变差列表 | 只读；缺 `spec.json` 时归入 `unknown`，不伪造分组 |
 | `trace` | `flash-trace.txt`、`stdout.txt` | 目标路线可映射；同指纹去重会 `re-anchored` 后继续，真正丢失点写 `cut`/`first-missing`（`seat replaced` 保持原语义） |
 | `survey` | 每根 `spec.json` / `request.json`、`SUMMARY.txt` | 路径可解析；`--run` 时探针输出可读 |

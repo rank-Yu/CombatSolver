@@ -418,13 +418,19 @@ internal static class SolverSettings
 
     /// <summary>
     /// 开启 Flash 时把请求 profile 的 Beam 宽度与全局节点上限换成该档位的 Flash 值；关闭与对照
-    /// 模式原样返回。其余 profile 字段（软时间、分支上限、排序开关等）保持不变。
+    /// 模式原样返回。换档前的常规 profile 保存在 <see cref="SearchPolicySnapshot.RegularProfile"/>，
+    /// 供准入改用常规搜索时从头重跑；重复调用保留第一次保存的常规 profile。其余 profile 字段
+    /// （软时间、分支上限、排序开关等）保持不变。
     /// </summary>
     internal static SearchPolicySnapshot ApplyFlashPerformance(
         SearchPolicySnapshot policy,
         SolverPerformancePreset preset)
         => policy.FlashMode == FlashSearchMode.On
-            ? policy with { Profile = FlashPerformance(preset, policy.Profile) }
+            ? policy with
+            {
+                RegularProfile = policy.RegularProfile ?? policy.Profile,
+                Profile = FlashPerformance(preset, policy.Profile),
+            }
             : policy;
 
     public static SolverSettingsData ApplyPerformancePreset(

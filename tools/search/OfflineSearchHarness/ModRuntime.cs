@@ -442,6 +442,12 @@ internal static class ModRuntime
         // 与游戏内 SolverController.CaptureSearchPolicy 同一替换规则：On 取当前档位的 Flash 宽度与
         // 节点上限，Off 不变，Custom 沿用 --beam/--nodes 或设置里的值。
         policy = SolverSettings.ApplyFlashPerformance(policy, ProfilePreset(options.Profile));
+        if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_FALLBACK_CHECKS") == "1")
+        {
+            // Contract-only probe: run the Off baseline, the On fallback and a non-admission
+            // rejection on the same captured root before the normal search.
+            FlashFallbackChecks.Run(root, names, damage, policy, options.OutputDirectory);
+        }
         // SR2 强制用药矩阵的复跑入口：Forced 把根上的每瓶可搜索药水标为 Force，Req 打开
         // RequireAtLeastOne。生产策略不受影响，只供离线矩阵对照。
         switch (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_POTION_PRESET"))

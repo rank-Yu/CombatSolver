@@ -164,6 +164,8 @@ internal sealed class SolverCombatSession
     public int? LastSolverDeployedTurn { get; set; }
     public bool ManualControlObserved { get; set; }
     public bool ShowcaseMode { get; set; }
+    /// <summary>The first Flash fallback of this combat; drives the one-shot player hint.</summary>
+    public FlashFallbackNotice? FlashFallbackNotice { get; set; }
     public CombatBugReportIssueLedger BugReportIssues { get; } = new();
     public CombatBugReportUploadPolicy UploadPolicy { get; } = new();
 }

@@ -1,10 +1,19 @@
 namespace CombatSolver;
 
+/// <summary>
+/// One search request switched from the Flash backend to the regular solver because admission
+/// rejected unsupported content or a state Flash cannot project. Runtime consumes it through the
+/// same injected diagnostics channel as the stable <c>FLASH_FALLBACK</c> line; Search never reads
+/// settings or UI.
+/// </summary>
+internal sealed record FlashFallbackNotice(string Reason, string Detail, string Purpose);
+
 internal sealed class SearchDiagnosticsSink(
     Action<string> info,
     Action<string> debug,
     SearchPathObserver? pathObserver = null,
-    bool retentionLabels = false)
+    bool retentionLabels = false,
+    Action<FlashFallbackNotice>? flashFallback = null)
 {
     public SearchPathObserver? PathObserver { get; } = pathObserver;
 
@@ -14,6 +23,29 @@ internal sealed class SearchDiagnosticsSink(
     public void Info(string message) => info(message);
 
     public void Debug(string message) => debug(message);
+
+    /// <summary>
+    /// Writes the one stable <c>FLASH_FALLBACK</c> line and publishes the same record to Runtime.
+    /// The regular solve is invoked after this call, so a later regular-search failure does not hide
+    /// the fact that this request already switched backends.
+    /// </summary>
+    public void FlashFallback(FlashFallbackNotice notice)
+    {
+        string detail = NormalizeDetail(notice.Detail);
+        Info($"[CombatSolver/Flash] FLASH_FALLBACK reason={notice.Reason} detail={detail} purpose={notice.Purpose}");
+        flashFallback?.Invoke(notice with { Detail = detail });
+    }
+
+    private static string NormalizeDetail(string detail)
+    {
+        if (string.IsNullOrWhiteSpace(detail))
+            return "-";
+        string normalized = string.Join(' ', detail.Split(
+            (char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return normalized.Length <= 320
+            ? normalized
+            : normalized[..320] + "…";
+    }
 }
 
 // Observation is opt-in and never participates in candidate acceptance. Both delegates may

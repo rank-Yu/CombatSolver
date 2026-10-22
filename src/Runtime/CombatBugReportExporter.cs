@@ -1283,6 +1283,14 @@ internal static class CombatBugReportExporter
             policy.EarlyTurnExplorationBudgetMilliseconds;
         captured["predictPotionReward"] = policy.PredictPotionReward;
         captured["flashSearchMode"] = JsonSerializer.SerializeToNode(policy.FlashMode, JsonOptions);
+        if (policy.RegularProfile is { } regularFlashProfile)
+        {
+            captured["flashRegularProfile"] = JsonSerializer.SerializeToNode(regularFlashProfile with
+            {
+                SoftTimeBudgetMilliseconds = policy.BudgetOverrideMilliseconds
+                    ?? regularFlashProfile.SoftTimeBudgetMilliseconds,
+            }, JsonOptions);
+        }
         captured["noveltyBudget"] = JsonSerializer.SerializeToNode(policy.NoveltyBudget, JsonOptions);
         captured["beamWidthPortfolioWidths"] = JsonSerializer.SerializeToNode(
             policy.BeamWidthPortfolioWidths,

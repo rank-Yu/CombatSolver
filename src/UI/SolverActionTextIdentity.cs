@@ -82,4 +82,44 @@ internal static class SolverUiModelNames
 
     public static string Relic(string id, string original)
         => LocString.GetIfExists("relics", id + ".title")?.GetFormattedText() ?? original;
+
+    private static string? _contentLanguage;
+    private static readonly Dictionary<string, string> ContentTitles = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Resolves any game content id (card, Power, relic, potion, orb, monster, enchantment, affliction
+    /// or modifier) to its current in-game name. Unknown ids keep the caller's original text.
+    /// </summary>
+    public static string Content(string id, string original)
+    {
+        if (id.Length == 0) return original;
+        string language = LocManager.Instance.Language;
+        if (_contentLanguage != language)
+        {
+            ContentTitles.Clear();
+            _contentLanguage = language;
+        }
+        if (ContentTitles.TryGetValue(id, out string? cached)) return cached;
+        string resolved = original;
+        foreach (AbstractModel model in ModelDb.All)
+        {
+            if (!string.Equals(model.Id.Entry, id, StringComparison.Ordinal))
+                continue;
+            resolved = model switch
+            {
+                CardModel card => card.Title,
+                RelicModel relic => relic.Title.GetFormattedText(),
+                PowerModel power => power.Title.GetFormattedText(),
+                PotionModel potion => potion.Title.GetFormattedText(),
+                ModifierModel modifier => modifier.Title.GetFormattedText(),
+                AfflictionModel affliction => affliction.Title.GetFormattedText(),
+                EnchantmentModel enchantment => enchantment.Title.GetFormattedText(),
+                OrbModel orb => orb.Title.GetFormattedText(),
+                MonsterModel monster => monster.Title.GetFormattedText(),
+                _ => original,
+            };
+            break;
+        }
+        return ContentTitles[id] = string.IsNullOrEmpty(resolved) ? original : resolved;
+    }
 }

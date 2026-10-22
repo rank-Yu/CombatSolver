@@ -29,6 +29,7 @@ internal enum CombatBugReportIssueKind
     FullAutoStoppedAtLiveRiskDeath,
     FullAutoStoppedAtLiveRiskWorsening,
     ManualSearchResultStale,
+    FlashFallback,
 }
 
 internal sealed record CombatBugReportIssue(
@@ -94,6 +95,7 @@ internal sealed class CombatBugReportIssueLedger
             CombatBugReportIssueKind.ManualHpLossIncreased
             or CombatBugReportIssueKind.ManualSearchResultStale
             or CombatBugReportIssueKind.IncompatibleGameplayMod
+            or CombatBugReportIssueKind.FlashFallback
             or CombatBugReportIssueKind.FullAutoStoppedAtDeathTurn));
 
     private static bool IsUnexpectedChoiceFailure(string message)
@@ -229,6 +231,7 @@ internal static class CombatBugReportDescription
             CombatBugReportIssueKind.IncompatibleGameplayMod => "内容性 Mod 暂未适配",
             CombatBugReportIssueKind.SearchFailure => "计算失败",
             CombatBugReportIssueKind.FlashSearchFailed => "Flash 快速搜索失败",
+            CombatBugReportIssueKind.FlashFallback => "Flash 改用常规搜索",
             CombatBugReportIssueKind.SearchActionReplayFailure => "搜索动作回放失败",
             CombatBugReportIssueKind.SearchCapacityFailure => "搜索内存或容量错误",
             CombatBugReportIssueKind.PotionPolicyUnsatisfied => "药水策略未满足",

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime;
@@ -60,6 +61,9 @@ internal static partial class SolverController
     private static readonly List<Task> PendingDeploymentReferenceReleases = [];
     private static readonly List<Task> PendingDeferredSearchReleases = [];
     private static readonly List<Task> PendingCombatDeferredOperations = [];
+    // Flash fallback notifications arrive on search workers; the main thread drains them into the
+    // combat session so the issue bundle and the one-shot player hint consume the same record.
+    private static readonly ConcurrentQueue<(int Generation, FlashFallbackNotice Notice)> PendingFlashFallbacks = new();
     private static int _searchReferenceReleaseScheduledCountForTesting;
     private static int _searchReferenceReleaseCompletedCountForTesting;
     private static int _searchCtsDisposeCountForTesting;
@@ -78,6 +82,9 @@ internal static partial class SolverController
     public static bool IsStoppingSearch
         => _search?.Interaction.StopRequested == true || PlayerTurnSetupCoordinator.IsStoppingSearch;
     public static bool SolverDisabled => _solverDisabled;
+
+    /// <summary>The first Flash fallback of this combat, or null. The UI formats it at display time.</summary>
+    internal static FlashFallbackNotice? FlashFallbackNotice => _combat.FlashFallbackNotice;
     public static bool CanApplyCurrentTurn
         => _search is { } search
                && search.Interaction.CurrentTakeoverRequest == null
@@ -561,6 +568,7 @@ internal static partial class SolverController
             UnattendedTestRunner.CheckpointProfileOverride is null
                 ? settings.PerformancePreset
                 : SolverPerformancePreset.Custom;
+        int flashFallbackGeneration = Volatile.Read(ref _combatLifecycleGeneration);
         SearchPolicySnapshot policy = new(
             UnattendedTestRunner.BeamWeightPerturbationOverride is { } beamWeightPerturbation
                 ? profile with { BeamWeightPerturbation = beamWeightPerturbation }
@@ -580,7 +588,8 @@ internal static partial class SolverController
             settings.AcceptableBattleHpLoss,
             new SearchDiagnosticsSink(
                 Entry.Logger.Journal.Bind("info"),
-                Entry.Logger.Journal.Bind("debug")),
+                Entry.Logger.Journal.Bind("debug"),
+                flashFallback: notice => NoteFlashFallback(flashFallbackGeneration, notice)),
             FramePressureSignal,
             new SearchMemoryPressureSignal())
         {
@@ -2147,7 +2156,13 @@ internal static partial class SolverController
 
     private static void ResetCore(string reason)
     {
+        // Include the last fallback of this combat in its issue bundle before the session is replaced.
+        DrainFlashFallbacks();
         int lifecycleGeneration = Interlocked.Increment(ref _combatLifecycleGeneration);
+        while (PendingFlashFallbacks.TryDequeue(out _))
+        {
+            // Old-generation fallback notices must not leak into the next combat's hint or bundle.
+        }
         bool deferredSearchCanceled = _deferredSearchCts != null;
         CancelDeferredSearch();
         Task deferredSearchRelease = DrainDeferredSearchReleases();
@@ -2333,6 +2348,34 @@ internal static partial class SolverController
         LastSearchFailureForTesting = null;
     }
 
+    /// <summary>
+    /// Called from a search worker when one request switches from Flash to the regular solver. The
+    /// record is bounded and carries no live model; the main thread consumes it on the next presence
+    /// tick so the issue ledger and the hint stay on the UI thread.
+    /// </summary>
+    private static void NoteFlashFallback(int lifecycleGeneration, FlashFallbackNotice notice)
+        => PendingFlashFallbacks.Enqueue((lifecycleGeneration, notice));
+
+    private static void DrainFlashFallbacks()
+    {
+        int lifecycleGeneration = Volatile.Read(ref _combatLifecycleGeneration);
+        bool firstNotice = false;
+        while (PendingFlashFallbacks.TryDequeue(out (int Generation, FlashFallbackNotice Notice) pending))
+        {
+            if (pending.Generation != lifecycleGeneration)
+                continue;
+            _combat.BugReportIssues.Record(
+                CombatBugReportIssueKind.FlashFallback,
+                $"{pending.Notice.Reason}：{pending.Notice.Detail}");
+            if (_combat.FlashFallbackNotice != null)
+                continue;
+            _combat.FlashFallbackNotice = pending.Notice;
+            firstNotice = true;
+        }
+        if (firstNotice && SolverOverlay.IsVisible)
+            SolverOverlay.RefreshControls();
+    }
+
     public static void MonitorCombatPresence()
     {
         AssertMainThread();
@@ -2348,6 +2391,7 @@ internal static partial class SolverController
         {
             BeginCombat(current);
         }
+        DrainFlashFallbacks();
         BattleDamageTracker.Observe(current);
         // SL may replace the combat after TurnStarted. Reattach at the playable boundary.
         // 初始化请求独立于用户通过 Ctrl+F9 选择的可见性。
@@ -2587,6 +2631,7 @@ internal static partial class SolverController
         if (!ReferenceEquals(_search, search))
             return;
         _combat.UploadPolicy.Observe(search.State);
+        DrainFlashFallbacks();
         _search = null;
         Volatile.Write(ref search.Interaction.Progress, null);
         int generation = search.Generation;

@@ -10,7 +10,17 @@
 
 ### Flash 搜索后端（默认关闭）
 
-新增可选的结构体状态内核（`src/Flash/Kernel/`、`src/Flash/Content/`）与旧引擎衔接层（`src/Flash/Bridge/`）。默认关闭；设置 > 性能 > 搜索预算 >「Flash 快速搜索（实验）」可选择关闭或启用。关闭时玩家可见行为不变。启用模式只运行 Flash，不回落现有搜索：Flash 判定没有满足药水策略的路线时，返回与现有搜索同形的无路线结果；遇到不支持的内容、根状态超容量、内核边界、逐步回放核对不一致或药水约束复核不一致时，停止本回合部署、关闭全自动、提示切回关闭模式，问题包标注 `FlashSearchFailed` 与具体失败类别；回合准备搜索失败按同一约定处理，原生选择留给玩家作答。无人测试在这些失败上直接判 Failed。覆盖五个角色卡池、296 个遗物、65 种药水、三幕已实现遭遇与第三幕首领策略，以及事件卡牌与事件遭遇；未支持的内容在准入阶段按类别拒绝。开启模式使用 Flash 自己的档位预算：低/中/高/极高档的 Beam 宽度与节点上限分别为 180/240/360/540 与 240,000/480,000/1,000,000/2,000,000，软时间与分支上限等其余字段沿用常规档位；关闭模式不变，自定义档位沿用玩家填写的数值。当前同政策、同预算的质量对照（五个角色、三幕均衡的 120 个生成牌组）：开启相对关闭 31 好 / 72 同 / 17 差，胜场 87 → 91，总耗时约为关闭模式的 44%；按角色与幕次的细分和变差根见测试记录。旧 100 根语料为 29/60/11、胜场 70 → 74。规格、失败类别与请求参数见 [Flash 搜索](flash-search/README.md) 与 [搜索与接入](flash-search/search.md)，覆盖、逐根证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
+新增可选的结构体状态内核（`src/Flash/Kernel/`、`src/Flash/Content/`）与旧引擎衔接层（`src/Flash/Bridge/`）。默认关闭；设置 > 性能 > 搜索预算 >「Flash 快速搜索（实验）」可选择关闭或启用。关闭时玩家可见行为不变。启用模式先运行 Flash：Flash 判定没有满足药水策略的路线时，返回与现有搜索同形的无路线结果；准入阶段遇到 Flash 尚未支持的卡牌、Power 等内容（`admission-unsupported-content`）或无法投影的状态（`admission-unrepresentable-state`）时，让整次协调器搜索改用换档前的常规档位从头重跑，不停止部署、不关闭全自动、不导出失败包，每场战斗最多提示一次内容名称；其余情况（根状态超容量、内核边界、逐步回放核对不一致、药水约束复核不一致、未实现请求、根阶段等）仍停止本回合部署、关闭全自动、提示切回关闭模式，问题包标注 `FlashSearchFailed` 与具体失败类别；回合准备搜索按同一分类处理，原生选择留给玩家作答。无人测试在这些失败上直接判 Failed。覆盖五个角色卡池、296 个遗物、65 种药水、三幕已实现遭遇与第三幕首领策略，以及事件卡牌与事件遭遇；未支持的内容在准入阶段按类别处理（其中不支持内容与不可表示状态改走常规搜索）。开启模式使用 Flash 自己的档位预算：低/中/高/极高档的 Beam 宽度与节点上限分别为 180/240/360/540 与 240,000/480,000/1,000,000/2,000,000，软时间与分支上限等其余字段沿用常规档位；关闭模式不变，自定义档位沿用玩家填写的数值。当前同政策、同预算的质量对照（五个角色、三幕均衡的 120 个生成牌组）：开启相对关闭 31 好 / 72 同 / 17 差，胜场 87 → 91，总耗时约为关闭模式的 44%；按角色与幕次的细分和变差根见测试记录。旧 100 根语料为 29/60/11、胜场 70 → 74。规格、失败类别与请求参数见 [Flash 搜索](flash-search/README.md) 与 [搜索与接入](flash-search/search.md)，覆盖、逐根证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
+
+### Flash 准入不支持内容改用常规搜索（FB）
+
+`BeamSolveDispatch` 的开启模式分支只对两类准入拒绝请求整次回落：`admission-unsupported-content`（卡牌、Power、遗物、药水、球、怪物、附魔、苦难或生成闭包没有 Flash 定义）与 `admission-unrepresentable-state`（第三方订阅者、未登记模型等无法投影的状态）。分发点不再自己调用常规求解器，而是抛 Search 层的 `FlashFallbackRequiredException`（携带 `FlashFallbackNotice`）。`CombatSearchCoordinator.Solve` 只捕获这一个异常：先确认这次 Flash 尝试没有发布可采用路线、路线采纳种子或路线预览，再写一行 `[CombatSolver/Flash] FLASH_FALLBACK reason=<类别> detail=<第一个不支持的内容或状态> purpose=<用途>`，并用 `FlashMode = Off`、`Profile = SearchPolicySnapshot.RegularProfile` 把整次搜索从头跑一遍；新尝试新建请求时钟与预算账本，复用同一个取消令牌。`RegularProfile` 由 `SolverSettings.ApplyFlashPerformance` 在换档时保存，自定义档位两者相同；缺失时显式失败，不按 Flash 档位或比例缩放兜底。准入只取决于根内容（含生成闭包），实际回落发生在第一个 Flash 请求、发布任何结果之前；若发布检查判定已经发布，则不重跑，改写 `FLASH_SEARCH_FAILED reason=<同一类别>` 并抛 `FlashSearchFailedException`。Runtime 主搜索与回合准备搜索都走同一协调器入口。
+
+Runtime 通过同一 `SearchDiagnosticsSink` 新增的类型化事件收到改用记录：每场战斗最多在消息横幅提示一次“本场有 Flash 尚未支持的内容（<游戏内名称>），改用常规搜索”（中英同步；名称由 UI 层按内容 ID 取游戏内本地化名，取不到时用 ID），不打断或阻塞部署；每次搜索的改用另记入问题包的 `FlashFallback` 分类（类别与内容），但不触发上传建议、不导出新问题包。搜索层不读取 `SolverSettings.Current` 或 UI。`FLASH_FALLBACK` 是每次协调器搜索一行，不是每个请求一行。
+
+仍失败：根容量、内核不支持、核对不一致、药水约束复核不一致、未登记搜索用途、根阶段、多人/Mock/废弃内容、待处理选择、未实现请求与其它准入类别。合同 `flash_regression.py fallback` 在一个超过常规 Beam 宽度的 `SOULBOUND_POWER` 根上验证 On 整次改用常规档位后的路线、质量、`ExpandedNodes`/`TransitionCount` 与 Off 相同，日志恰好一行 `FLASH_FALLBACK` 且不写 `FLASH_SEARCH_FAILED`；常规求解器强制套上 Flash profile 的工作量不同（敏感性）；预置采纳种子后回落不重跑；同一根上未登记搜索用途仍以 `admission-unsupported-request` 失败。
+
+验证：Release 构建 0 警告；K0 `contracts=Passed`；结构、文档、工具、覆盖四项门禁通过。`fallback` 合同输出 `status=Passed route=True quality=True work=True fallback_lines=1 off_work=1843/5855 flash_profile_work=6203/17954 sensitivity=True published_blocked=True rejection=admission-unsupported-request`。开启模式 120 根（`coordinator --off-baseline`）全部准入，`route.json`、`quality.json`、`SelectedExpanded`、`SelectedTransitions` 与主线 `cl2-on120` 逐根相同；总展开/转移 119/120 相同，只有 REGENT-013（120 秒时间预算根，每次运行会变）为 253,260/6,598,600 对 253,712/6,796,322。关闭模式 120 根与 `off120-base` 对照：`quality.json` 120/120 相同，`SelectedExpanded`/`SelectedTransitions` 与总展开/转移均为 118/120，差异只在 IRONCLAD-013 与 REGENT-013 两个时间预算根；日志无 Flash 行。未做可见游戏提示排版验收。
 
 ### Flash 终局排序键顺序与质量表口径（CL2）
 
@@ -29,7 +39,7 @@ Flash 终局比较把政策边界原因排在可选药水数之前，与常规 `
 
 ### Flash 开启模式使用自己的档位宽度与节点上限（FW）
 
-开启模式不再沿用常规档位的 Beam 宽度与节点上限。`SolverPerformanceValues` 旁增加每个档位的 Flash profile（只替换 `BeamWidth`/`MaxExpandedNodes`，软时间与分支上限等沿用常规 profile）；`SolverSettingsSnapshot` 带上当前档位，`SolverController.CaptureSearchPolicy` 在快照构造完成后用 `SolverSettings.ApplyFlashPerformance` 替换，协调器按替换后的 profile 计算成员宽度和共享节点预算，FlashBeam 直接使用请求 profile（QW 已是如此）。关闭模式原样返回；自定义档位不替换，沿用玩家填写的值；检查点录制的精确 profile 也按自定义处理。离线宿主在 `OFFLINE_HARNESS_FLASH_MODE=On` 时用同一函数按 `--profile` 替换，`--profile Custom`/`Off` 不变。
+开启模式不再沿用常规档位的 Beam 宽度与节点上限。`SolverPerformanceValues` 旁增加每个档位的 Flash profile（只替换 `BeamWidth`/`MaxExpandedNodes`，软时间与分支上限等沿用常规 profile）；`SolverSettingsSnapshot` 带上当前档位，`SolverController.CaptureSearchPolicy` 在快照构造完成后用 `SolverSettings.ApplyFlashPerformance` 替换，协调器按替换后的 profile 计算成员宽度和共享节点预算，FlashBeam 直接使用请求 profile（QW 已是如此）。换档前的常规 profile 同时保存在 `SearchPolicySnapshot.RegularProfile`，供 FB 的准入回落整次重跑；重复换档保留第一次的常规值。关闭模式原样返回；自定义档位不替换，沿用玩家填写的值；检查点录制的精确 profile 也按自定义处理。离线宿主在 `OFFLINE_HARNESS_FLASH_MODE=On` 时用同一函数按 `--profile` 替换，`--profile Custom`/`Off` 不变。
 
 关闭模式对照：替换只在 `FlashMode == On` 执行，Off 的 profile 选择不变。用关闭模式重跑 IRONCLAD-020、SILENT-007 两个根，`quality.json` 与主线 `off120-base` 逐字段相同；`SearchWorkAttributions` 的 `ExpandedNodes`/`Transitions`/`ChoiceBranches`/`RecordedSolverCount` 合计分别为 16,189/58,720/0/8 与 21,274/73,045/4,571/14，逐项相同。
 
