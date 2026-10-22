@@ -101,6 +101,16 @@ internal static class ModRuntime
         return profile;
     }
 
+    private static SolverPerformancePreset ProfilePreset(string profile) => profile switch
+    {
+        "Low" => SolverPerformancePreset.Low,
+        "Medium" => SolverPerformancePreset.Medium,
+        "High" => SolverPerformancePreset.High,
+        "VeryHigh" => SolverPerformancePreset.VeryHigh,
+        "Custom" => SolverPerformancePreset.Custom,
+        _ => throw new ArgumentException($"未知预设 {profile}。"),
+    };
+
     /// <summary>预设值一律问模组自己要，不在宿主里抄常量。</summary>
     private static SolverSearchProfile Preset(SolverPerformancePreset preset)
         => SolverSettings.ResolvePerformanceValues(
@@ -426,8 +436,12 @@ internal static class ModRuntime
             StopPortfolioAtHpTarget = options.StopPortfolioAtHpTarget ?? policy.Profile.StopPortfolioAtHpTarget,
         } };
         // OFFLINE_HARNESS_FLASH_MODE=Off|Shadow|On 覆盖设置里的 Flash 档位（主搜索分发点，见 BeamSolveDispatch）。
-        if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_MODE") is { Length: > 0 } flashMode)
+        string? flashModeValue = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_MODE");
+        if (flashModeValue is { Length: > 0 } flashMode)
             policy = policy with { FlashMode = Enum.Parse<FlashSearchMode>(flashMode, ignoreCase: true) };
+        // 与游戏内 SolverController.CaptureSearchPolicy 同一替换规则：On 取当前档位的 Flash 宽度与
+        // 节点上限，Off/Shadow 不变，Custom 沿用 --beam/--nodes 或设置里的值。
+        policy = SolverSettings.ApplyFlashPerformance(policy, ProfilePreset(options.Profile));
         // SR2 强制用药矩阵的复跑入口：Forced 把根上的每瓶可搜索药水标为 Force，Req 打开
         // RequireAtLeastOne。生产策略不受影响，只供离线矩阵对照。
         switch (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_POTION_PRESET"))

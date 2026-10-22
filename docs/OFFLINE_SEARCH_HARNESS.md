@@ -66,7 +66,7 @@ dotnet .local/tool-build/OfflineSearchHarness/bin/Release/net9.0/OfflineSearchHa
 
 纯 ETC 外部生命界合同可运行 `dotnet .local/tool-build/OfflineSearchHarness/bin/Release/net9.0/OfflineSearchHarness.dll --check-early-turn-continuation-bound`，直接调用生产门禁及剪枝谓词，不建游戏状态。当前覆盖 143 条断言。普通 ETC 诊断起始行新增 `incumbent_bound=eligible_strict_hp`，已完成续搜行输出 `incumbent_hp`（`-` 表示旁路）及 `incumbent_pruned`；后者包含原有内部生命界剪枝，不能直接视为外部界的净收益。新版本另输出 `incumbent_certified_healing_bound_pruned`，只归因于根认证治疗上界的边际剪枝；根捕获行记录认证状态、首个拒绝原因和固定战后治疗量。两个计数的口径不同，前者是成员内合计，后者只统计认证上界相对完整缺血余量增加剪掉的候选节点。它不是所有阶段的总剪枝量或节省的节点数。固定根对照及实际适用范围见 [测试矩阵](archive/testing/volume-01.md#早期回合探索的外部生命界2026-10-01)。
 
-Flash 开启模式与常规搜索使用同一档位的 Beam 宽度、节点上限与软时间；宽度实验直接使用已有的 `--profile`/`--beam`/`--nodes`/`--budget-ms`，不再读取独立倍数开关。
+`OFFLINE_HARNESS_FLASH_MODE=On` 时与游戏内 `SolverController.CaptureSearchPolicy` 使用同一替换函数：按 `--profile` 档位取 Flash 自己的 Beam 宽度与节点上限，软时间与分支上限沿用该档位；`Off`/`Shadow` 不替换，`--profile Custom` 沿用 `--beam`/`--nodes` 或设置值。宽度实验直接使用已有的 `--profile`/`--beam`/`--nodes`/`--budget-ms`，不再读取独立倍数开关。
 
 `OFFLINE_HARNESS_WARMUP_SEARCHES=N` 让 M2 在计量的那次搜索之前先跑 N 次同根搜索并丢弃结果（不写会话指标），计量的搜索因此处在已预热的进程里，对应长时间游戏会话中的后续请求；每次预热耗时写入 `harness-result.json` 的 `warmupWallSeconds`。
 

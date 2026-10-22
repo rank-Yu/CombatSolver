@@ -116,8 +116,9 @@ python3 -B tools/search/FlashRegression/flash_regression.py trace \
 读取 [质量语料](../../../coverage/corpora/flash-quality/README.md) 的 120 个牌组（五个角色各 24，
 第一、二、三幕各 8）。每根在
 `--search-mode Coordinator --use-portfolio --profile Medium --budget-ms 120000` 下分别跑
-`Off` 与 `On`（`OFFLINE_HARNESS_WARMUP_SEARCHES=1`），单次超时 1800 秒。Flash 与常规搜索使用同一
-档位的 Beam 宽度、节点上限与软时间。
+`Off` 与 `On`（`OFFLINE_HARNESS_WARMUP_SEARCHES=1`），单次超时 1800 秒。`On` 按 `--profile`
+取 Flash 自己的 Beam 宽度与节点上限（Medium 为 240 / 480,000），软时间与分支上限沿用该档位；
+`Off` 使用常规档位，`--profile Custom` 不替换。
 
 比较键与求解器的 `RouteQualityPolicy` 的 `PotionPolicy` 投影一致，依次为：
 

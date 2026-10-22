@@ -555,6 +555,12 @@ internal static partial class SolverController
                 $"实际为 {maxDegreeOfParallelism}。");
         }
         SolverSearchProfile profile = UnattendedTestRunner.CheckpointProfileOverride ?? settings.Profile;
+        // 记录下来的检查点 profile 是精确输入，按自定义档位对待；其余情况按当前性能档位取
+        // Flash 自己的 Beam 宽度与节点上限，关闭与对照模式不变。
+        SolverPerformancePreset performancePreset =
+            UnattendedTestRunner.CheckpointProfileOverride is null
+                ? settings.PerformancePreset
+                : SolverPerformancePreset.Custom;
         SearchPolicySnapshot policy = new(
             UnattendedTestRunner.BeamWeightPerturbationOverride is { } beamWeightPerturbation
                 ? profile with { BeamWeightPerturbation = beamWeightPerturbation }
@@ -616,6 +622,7 @@ internal static partial class SolverController
             GrowthOpportunityTargets = GrowthOpportunityPolicy.Capture(state),
             IgnoreLongTermRewards = settings.IgnoreLongTermRewards,
         };
+        policy = SolverSettings.ApplyFlashPerformance(policy, performancePreset);
         CombatBugReportExporter.RecordSearchPolicy(state, policy);
         return policy;
     }

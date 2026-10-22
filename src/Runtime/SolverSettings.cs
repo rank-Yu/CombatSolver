@@ -53,7 +53,8 @@ internal readonly record struct PersistedPotionDirective(
     SolverPotionDirective Directive);
 
 internal sealed record SolverPerformanceValues(
-    SolverSearchProfile Profile);
+    SolverSearchProfile Profile,
+    SolverSearchProfile FlashProfile);
 
 internal sealed record SolverSettingsData
 {
@@ -150,6 +151,7 @@ internal sealed record SolverSettingsSnapshot(
     int AcceptableBattleHpLoss,
     int SearchMaxDegreeOfParallelism,
     SolverSearchProfile Profile,
+    SolverPerformancePreset PerformancePreset,
     bool EnableNoGcRegion,
     long NoGcRegionBudgetBytes,
     SolverDeploymentFastMode DeploymentFastMode,
@@ -179,32 +181,51 @@ internal static class SolverSettings
     private const int UnifiedPerformanceMigrationVersion = 243;
     private const int BeamWidthPortfolioDefaultMigrationVersion = 244;
     internal const int CurrentPerformanceMigrationVersion = 246;
-    private static readonly SolverPerformanceValues LowPerformance = new(
+    private static readonly SolverPerformanceValues LowPerformance = FlashVariant(
         new SolverSearchProfile(
             BeamWidth: 45,
             MaxExpandedNodes: 60_000,
             MaxCardBranchesPerNode: 24,
             MaxPileChoiceBranchesPerAction: 12,
             MaxHandChoiceBranchesPerAction: 16,
-            SoftTimeBudgetMilliseconds: 60_000));
-    private static readonly SolverPerformanceValues MediumPerformance = new(
-        SolverSearchProfile.Default);
-    private static readonly SolverPerformanceValues HighPerformance = new(
+            SoftTimeBudgetMilliseconds: 60_000),
+        beamWidth: 180,
+        maxExpandedNodes: 240_000);
+    private static readonly SolverPerformanceValues MediumPerformance = FlashVariant(
+        SolverSearchProfile.Default,
+        beamWidth: 240,
+        maxExpandedNodes: 480_000);
+    private static readonly SolverPerformanceValues HighPerformance = FlashVariant(
         new SolverSearchProfile(
             BeamWidth: 90,
             MaxExpandedNodes: 250_000,
             MaxCardBranchesPerNode: 48,
             MaxPileChoiceBranchesPerAction: 28,
             MaxHandChoiceBranchesPerAction: 36,
-            SoftTimeBudgetMilliseconds: 180_000));
-    private static readonly SolverPerformanceValues VeryHighPerformance = new(
+            SoftTimeBudgetMilliseconds: 180_000),
+        beamWidth: 360,
+        maxExpandedNodes: 1_000_000);
+    private static readonly SolverPerformanceValues VeryHighPerformance = FlashVariant(
         new SolverSearchProfile(
             BeamWidth: 135,
             MaxExpandedNodes: 500_000,
             MaxCardBranchesPerNode: 72,
             MaxPileChoiceBranchesPerAction: 42,
             MaxHandChoiceBranchesPerAction: 54,
-            SoftTimeBudgetMilliseconds: 300_000));
+            SoftTimeBudgetMilliseconds: 300_000),
+        beamWidth: 540,
+        maxExpandedNodes: 2_000_000);
+
+    /// <summary>
+    /// 性能档位的 Flash 变体：只替换 Beam 宽度与全局节点上限，软时间、分支上限等其余字段
+    /// 沿用常规档位。自定义档位传入同一份 profile，即保留玩家填写的值。
+    /// </summary>
+    private static SolverPerformanceValues FlashVariant(
+        SolverSearchProfile profile,
+        int beamWidth,
+        int maxExpandedNodes)
+        => new(profile, profile with { BeamWidth = beamWidth, MaxExpandedNodes = maxExpandedNodes });
+
     private const string SettingsUri = "user://combat_solver_settings.json";
     private static readonly object Sync = new();
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -298,6 +319,7 @@ internal static class SolverSettings
     public static SolverSettingsSnapshot Capture()
     {
         SolverSettingsData data = Current;
+        SolverPerformancePreset performancePreset = ResolvePerformancePreset(data);
         SolverPerformanceValues performance = ResolvePerformanceValues(data);
         SolverSearchProfile profile = performance.Profile;
         double noGcGigabytes = data.NoGcRegionBudgetGigabytes
@@ -318,6 +340,7 @@ internal static class SolverSettings
             data.SearchMaxDegreeOfParallelism
                 ?? SolverWeights.DefaultSearchMaxDegreeOfParallelism,
             profile,
+            performancePreset,
             RuntimeGcProfile.Current.ResolveEnableNoGcRegion(data.EnableNoGcRegion),
             noGcBytes,
             data.DeploymentFastMode,
@@ -345,13 +368,13 @@ internal static class SolverSettings
             return SolverPerformancePreset.Medium;
 
         SolverPerformanceValues legacy = BuildCustomPerformance(data);
-        if (legacy == LowPerformance)
+        if (legacy.Profile == LowPerformance.Profile)
             return SolverPerformancePreset.Low;
-        if (legacy == MediumPerformance)
+        if (legacy.Profile == MediumPerformance.Profile)
             return SolverPerformancePreset.Medium;
-        if (legacy == HighPerformance)
+        if (legacy.Profile == HighPerformance.Profile)
             return SolverPerformancePreset.High;
-        if (legacy == VeryHighPerformance)
+        if (legacy.Profile == VeryHighPerformance.Profile)
             return SolverPerformancePreset.VeryHigh;
         return SolverPerformancePreset.Custom;
     }
@@ -366,6 +389,43 @@ internal static class SolverSettings
             SolverPerformancePreset.Custom => BuildCustomPerformance(data),
             _ => throw new ArgumentOutOfRangeException(nameof(data.PerformancePreset)),
         };
+
+    /// <summary>
+    /// 指定档位的 Flash 宽度与节点上限。自定义档位没有 Flash 专属值，保留玩家填写的宽度与节点
+    /// 上限；调用方传入该档位自己的 profile 即可。
+    /// </summary>
+    internal static SolverSearchProfile FlashPerformance(
+        SolverPerformancePreset preset,
+        SolverSearchProfile profile)
+        => preset switch
+        {
+            SolverPerformancePreset.Low => WithFlashBudgets(profile, LowPerformance),
+            SolverPerformancePreset.Medium => WithFlashBudgets(profile, MediumPerformance),
+            SolverPerformancePreset.High => WithFlashBudgets(profile, HighPerformance),
+            SolverPerformancePreset.VeryHigh => WithFlashBudgets(profile, VeryHighPerformance),
+            SolverPerformancePreset.Custom => profile,
+            _ => throw new ArgumentOutOfRangeException(nameof(preset)),
+        };
+
+    private static SolverSearchProfile WithFlashBudgets(
+        SolverSearchProfile profile,
+        SolverPerformanceValues values)
+        => profile with
+        {
+            BeamWidth = values.FlashProfile.BeamWidth,
+            MaxExpandedNodes = values.FlashProfile.MaxExpandedNodes,
+        };
+
+    /// <summary>
+    /// 开启 Flash 时把请求 profile 的 Beam 宽度与全局节点上限换成该档位的 Flash 值；关闭与对照
+    /// 模式原样返回。其余 profile 字段（软时间、分支上限、排序开关等）保持不变。
+    /// </summary>
+    internal static SearchPolicySnapshot ApplyFlashPerformance(
+        SearchPolicySnapshot policy,
+        SolverPerformancePreset preset)
+        => policy.FlashMode == FlashSearchMode.On
+            ? policy with { Profile = FlashPerformance(preset, policy.Profile) }
+            : policy;
 
     public static SolverSettingsData ApplyPerformancePreset(
         SolverSettingsData data,
@@ -740,7 +800,7 @@ internal static class SolverSettings
                 ? checked((int)Math.Round(deepSeconds * 1000d, MidpointRounding.AwayFromZero))
                 : MediumPerformance.Profile.SoftTimeBudgetMilliseconds,
         };
-        return new SolverPerformanceValues(profile);
+        return new SolverPerformanceValues(profile, profile);
     }
 
     private static bool HasExplicitPerformanceValues(SolverSettingsData data)
