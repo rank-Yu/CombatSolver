@@ -132,8 +132,9 @@ python3 -B tools/search/FlashRegression/flash_regression.py trace \
 
 即药水路线不能靠 `strategicHpDeficit` 单独看起来更好，必须把 `potionStrategicCost` 计入。
 `TABLE.txt` 逐根列出 `cost`、`strategicHpDeficit`、`potionStrategicCost`、回合、墙钟和
-`better/same/worse`，末行给出 `cost_delta`（On−Off 的合计）、`potion_cost_diff`（药水成本
-不同的根数）、胜负合计与墙钟合计；`STRATEGIC.txt` 逐根列出同一键下的
+`better/same/worse`，末行给出 `both_won`（两种模式都获胜的根数）、`cost_delta`（这些根上 On−Off 的合计）、
+`on_only_wins`/`off_only_wins`（只有一方获胜的根数）、`potion_cost_diff`（药水成本不同的根数）、
+胜负合计与墙钟合计；输掉的战斗的代价与获胜的不可比，所以不计入 `cost_delta`；`STRATEGIC.txt` 逐根列出同一键下的
 `strategic`/`potion`/`deathSaves`/`turn`/`lost` 变化；`TABLE-GROUPS.txt` 是 `table` 的
 按角色/按幕/按遭遇类型表。单模式运行（`--off-baseline` 默认只跑 `On`，或 `--modes Off`）
 只写 `TABLE.txt` 的单模式逐根汇总，不生成 `STRATEGIC.txt`/`TABLE-GROUPS.txt`。
@@ -161,8 +162,8 @@ python3 -B tools/search/FlashRegression/flash_regression.py compat --label compa
 只读一个已有协调器输出目录（`<id>/{Off,On}/quality.json`、`harness-result.json` 与 On 日志），
 按求解器的 `PotionPolicy` 键输出：
 
-- 合计：根数、好/同/差、`cost_delta`（On−Off 的战略失血+药水成本合计）、
-  `potion_cost_diff`（药水成本不同的根数）、Off/On 胜场、两种模式墙钟合计、缺失根数、
+- 合计：根数、好/同/差、`both_won`、`cost_delta`（两种模式都获胜的根上 On−Off 的战略失血+药水成本合计）、
+  `on_only_wins`/`off_only_wins`、`potion_cost_diff`（药水成本不同的根数）、Off/On 胜场、两种模式墙钟合计、缺失根数、
   `FLASH_SEARCH_FAILED` 根数；
 - 按 `spec.json` 的 `characterId`、`actIndex`、`encounterKind` 分组的同一组列；
 - 变差根列表（Off/On 键、成本、药水成本变化）。
@@ -176,8 +177,8 @@ python3 -B tools/search/FlashRegression/flash_regression.py table \
 不运行宿主，也不改结果目录。`coordinator` 结束时调用同一个 `quality_table` 函数并把结果写入
 `TABLE-GROUPS.txt`。
 
-已用三个历史目录核对：120 根 `29/74/17`、`cost_delta=-17`；79 根 `19/50/10`、`-60`；
-100 根 `30/60/10`、`+226`（顺序为 好/同/差）。这些数字只用于口径核对，不是新的质量门禁。
+口径核对：CL2 合入后的 120 根为 `31/72/17`、`both_won=87`、`cost_delta=-28`、`on_only_wins=4`、
+`off_only_wins=0`（顺序为 好/同/差）。这些数字只用于口径核对，不是新的质量门禁。
 
 ### `survey`
 
