@@ -457,21 +457,33 @@ def load_quality(directory: Path) -> tuple[float, dict, str]:
     return result['wallSeconds'], quality, flash
 
 
-def solver_key(quality: dict) -> tuple:
-    """The coordinator's comparison key, in the order RouteQualityPolicy.PotionPolicy reads it.
+def quality_key(quality: dict) -> tuple:
+    """The good/same/worse comparison key: RouteQualityPolicy.PotionPolicy without the end turn.
 
-    Win -> survive -> fewer death-save uses -> smaller (strategic deficit + potion strategic cost)
-    -> earlier combat end. The old (won, strategicHpDeficit, turn) key omitted the potion cost and
-    the survival/death-save terms; a potion route could therefore look better while costing more.
+    Win -> survive -> fewer death-save uses -> smaller (strategic deficit + potion strategic cost).
+    A route that only ends earlier or later at the same HP and potion cost is not better or worse
+    for the player, so the combat-end turn is reported separately (``turn_only``) and never decides
+    the mark. The old (won, strategicHpDeficit, turn) key omitted the potion cost and the
+    survival/death-save terms; a potion route could therefore look better while costing more.
     """
-    turn = quality.get('combatEndedTurn')
     return (
         0 if quality.get('won') else 1,
         0 if quality.get('survives', True) else 1,
         int(quality.get('deathSaveUseCount') or 0),
         solver_cost(quality),
-        turn if turn is not None else 99,
     )
+
+
+def solver_key(quality: dict) -> tuple:
+    """The full solver key (quality key, then earlier combat end) for run-to-run identity checks."""
+    turn = quality.get('combatEndedTurn')
+    return quality_key(quality) + (turn if turn is not None else 99,)
+
+
+def _turn_only(off_quality: dict, on_quality: dict) -> bool:
+    """Same quality key, different combat-end turn: informational, counted as same."""
+    return (quality_key(off_quality) == quality_key(on_quality)
+            and off_quality.get('combatEndedTurn') != on_quality.get('combatEndedTurn'))
 
 
 def solver_cost(quality: dict) -> int:
@@ -507,12 +519,12 @@ def spec_metadata(corpus: Path | None, root_name: str) -> tuple[str, str, str]:
 
 
 class _GroupRow:
-    __slots__ = ('roots', 'good', 'same', 'worse', 'both_won', 'cost_delta', 'on_only', 'off_only',
-                 'off_wins', 'on_wins', 'off_wall', 'on_wall', 'missing', 'failed')
+    __slots__ = ('roots', 'good', 'same', 'worse', 'turn_only', 'both_won', 'cost_delta', 'on_only',
+                 'off_only', 'off_wins', 'on_wins', 'off_wall', 'on_wall', 'missing', 'failed')
 
     def __init__(self) -> None:
         self.roots = 0
-        self.good = self.same = self.worse = 0
+        self.good = self.same = self.worse = self.turn_only = 0
         self.both_won = self.cost_delta = 0
         self.on_only = self.off_only = 0
         self.off_wins = self.on_wins = 0
@@ -522,13 +534,13 @@ class _GroupRow:
 
 def _group_table(title: str, groups: dict[str, _GroupRow]) -> list[str]:
     lines = [f'{title}']
-    lines.append(f'  {"key":20} {"roots":>5} {"good":>4} {"same":>4} {"worse":>5} '
+    lines.append(f'  {"key":20} {"roots":>5} {"good":>4} {"same":>4} {"worse":>5} {"turn_only":>9} '
                  f'{"both_won":>8} {"cost_delta":>10} {"on_only":>7} {"off_only":>8} {"off_won":>7} {"on_won":>6} '
                  f'{"off_wall":>9} {"on_wall":>9} {"missing":>7} {"failed":>6}')
     for key in sorted(groups):
         row = groups[key]
         lines.append(f'  {key:20} {row.roots:5d} {row.good:4d} {row.same:4d} {row.worse:5d} '
-                     f'{row.both_won:8d} {row.cost_delta:+10d} {row.on_only:7d} {row.off_only:8d} '
+                     f'{row.turn_only:9d} {row.both_won:8d} {row.cost_delta:+10d} {row.on_only:7d} {row.off_only:8d} '
                      f'{row.off_wins:7d} {row.on_wins:6d} '
                      f'{row.off_wall:9.2f} {row.on_wall:9.2f} {row.missing:7d} {row.failed:6d}')
     return lines
@@ -579,9 +591,10 @@ def quality_table(run_dir: Path, corpus: Path | None = None) -> str:
         failed = flash_failed(root)
         if failed:
             failed_roots.append(root.name)
-        off_key = solver_key(off_q)
-        on_key = solver_key(on_q)
+        off_key = quality_key(off_q)
+        on_key = quality_key(on_q)
         mark = '+' if on_key < off_key else ('-' if on_key > off_key else '=')
+        turn_only = _turn_only(off_q, on_q)
         off_cost = solver_cost(off_q)
         on_cost = solver_cost(on_q)
         delta = on_cost - off_cost
@@ -598,6 +611,7 @@ def quality_table(run_dir: Path, corpus: Path | None = None) -> str:
                 row.worse += 1
             else:
                 row.same += 1
+            row.turn_only += turn_only
             if off_won and on_won:
                 row.both_won += 1
                 row.cost_delta += delta
@@ -619,8 +633,8 @@ def quality_table(run_dir: Path, corpus: Path | None = None) -> str:
     lines = [
         f'run_dir={run_dir} corpus={corpus if corpus is not None else "unknown"}',
         f'total roots={total.roots} compared={compared} good={total.good} same={total.same} '
-        f'worse={total.worse} both_won={total.both_won} cost_delta={total.cost_delta:+d} '
-        f'on_only_wins={total.on_only} off_only_wins={total.off_only} potion_cost_diff={potion_cost_diff} '
+        f'worse={total.worse} turn_only={total.turn_only} both_won={total.both_won} '
+        f'cost_delta={total.cost_delta:+d} on_only_wins={total.on_only} off_only_wins={total.off_only} potion_cost_diff={potion_cost_diff} '
         f'off_won={total.off_wins} on_won={total.on_wins} '
         f'off_wall={total.off_wall:.2f}s on_wall={total.on_wall:.2f}s '
         f'missing={total.missing} failed={total.failed}',
@@ -645,7 +659,7 @@ def coordinator_table(out: Path) -> str:
     rows: list[str] = []
     total = {'Off': 0.0, 'On': 0.0}
     better = same = worse = adopted = lost = 0
-    both_won = on_only = off_only = 0
+    both_won = on_only = off_only = turn_only = 0
     potion_cost_diff = 0
 
     for root in sorted(path for path in out.iterdir() if path.is_dir()):
@@ -655,12 +669,13 @@ def coordinator_table(out: Path) -> str:
         except (OSError, ValueError, KeyError) as error:
             rows.append(f'{root.name:40} ERROR {error}')
             continue
-        off_key = solver_key(off_quality)
-        on_key = solver_key(on_quality)
+        off_key = quality_key(off_quality)
+        on_key = quality_key(on_quality)
         mark = '=' if off_key == on_key else ('+' if on_key < off_key else '-')
         better += mark == '+'
         same += mark == '='
         worse += mark == '-'
+        turn_only += _turn_only(off_quality, on_quality)
         adopted += flash.startswith('FLASH_ADOPTED')
         total['Off'] += off_wall
         total['On'] += on_wall
@@ -683,7 +698,8 @@ def coordinator_table(out: Path) -> str:
                     f"on cost={on_cost:>3} strategic={on_quality['strategicHpDeficit']:>3} "
                     f"potion={int(on_quality.get('potionStrategicCost') or 0):>3} "
                     f"turn={on_quality['combatEndedTurn']!s:>3} wall={on_wall:6.2f}s {flash}")
-    rows.append(f"on better={better} same={same} worse={worse} both_won={both_won} cost_delta={lost:+d} "
+    rows.append(f"on better={better} same={same} worse={worse} turn_only={turn_only} "
+                f"both_won={both_won} cost_delta={lost:+d} "
                 f"on_only_wins={on_only} off_only_wins={off_only} "
                 f"potion_cost_diff={potion_cost_diff} adopted={adopted} "
                 f"off_wall={total['Off']:.1f}s on_wall={total['On']:.1f}s")
@@ -693,14 +709,14 @@ def coordinator_table(out: Path) -> str:
 
 def strategic_table(out: Path) -> str:
     lines: list[str] = []
-    for root in sorted(path for path in out.glob('*-[0-9][0-9]') if path.is_dir()):
+    for root in sorted(path for path in out.iterdir() if path.is_dir()):
         try:
             off = json.loads((root / 'Off/quality.json').read_text(encoding='utf-8-sig'))['quality']
             on = json.loads((root / 'On/quality.json').read_text(encoding='utf-8-sig'))['quality']
         except (OSError, ValueError, KeyError):
             continue
-        off_key = solver_key(off)
-        on_key = solver_key(on)
+        off_key = quality_key(off)
+        on_key = quality_key(on)
         mark = '=' if off_key == on_key else ('+' if on_key < off_key else '-')
         lines.append(f"{root.name} {mark} cost {solver_cost(off)}->{solver_cost(on)} "
                      f"strategic {off['strategicHpDeficit']}->{on['strategicHpDeficit']} "

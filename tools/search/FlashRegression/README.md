@@ -128,13 +128,16 @@ python3 -B tools/search/FlashRegression/flash_regression.py trace \
 取 Flash 自己的 Beam 宽度与节点上限（Medium 为 240 / 480,000），软时间与分支上限沿用该档位；
 `Off` 使用常规档位，`--profile Custom` 不替换。
 
-比较键与求解器的 `RouteQualityPolicy` 的 `PotionPolicy` 投影一致，依次为：
+好/同/差的比较键取求解器 `RouteQualityPolicy` 的 `PotionPolicy` 投影的前四项，依次为：
 
 1. 胜负（胜者优）；
 2. 存活（存活者优）；
 3. 死亡豁免次数（少者优）；
-4. `strategicHpDeficit + potionStrategicCost`（小者优）；
-5. 结束回合（早者优）。
+4. `strategicHpDeficit + potionStrategicCost`（小者优）。
+
+求解器自己还用结束回合（早者优）做最后一级比较，但失血与用药代价相同时，早一回合或晚一回合结束对玩家
+没有差别，所以结束回合不决定好/差：这类根计为“同”，另在 `turn_only` 中计数。`qcompare` 判断两次运行
+是否逐项一致时仍用含结束回合的完整键。
 
 即药水路线不能靠 `strategicHpDeficit` 单独看起来更好，必须把 `potionStrategicCost` 计入。
 `TABLE.txt` 逐根列出 `cost`、`strategicHpDeficit`、`potionStrategicCost`、回合、墙钟和
@@ -275,7 +278,7 @@ python3 -B tools/search/FlashRegression/flash_regression.py fallback --label fal
 只读一个已有协调器输出目录（`<id>/{Off,On}/quality.json`、`harness-result.json` 与 On 日志），
 按求解器的 `PotionPolicy` 键输出：
 
-- 合计：根数、好/同/差、`both_won`、`cost_delta`（两种模式都获胜的根上 On−Off 的战略失血+药水成本合计）、
+- 合计：根数、好/同/差、`turn_only`（只差结束回合的根数，已计入“同”）、`both_won`、`cost_delta`（两种模式都获胜的根上 On−Off 的战略失血+药水成本合计）、
   `on_only_wins`/`off_only_wins`、`potion_cost_diff`（药水成本不同的根数）、Off/On 胜场、两种模式墙钟合计、缺失根数、
   `FLASH_SEARCH_FAILED` 根数；
 - 按 `spec.json` 的 `characterId`、`actIndex`、`encounterKind` 分组的同一组列；
@@ -290,7 +293,7 @@ python3 -B tools/search/FlashRegression/flash_regression.py table \
 不运行宿主，也不改结果目录。`coordinator` 结束时调用同一个 `quality_table` 函数并把结果写入
 `TABLE-GROUPS.txt`。
 
-口径核对：CL2 合入后的 120 根为 `31/72/17`、`both_won=87`、`cost_delta=-28`、`on_only_wins=4`、
+口径核对：CL2 合入后的 120 根为 `29/81/10`、`turn_only=9`、`both_won=87`、`cost_delta=-28`、`on_only_wins=4`、
 `off_only_wins=0`（顺序为 好/同/差）。这些数字只用于口径核对，不是新的质量门禁。
 
 ### `survey`
