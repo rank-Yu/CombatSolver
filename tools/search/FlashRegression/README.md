@@ -28,6 +28,11 @@ python3 -B tools/search/FlashRegression/flash_regression.py build
 # 设置持久化兼容（旧 Shadow/数值形式读成 Off，On 序列化不变）
 python3 -B tools/search/FlashRegression/flash_regression.py compat --label compat
 
+# 固定 40 根质量语料的开启模式无头整场（Linux；默认 2 条通道）
+python3 -B tools/search/FlashRegression/flash_regression.py headless \
+  --label hl --lanes 2 \
+  --sts2-game-root '<游戏目录>' --ritsu-workshop-root '<RitsuLib 工坊目录>'
+
 # 全量差分回归（410 根；输出 .local/flash-regression/diff）
 python3 -B tools/search/FlashRegression/flash_regression.py diff --label diff --jobs 8
 
@@ -146,6 +151,83 @@ python3 -B tools/search/FlashRegression/flash_regression.py trace \
 有失败根（`FLASH_SEARCH_FAILED`）或缺失 `quality.json` 的根时命令以非 0 退出（缺失与失败
 计数也写在 `TABLE-GROUPS.txt` 的合计行）。
 
+### `headless`
+
+Linux 无头整场入口：从质量语料固定挑 40 根，逐场调用
+`tools/testing/run-unattended-test.sh` 做开启模式（或关闭模式对照）的全自动部署，直到战斗结束。
+当前只接入 Bash 启动器，未接入 Windows PowerShell `.ps1`；在非 Linux 平台运行会直接拒绝。
+
+默认 40 根写死在工具里：五个角色（`IRONCLAD`、`SILENT`、`DEFECT`、`REGENT`、`NECROBINDER`）
+各取序号 `000 001 002`（第一幕普通/精英/首领）、`009 010 011`（第二幕普通/精英/首领）与
+`019 020`（第三幕精英/首领）。`--ids` 覆盖清单（空格或逗号分隔的语料目录名）；`--quality-dir`
+可改用别的语料目录。默认输出 `.local/flash-regression/headless/`，`--label`/`--out` 可改。
+
+每场从 `coverage/corpora/flash-quality/<id>/spec.json` 派生 `<out>/<id>/scenario.json`，把生成模式
+改为 `Deploy`，再传 `--generated-scenario-path`、`--flash-search-mode-for-test On|Off`（`--mode`，默认
+`On`）、`--cards-json []` 与 `--search-budget-override-milliseconds`（`--search-budget-ms`，默认
+`120000`，与质量语料协调器同预算）。生成场景在固化请求里保留原生战斗状态，所以敌人生命是自然值，
+手牌不会注入额外的打击；工具不传 `--enemy-current-hp`、`--initial-enemy-*` 或
+`--initial-player-hp`。回合准备
+根会在模式覆盖生效前捕获，因此在启动游戏前把 `flashSearchMode` 写入实例的
+`data/SlayTheSpire2/combat_solver_settings.json`；每条通道模式固定，后续复用同一进程时设置保持一致。
+
+并行与实例：
+
+- `--lanes N`（默认 2）把清单轮转分配到 N 条通道，每通道顺序跑自己的一段。
+- 所有通道共用同一个 `COMBATSOLVER_HEADLESS_HOST_ROOT`（默认 `.local/headless-host`，
+  `--headless-host-root` 或同名环境变量可覆盖）。
+- 每条通道一个实例，目录固定为 `.local/headless-instances/<label>-<通道号>`；通道内复用实例，每场
+  结束先把证据拷出实例并清掉 `combat-solver-routes`、问题包与上一场结果，再跑下一场。
+- 每条通道最后一场带 `--cleanup-instance-on-exit`。工具在该场结束后检查实例目录已删除；目录仍在时
+  先停止实例再删除，并把该通道标成清理失败、命令退出码非 0。
+- 证据放在 `<out>/<id>/evidence/`：`generated-scenario.resolved/loadout/opening/request.json`、
+  `result.json`、`runtime-events.json`、`search-result.json`、`policy.json`、`timings.json`、
+  `report.zip` 与解包后的 `report/`、`instance-logs/`。最后一场会在启动器删除实例前用轮询把
+  报告包和实例日志拷出。启动器输出在 `<out>/<id>/run.log`。
+
+汇总写 `<out>/SUMMARY.txt` 并打印，同时写机器可读的 `<out>/results.json`。每行是：
+
+```text
+id  mode  status  outcome  turn  hp  maxHp  adopted  verified  searchFailed
+verifyMismatch  previewMismatch  replans  scenario  exit  cleanup  evidence
+```
+
+`outcome` 取 `win`、`death`、`failed` 或 `no-result`；`turn`/`hp`/`maxHp` 取
+`NativeOutcome:combatEnded=...` 完成检查。玩家战死时执行器可能先以“仍存在未死亡敌人”结束、不写
+`NativeOutcome`；工具使用该原生结束状态（`combatEnded=True`）、`result.json` 的 `FinishedTurn` 与
+实际 `generated-scenario.loadout.json` 的最大生命记为 `death`、HP 0，不读取 `solverMetrics.finalHp`。
+`adopted` 是 `FLASH_ADOPTED` 行数，`verified` 是其中 `status=verified` 的行数；
+`searchFailed`、`verifyMismatch`、`previewMismatch` 与 `replans` 分别统计
+`FLASH_SEARCH_FAILED`、`FLASH_VERIFY_MISMATCH`、`FLASH_PREVIEW_MISMATCH` 与 `UnexpectedReplans:N`。
+`scenario` 检查请求 `cards=[]`、原生状态保留、未设置生命覆盖、玩家满血开局、敌人生命不是注入的 1，
+并可选和 `--scenario-baseline` 的旧证据逐字段比较（忽略生成模式 `mode`）。
+
+验收条件：每场 `outcome` 为 `win` 或 `death`，`searchFailed=0`、`verifyMismatch=0`、`replans=0`、
+`scenario=ok`，且每条通道 `cleanup=ok`。以下情况命令退出码非 0：`FLASH_SEARCH_FAILED`、核对不一致、
+计划外重算、没有结果（缺少原生结束状态）、场景不一致、通道清理失败或通道异常。预览不一致只汇总，
+单独出现时不改变退出码。玩家战死本身不是失败；它的启动器退出码可能是 1（`result.json` 为
+`Failed`），工具在 `exit` 列记录而不据此改判。
+
+路径全部透传，不写死个人目录：`--sts2-game-root`、`--ritsu-workshop-root`、
+`--combat-solver-build-dir`。`--xdg-data-home` 设置启动器的 `XDG_DATA_HOME`，用作复制玩家档的
+种子目录；vps4 的默认值是仓库内 `.local/headless-seed/data`（存在时），其中必须有
+`SlayTheSpire2/default/1/settings.save`。工具默认先做一次 Release 构建（`-p:CopyModOnBuild=false -p:NuGetAudit=false`），
+`--skip-build` 复用已有 DLL；使用冻结目录时与 `--combat-solver-build-dir` 一起传 `--skip-build`。
+
+两根场景一致性核对示例（基线是离线宿主对同一 `spec.json` 的解析证据）：
+
+```bash
+python3 -B tools/search/FlashRegression/flash_regression.py headless \
+  --label hl-check --ids IRONCLAD-000 SILENT-000 --lanes 2 --timeout-seconds 300 \
+  --search-budget-ms 120000 \
+  --sts2-game-root '<游戏目录>' --ritsu-workshop-root '<RitsuLib 工坊目录>' \
+  --scenario-baseline '<旧证据根>'
+```
+
+`--scenario-baseline` 接受 `<根>/<id>/On/evidence`、`<根>/<id>/evidence` 或 `<根>/<id>` 布局；每根逐字段
+比较 `generated-scenario.resolved.json`（忽略 `mode`）与 `generated-scenario.loadout.json`，缺基线或
+字段不同都写入 `scenario=mismatch:...` 并使命令失败。
+
 ### `compat`
 
 设置持久化兼容合同：用离线宿主加载旧设置 JSON、检查点/问题包策略 JSON 与设置序列化器，断言
@@ -202,6 +284,7 @@ python3 -B tools/search/FlashRegression/flash_regression.py table \
 | `diff` | `SUMMARY.txt`、每根 `stdout.txt` / `flash-diff.txt`、可选 `BASELINE.txt` | 每根 `exit=0`，首行 `SUMMARY failed=0 walkFailed=0`，`actionSetFailed=0`，`unsupported=0`；有 `--baseline` 时 `bad=0` |
 | `scan` | `SUMMARY.txt`、每根 `harness-result.json` | 每根 `exit=0`、`admitted=true`、`mismatches=0` |
 | `coordinator` | `TABLE.txt`、`STRATEGIC.txt`、`TABLE-GROUPS.txt`、每根 `Off`/`On` | 每根 `FLASH_ADOPTED`，没有 `FLASH_SEARCH_FAILED`，没有缺失根；数字按 `PotionPolicy` 键计入；不满足时退出码非 0 |
+| `headless` | `SUMMARY.txt`、`results.json`、每根 `evidence/` | 每根 `outcome=win/death`、`searchFailed=0`、`verifyMismatch=0`、`replans=0`、`scenario=ok`；每条通道清理完成 |
 | `compat` | `compat.txt` | `FLASH_MODE_COMPAT status=Passed` |
 | `table` | 标准输出的合计/分组/变差列表 | 只读；缺 `spec.json` 时归入 `unknown`，不伪造分组 |
 | `trace` | `flash-trace.txt`、`stdout.txt` | 目标路线可映射；同指纹去重会 `re-anchored` 后继续，真正丢失点写 `cut`/`first-missing`（`seat replaced` 保持原语义） |
@@ -223,3 +306,7 @@ python3 -B tools/search/FlashRegression/flash_regression.py table \
 - 质量语料默认 48 条游走，固定根默认 32 条；`--quality-walks` / `--walks` 可覆盖。
 - 工具参数跨平台，但游戏依赖与 Steam 目录仍由本机 `local.props`/环境决定；没有在 Windows
   上运行的记录时，不把 Linux 结果写成 Windows 结论。
+- `headless` 只支持 Linux 的 Bash 启动器，未接入 Windows 的 `.ps1` 入口。它统计的
+  `previewMismatch` 只报告进度预览候选的回放差异，不作为失败条件；最终路线仍以
+  `verifyMismatch` 与 `FLASH_SEARCH_FAILED` 为准。玩家战死的 `result.json` 可能是 `Failed`
+  且启动器退出码为 1，判定以工具汇总的 `outcome` 与证据为准。

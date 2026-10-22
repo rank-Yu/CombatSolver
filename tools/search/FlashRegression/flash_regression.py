@@ -16,7 +16,9 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,12 +28,25 @@ DEFAULT_OUT = ROOT / ".local/flash-regression"
 FIXTURES = ROOT / "coverage/fixtures/cards"
 QUALITY = ROOT / "coverage/corpora/flash-quality"
 KERNEL_CHECKS = ROOT / "tools/testing/checks/FlashKernelChecks"
+HEADLESS_SCRIPT = ROOT / "tools/testing/run-unattended-test.sh"
 DOTNET = shutil.which("dotnet") or "dotnet"
 
 SURVEY_KINDS = ('Monster', 'Elite', 'Boss')
 FLASH_LOG_LINE = re.compile(
     r"\[CombatSolver/Flash\] (\S+) purpose=PrimaryBeam (?:incumbent=\S+ )?flash=\[status=(\S+) ms=(\d+)"
 )
+
+HEADLESS_CHARACTERS = ('IRONCLAD', 'SILENT', 'DEFECT', 'REGENT', 'NECROBINDER')
+HEADLESS_INDEXES = (0, 1, 2, 9, 10, 11, 19, 20)
+DEFAULT_HEADLESS_IDS = tuple(f'{character}-{index:03d}'
+                            for character in HEADLESS_CHARACTERS for index in HEADLESS_INDEXES)
+HEADLESS_ARTIFACTS = ('result.json', 'runtime-events.json', 'search-result.json', 'difference.json',
+                      'policy.json', 'timings.json')
+NATIVE_OUTCOME_RE = re.compile(
+    r'NativeOutcome:combatEnded=(True|False):turn=(\d+):hp=(-?\d+):maxHp=(\d+)')
+UNEXPECTED_REPLANS_RE = re.compile(r'UnexpectedReplans:(\d+)')
+BUG_REPORT_CHECK_RE = re.compile(r'BugReport[^:]*:([^:]+[.]zip)')
+SEARCH_FAILED_REASON_RE = re.compile(r'FLASH_SEARCH_FAILED reason=(\S+)')
 
 
 @dataclass
@@ -105,11 +120,11 @@ def baseline_environment() -> dict[str, str]:
 
 
 def run_command(command: list[str], *, cwd: Path, env: dict[str, str] | None = None,
-                timeout: float | None = None, log: Path | None = None) -> int:
+                timeout: float | None = None, log: Path | None = None, append: bool = False) -> int:
     try:
         if log is not None:
             log.parent.mkdir(parents=True, exist_ok=True)
-            with log.open('wb') as stream:
+            with log.open('ab' if append else 'wb') as stream:
                 completed = subprocess.run(command, cwd=cwd, env=env, stdout=stream,
                                            stderr=subprocess.STDOUT, timeout=timeout)
             return completed.returncode
@@ -973,6 +988,800 @@ def cmd_trace(args: argparse.Namespace) -> int:
             print(line)
     return 0 if code == 0 else 1
 
+# ---------------------------------------------------------------------------
+# headless: full-battle deployment on Linux headless instances
+# ---------------------------------------------------------------------------
+
+
+def _headless_read_json(path: Path):
+    try:
+        return json.loads(path.read_text(encoding='utf-8-sig'))
+    except (OSError, ValueError):
+        return None
+
+
+def _headless_safe_label(value: str) -> str:
+    name = re.sub(r'[^A-Za-z0-9._-]+', '-', value.strip()).strip('.-')
+    return (name or 'headless')[:48]
+
+
+def _headless_selected_ids(args: argparse.Namespace) -> tuple[list[str], list[str]]:
+    raw: list[str] = []
+    if args.ids:
+        for token in args.ids:
+            raw.extend(part.strip() for part in token.split(',') if part.strip())
+    else:
+        raw = list(DEFAULT_HEADLESS_IDS)
+    selected: list[str] = []
+    seen: set[str] = set()
+    for identifier in raw:
+        if identifier not in seen:
+            seen.add(identifier)
+            selected.append(identifier)
+    corpus = args.quality_dir.resolve()
+    missing = [identifier for identifier in selected
+               if not (corpus / identifier / 'spec.json').is_file()]
+    return selected, missing
+
+
+def _headless_instance_root() -> Path:
+    return (ROOT / '.local/headless-instances').resolve()
+
+
+def _headless_remove_instance(instance_dir: Path) -> None:
+    root = _headless_instance_root()
+    target = instance_dir.resolve()
+    if target.parent != root:
+        raise RuntimeError(f'refusing to remove unexpected instance path: {target}')
+    if target.exists():
+        shutil.rmtree(target)
+
+
+def _headless_environment(args: argparse.Namespace, instance_dir: Path, host_root: Path,
+                          xdg_data_home: Path | None) -> dict[str, str]:
+    env = baseline_environment()
+    env['COMBATSOLVER_HEADLESS_HOST_ROOT'] = str(host_root)
+    env['COMBATSOLVER_HEADLESS_ROOT'] = str(instance_dir)
+    if xdg_data_home is not None:
+        env['XDG_DATA_HOME'] = str(xdg_data_home)
+    return env
+
+
+def _headless_launcher(args: argparse.Namespace, instance_name: str) -> list[str]:
+    command = ['bash', str(HEADLESS_SCRIPT),
+               '--headless-instance', instance_name,
+               '--headless-execution-mode', 'parallel',
+               '--headless-cpu-reservation', str(args.headless_cpu_reservation),
+               '--headless-memory-reservation-mib', str(args.headless_memory_reservation_mib)]
+    for option, value in (('--sts2-game-root', args.sts2_game_root),
+                          ('--ritsu-workshop-root', args.ritsu_workshop_root),
+                          ('--combat-solver-build-dir', args.combat_solver_build_dir)):
+        if value:
+            command += [option, str(value)]
+    return command
+
+
+def _headless_write_settings(instance_dir: Path, mode: str) -> None:
+    data = instance_dir / 'data/SlayTheSpire2'
+    data.mkdir(parents=True, exist_ok=True)
+    (data / 'combat_solver_settings.json').write_text(
+        json.dumps({'flashSearchMode': mode}, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+
+def _headless_clear_run_state(instance_dir: Path) -> None:
+    data = instance_dir / 'data/SlayTheSpire2'
+    data.mkdir(parents=True, exist_ok=True)
+    for name in ('combat_solver_test_result.json', 'combat_solver_test_ready.json',
+                 'runtime-events.json', 'search-result.json', 'difference.json',
+                 'policy.json', 'timings.json'):
+        try:
+            (data / name).unlink()
+        except FileNotFoundError:
+            pass
+    for name in ('combat-solver-routes', 'combat-solver-test-bug-reports'):
+        shutil.rmtree(data / name, ignore_errors=True)
+
+
+def _headless_build(args: argparse.Namespace, out: Path) -> tuple[bool, str]:
+    out.mkdir(parents=True, exist_ok=True)
+    log = out / 'build.txt'
+    command = [args.dotnet, 'build', 'CombatSolver.csproj', '-c', 'Release',
+               '-p:CopyModOnBuild=false', '-p:NuGetAudit=false', '-v', 'q', '-nologo']
+    code = run_command(command, cwd=ROOT, log=log)
+    if code != 0:
+        return False, 'BUILD FAILED'
+    return True, ''
+
+
+def _headless_dll(args: argparse.Namespace) -> Path:
+    if args.combat_solver_build_dir:
+        return Path(args.combat_solver_build_dir).expanduser().resolve() / 'CombatSolver.dll'
+    return ROOT / '.godot/mono/temp/bin/Release/CombatSolver.dll'
+
+
+class _HeadlessEvidenceWatcher:
+    """Copy instance-local evidence (report ZIPs and launcher/game logs) while the run is alive.
+
+    The last run of a lane uses --cleanup-instance-on-exit, which deletes the whole instance as
+    soon as the launcher exits. Polling during the run keeps the report bundle and logs without
+    changing the launcher's cleanup contract.
+    """
+
+    def __init__(self, instance_dir: Path, evidence: Path) -> None:
+        self.instance_dir = instance_dir
+        self.evidence = evidence
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=10)
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            self._copy_once()
+            self._stop.wait(0.25)
+        self._copy_once()
+
+    def _copy_once(self) -> None:
+        data = self.instance_dir / 'data/SlayTheSpire2'
+        reports = data / 'combat-solver-test-bug-reports'
+        if reports.is_dir():
+            destination = self.evidence / 'reports'
+            try:
+                destination.mkdir(parents=True, exist_ok=True)
+                for path in sorted(reports.glob('*.zip')):
+                    target = destination / path.name
+                    if target.exists() and target.stat().st_size == path.stat().st_size:
+                        continue
+                    temporary = destination / (path.name + '.tmp')
+                    shutil.copy2(path, temporary)
+                    if _headless_zip_valid(temporary):
+                        os.replace(temporary, target)
+                    else:
+                        temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+        logs = self.evidence / 'instance-logs'
+        try:
+            logs.mkdir(parents=True, exist_ok=True)
+            for name in ('godot-headless.log', 'launcher.log'):
+                source = self.instance_dir / name
+                if not source.is_file():
+                    continue
+                target = logs / name
+                if not target.exists() or target.stat().st_size != source.stat().st_size:
+                    shutil.copy2(source, target)
+        except OSError:
+            pass
+        for name in ('runtime-events.json', 'search-result.json', 'difference.json',
+                     'policy.json', 'timings.json'):
+            source = data / name
+            if source.is_file() and not (self.evidence / name).exists():
+                try:
+                    shutil.copy2(source, self.evidence / name)
+                except OSError:
+                    pass
+        for source, name in ((data / 'combat_solver_settings.json', 'instance-settings.json'),
+                             (data / 'combat_solver_test_request.json', 'launcher-request.json')):
+            if source.is_file() and not (self.evidence / name).exists():
+                try:
+                    shutil.copy2(source, self.evidence / name)
+                except OSError:
+                    pass
+        result = data / 'combat_solver_test_result.json'
+        if result.is_file() and not (self.evidence / 'result.json').exists():
+            try:
+                shutil.copy2(result, self.evidence / 'result.json')
+            except OSError:
+                pass
+
+
+def _headless_zip_valid(path: Path) -> bool:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return bool(archive.namelist())
+    except (OSError, zipfile.BadZipFile):
+        return False
+
+
+def _headless_extract_zip(zip_path: Path, target: Path) -> None:
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True)
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            root = target.resolve()
+            for info in archive.infolist():
+                member = (target / info.filename).resolve()
+                if member != root and root not in member.parents:
+                    continue
+                archive.extract(info, target)
+    except (OSError, zipfile.BadZipFile):
+        pass
+
+
+def _headless_copy_evidence(instance_dir: Path, evidence: Path) -> None:
+    evidence.mkdir(parents=True, exist_ok=True)
+    data = instance_dir / 'data/SlayTheSpire2'
+    if data.is_dir():
+        for name in ('runtime-events.json', 'search-result.json', 'difference.json',
+                     'policy.json', 'timings.json'):
+            source = data / name
+            destination = evidence / name
+            if source.is_file() and not destination.exists():
+                try:
+                    shutil.copy2(source, destination)
+                except OSError:
+                    pass
+        if not (evidence / 'result.json').exists() and (data / 'combat_solver_test_result.json').is_file():
+            try:
+                shutil.copy2(data / 'combat_solver_test_result.json', evidence / 'result.json')
+            except OSError:
+                pass
+        if (data / 'combat_solver_test_request.json').is_file():
+            try:
+                shutil.copy2(data / 'combat_solver_test_request.json', evidence / 'launcher-request.json')
+            except OSError:
+                pass
+        if (data / 'combat_solver_settings.json').is_file():
+            try:
+                shutil.copy2(data / 'combat_solver_settings.json', evidence / 'instance-settings.json')
+            except OSError:
+                pass
+    logs = evidence / 'instance-logs'
+    if instance_dir.is_dir():
+        logs.mkdir(parents=True, exist_ok=True)
+        for name in ('godot-headless.log', 'launcher.log'):
+            source = instance_dir / name
+            if source.is_file():
+                try:
+                    shutil.copy2(source, logs / name)
+                except OSError:
+                    pass
+    # Prefer the report named by the result; fall back to the latest copied ZIP.
+    report_name = ''
+    result = _headless_read_json(evidence / 'result.json')
+    if isinstance(result, dict):
+        for check in result.get('completedChecks') or []:
+            match = BUG_REPORT_CHECK_RE.search(str(check))
+            if match:
+                report_name = Path(match.group(1)).name
+                break
+    reports = evidence / 'reports'
+    candidates = sorted(reports.glob('*.zip')) if reports.is_dir() else []
+    selected = None
+    if report_name:
+        selected = reports / report_name if (reports / report_name).is_file() else None
+    if selected is None and candidates:
+        selected = candidates[-1]
+    if selected is not None:
+        destination = evidence / 'report.zip'
+        try:
+            shutil.copy2(selected, destination)
+            _headless_extract_zip(destination, evidence / 'report')
+        except OSError:
+            pass
+
+
+def _headless_log_lines(evidence: Path) -> list[str]:
+    runtime: list[str] = []
+    events = _headless_read_json(evidence / 'runtime-events.json')
+    if isinstance(events, list):
+        for entry in events:
+            if isinstance(entry, dict):
+                message = entry.get('message') or entry.get('Message')
+                if isinstance(message, str):
+                    runtime.append(message)
+    report: list[str] = []
+    report_dir = evidence / 'report'
+    if report_dir.is_dir():
+        for path in sorted(report_dir.rglob('*.jsonl')):
+            for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
+                try:
+                    parsed = json.loads(line)
+                    message = parsed.get('Message') or parsed.get('message') if isinstance(parsed, dict) else None
+                    report.append(message if isinstance(message, str) else line)
+                except ValueError:
+                    report.append(line)
+        for path in sorted(report_dir.rglob('*.log')):
+            report.extend(path.read_text(encoding='utf-8', errors='replace').splitlines())
+
+    def flash_count(lines: list[str]) -> int:
+        return sum('[CombatSolver/Flash]' in line for line in lines)
+
+    return report if flash_count(report) >= flash_count(runtime) else runtime
+
+
+def _headless_native_outcome(result: dict):
+    outcome = None
+    for check in result.get('completedChecks') or []:
+        match = NATIVE_OUTCOME_RE.search(str(check))
+        if match:
+            outcome = {
+                'combatEnded': match.group(1) == 'True',
+                'turn': int(match.group(2)),
+                'hp': int(match.group(3)),
+                'maxHp': int(match.group(4)),
+            }
+    return outcome
+
+
+def _headless_replans(result: dict):
+    value = None
+    for check in result.get('completedChecks') or []:
+        match = UNEXPECTED_REPLANS_RE.search(str(check))
+        if match:
+            value = int(match.group(1))
+    return value
+
+
+def _headless_find_baseline(baseline: Path, identifier: str) -> Path | None:
+    for candidate in (baseline / identifier / 'On' / 'evidence',
+                      baseline / identifier / 'evidence',
+                      baseline / identifier):
+        if (candidate / 'generated-scenario.resolved.json').is_file():
+            return candidate
+    return None
+
+
+def _headless_compare_scenarios(current: Path, baseline: Path) -> list[str]:
+    problems: list[str] = []
+    for name in ('resolved', 'loadout'):
+        now = _headless_read_json(current / f'generated-scenario.{name}.json')
+        old = _headless_read_json(baseline / f'generated-scenario.{name}.json')
+        if now is None or old is None:
+            problems.append(f'baseline-{name}-missing')
+            continue
+        for key in sorted(set(now) | set(old)):
+            if name == 'resolved' and key == 'mode':
+                continue
+            if now.get(key) != old.get(key):
+                problems.append(f'{name}.{key}')
+                if len(problems) >= 8:
+                    return problems
+    return problems
+
+
+def _headless_scenario_check(evidence: Path, baseline: Path | None, identifier: str) -> str:
+    problems: list[str] = []
+    request = _headless_read_json(evidence / 'generated-scenario.request.json')
+    resolved = _headless_read_json(evidence / 'generated-scenario.resolved.json')
+    loadout = _headless_read_json(evidence / 'generated-scenario.loadout.json')
+    opening = _headless_read_json(evidence / 'generated-scenario.opening.json')
+    if not isinstance(request, dict):
+        problems.append('missing-request')
+    else:
+        if request.get('cards'):
+            problems.append('injected-cards')
+        if request.get('preserveNativeCombatStateForTest') is not True:
+            problems.append('native-state-not-preserved')
+        for key in ('initialEnemyMaxHps', 'initialEnemyCurrentHps', 'initialEnemyBlocks',
+                    'initialPlayerHp', 'initialPlayerMaxHp'):
+            if request.get(key):
+                problems.append(f'{key}-set')
+    if not isinstance(resolved, dict):
+        problems.append('missing-resolved')
+    elif resolved.get('mode') != 'Deploy':
+        problems.append('mode-not-deploy')
+    if not isinstance(loadout, dict):
+        problems.append('missing-loadout')
+    else:
+        if (isinstance(resolved, dict) and resolved.get('playerCurrentHp') is None
+                and loadout.get('playerHp') != loadout.get('playerMaxHp')):
+            problems.append('player-not-at-full-hp')
+    if not isinstance(opening, dict):
+        problems.append('missing-opening')
+    else:
+        continuation = str(opening.get('continuation') or '')
+        for segment in continuation.split(';'):
+            if not re.match(r'E\d+=', segment):
+                continue
+            parts = segment.split('=', 1)[1].split('/')
+            if len(parts) < 6:
+                continue
+            try:
+                hp, max_hp = int(parts[3]), int(parts[4])
+            except ValueError:
+                problems.append('enemy-hp-unparsed')
+                break
+            if hp == 1 and max_hp > 1:
+                problems.append('enemy-hp-injected')
+                break
+            if hp > max_hp:
+                problems.append('enemy-hp-invalid')
+                break
+    if baseline is not None:
+        base = _headless_find_baseline(baseline, identifier)
+        if base is None:
+            problems.append('baseline-missing')
+        else:
+            problems.extend(_headless_compare_scenarios(evidence, base))
+    return 'ok' if not problems else 'mismatch:' + ','.join(problems[:8])
+
+
+def _headless_analyze(evidence: Path, baseline: Path | None, identifier: str) -> dict:
+    result = _headless_read_json(evidence / 'result.json')
+    if not isinstance(result, dict):
+        result = {}
+    error = str(result.get('error') or '')
+    lines = _headless_log_lines(evidence)
+    adopted = sum('FLASH_ADOPTED' in line for line in lines)
+    verified = sum('FLASH_ADOPTED' in line and 'status=verified' in line for line in lines)
+    failed_lines = [line for line in lines if 'FLASH_SEARCH_FAILED' in line]
+    if not failed_lines and 'FLASH_SEARCH_FAILED' in error:
+        failed_lines = [error]
+    search_failed = len(failed_lines)
+    reasons = sorted({match.group(1) for line in failed_lines
+                      for match in [SEARCH_FAILED_REASON_RE.search(line)] if match})
+    verify_mismatch = sum('FLASH_VERIFY_MISMATCH' in line for line in lines)
+    if verify_mismatch == 0 and 'FLASH_VERIFY_MISMATCH' in error:
+        verify_mismatch = 1
+    preview_mismatch = sum('FLASH_PREVIEW_MISMATCH' in line for line in lines)
+    native = _headless_native_outcome(result)
+    replans = _headless_replans(result)
+    if replans is None:
+        match = re.search(r'战斗出现 (\d+) 次非预期重算', error)
+        if match:
+            replans = int(match.group(1))
+    if (native is None and result.get('combatEnded') is True
+            and '仍存在未死亡敌人' in error):
+        # The deployment lock path reports player death as Failed before the post-combat
+        # NativeOutcome check runs. CombatEnded with living enemies is the native death result;
+        # take the turn from result.json and max HP from the actual loadout, never solverMetrics.
+        loadout = _headless_read_json(evidence / 'generated-scenario.loadout.json')
+        native = {
+            'combatEnded': True,
+            'turn': int(result.get('finishedTurn') or 0),
+            'hp': 0,
+            'maxHp': int(loadout.get('playerMaxHp') or 0) if isinstance(loadout, dict) else 0,
+        }
+    scenario = _headless_scenario_check(evidence, baseline, identifier)
+    status = str(result.get('status') or 'no-result')
+    if search_failed:
+        outcome = 'failed'
+    elif native is None or not native['combatEnded']:
+        outcome = 'no-result'
+    elif native['hp'] <= 0:
+        if status == 'Passed' or '仍存在未死亡敌人' in error or not error:
+            outcome = 'death'
+        else:
+            outcome = 'failed'
+    elif status == 'Passed':
+        outcome = 'win'
+    elif status == 'Failed':
+        outcome = 'failed'
+    else:
+        outcome = 'no-result'
+    ok = (outcome in ('win', 'death') and search_failed == 0 and verify_mismatch == 0
+          and replans == 0 and scenario == 'ok')
+    detail = error.replace('\n', ' ')[:240]
+    if reasons:
+        detail = (detail + ' ' if detail else '') + 'reason=' + ','.join(reasons)
+    if scenario != 'ok':
+        detail = (detail + ' ' if detail else '') + 'scenario=' + scenario
+    return {
+        'id': identifier,
+        'mode': '',
+        'status': status,
+        'outcome': outcome,
+        'turn': native['turn'] if native else None,
+        'hp': native['hp'] if native else None,
+        'max_hp': native['maxHp'] if native else None,
+        'adopted': adopted,
+        'verified': verified,
+        'search_failed': search_failed,
+        'verify_mismatch': verify_mismatch,
+        'preview_mismatch': preview_mismatch,
+        'replans': replans,
+        'scenario': scenario,
+        'detail': detail,
+        'ok': ok,
+        'exit': None,
+        'cleanup': '-',
+        'evidence': _relative(evidence),
+    }
+
+
+def _headless_command(args: argparse.Namespace, identifier: str, scenario: Path, evidence: Path,
+                      instance_name: str, cleanup: bool) -> list[str]:
+    command = _headless_launcher(args, instance_name) + [
+        '--scenario-id', identifier,
+        '--generated-scenario-path', str(scenario),
+        '--flash-search-mode-for-test', args.mode,
+        '--cards-json', '[]',
+        '--evidence-directory', str(evidence),
+        '--headless-fast-mode-for-test', 'Instant',
+        '--deployment-fast-mode-for-test', 'Instant',
+        '--deployment-inter-action-delay-seconds-for-test', '0',
+        '--expected-unexpected-replans-at-most', '0',
+        '--search-budget-override-milliseconds', str(args.search_budget_ms),
+        '--export-bug-report-after-combat',
+        '--timeout-seconds', str(args.timeout_seconds),
+    ]
+    if cleanup:
+        command.append('--cleanup-instance-on-exit')
+    return command
+
+
+def _headless_stop(args: argparse.Namespace, instance_name: str, env: dict[str, str], log: Path) -> None:
+    try:
+        run_command(_headless_launcher(args, instance_name) + ['--stop-instance'],
+                    cwd=ROOT, env=env, timeout=120, log=log, append=True)
+    except OSError:
+        pass
+
+
+def _headless_prepare_scenario(out: Path, corpus: Path, identifier: str) -> Path | None:
+    source = corpus / identifier / 'spec.json'
+    if not source.is_file():
+        return None
+    try:
+        spec = json.loads(source.read_text(encoding='utf-8-sig'))
+    except (OSError, ValueError):
+        return None
+    spec['mode'] = 'Deploy'
+    target = out / identifier / 'scenario.json'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(spec, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    return target
+
+
+def _headless_row_line(row: dict) -> str:
+    def value(key):
+        item = row.get(key)
+        return '-' if item is None or item == '' else str(item)
+    return '\t'.join([
+        value('id'), value('mode'), value('status'), value('outcome'), value('turn'),
+        value('hp'), value('max_hp'), value('adopted'), value('verified'),
+        value('search_failed'), value('verify_mismatch'), value('preview_mismatch'),
+        value('replans'), value('scenario'), value('exit'), value('cleanup'), value('evidence'),
+    ])
+
+
+def _headless_summary(rows: list[dict], lanes: list[dict]) -> str:
+    header = ['id', 'mode', 'status', 'outcome', 'turn', 'hp', 'maxHp', 'adopted', 'verified',
+              'searchFailed', 'verifyMismatch', 'previewMismatch', 'replans', 'scenario',
+              'exit', 'cleanup', 'evidence']
+    lines = ['\t'.join(header)]
+    for row in rows:
+        lines.append(_headless_row_line(row))
+    ints = ('adopted', 'verified', 'search_failed', 'verify_mismatch', 'preview_mismatch',
+            'replans')
+    totals = {key: sum(row[key] for row in rows if isinstance(row.get(key), int)) for key in ints}
+    totals['unknown_replans'] = sum(1 for row in rows if not isinstance(row.get('replans'), int))
+    totals['win'] = sum(row['outcome'] == 'win' for row in rows)
+    totals['death'] = sum(row['outcome'] == 'death' for row in rows)
+    totals['failed'] = sum(row['outcome'] == 'failed' for row in rows)
+    totals['no_result'] = sum(row['outcome'] == 'no-result' for row in rows)
+    totals['scenario_mismatch'] = sum(row['scenario'] != 'ok' for row in rows)
+    totals['launcher_nonzero'] = sum(bool(row.get('exit')) for row in rows)
+    totals['cleanup_failures'] = sum(lane['cleanup'] != 'ok' for lane in lanes)
+    lines.append('TOTAL\truns={runs}\twin={win}\tdeath={death}\tfailed={failed}\tnoResult={no_result}\t'
+                 'adopted={adopted}\tverified={verified}\tsearchFailed={search_failed}\t'
+                 'verifyMismatch={verify_mismatch}\tpreviewMismatch={preview_mismatch}\t'
+                 'replans={replans}\tunknownReplans={unknown_replans}\t'
+                 'scenarioMismatch={scenario_mismatch}\tlauncherNonzero={launcher_nonzero}\t'
+                 'cleanupFailures={cleanup_failures}'.format(runs=len(rows), **totals))
+    for lane in lanes:
+        lines.append(f"LANE\t{lane['lane']}\tinstance={lane['instance']}\truns={lane['runs']}\t"
+                     f"cleanup={lane['cleanup']}")
+    failures = [row for row in rows if not row['ok']]
+    if failures:
+        lines.append('FAILURES')
+        for row in failures:
+            lines.append(f"  {row['id']} outcome={row['outcome']} status={row['status']} "
+                         f"searchFailed={row['search_failed']} verifyMismatch={row['verify_mismatch']} "
+                         f"replans={row['replans']} scenario={row['scenario']} detail={row['detail']}")
+    ok = all(row['ok'] for row in rows) and all(lane['cleanup'] == 'ok' for lane in lanes)
+    lines.append('RESULT ' + ('PASS' if ok else 'FAIL'))
+    return '\n'.join(lines) + '\n'
+
+
+def _run_headless_lane(lane: int, ids: list[str], args: argparse.Namespace, out: Path,
+                       host_root: Path, xdg_data_home: Path | None,
+                       print_lock: threading.Lock) -> tuple[list[dict], dict]:
+    label = _headless_safe_label(args.label or 'headless')
+    instance_name = f'{label}-{lane + 1}'
+    instance_dir = _headless_instance_root() / instance_name
+    env = _headless_environment(args, instance_dir, host_root, xdg_data_home)
+    lane_log = out / f'lane-{lane + 1}.log'
+    rows: list[dict] = []
+    cleanup = 'ok'
+    if instance_dir.exists():
+        _headless_stop(args, instance_name, env, lane_log)
+        try:
+            _headless_remove_instance(instance_dir)
+        except (OSError, RuntimeError) as error:
+            with print_lock:
+                print(f'lane {lane + 1}: stale instance cleanup failed: {error}', flush=True)
+    for position, identifier in enumerate(ids):
+        last = position == len(ids) - 1
+        evidence = out / identifier / 'evidence'
+        if evidence.exists():
+            shutil.rmtree(evidence)
+        evidence.mkdir(parents=True)
+        scenario = _headless_prepare_scenario(out, args.quality_dir.resolve(), identifier)
+        if scenario is None:
+            row = {'id': identifier, 'mode': args.mode, 'status': 'no-scenario',
+                   'outcome': 'no-result', 'turn': None, 'hp': None, 'max_hp': None,
+                   'adopted': 0, 'verified': 0, 'search_failed': 0, 'verify_mismatch': 0,
+                   'preview_mismatch': 0, 'replans': None, 'scenario': 'mismatch:missing-spec',
+                   'detail': 'missing spec.json', 'ok': False, 'exit': None, 'cleanup': '-',
+                   'evidence': _relative(evidence)}
+            rows.append(row)
+            continue
+        _headless_clear_run_state(instance_dir)
+        _headless_write_settings(instance_dir, args.mode)
+        watcher = _HeadlessEvidenceWatcher(instance_dir, evidence)
+        watcher.start()
+        try:
+            code = run_command(_headless_command(args, identifier, scenario, evidence,
+                                                 instance_name, last),
+                               cwd=ROOT, env=env, timeout=args.timeout_seconds + 180,
+                               log=out / identifier / 'run.log')
+        finally:
+            watcher.stop()
+        _headless_copy_evidence(instance_dir, evidence)
+        row = _headless_analyze(evidence, args.scenario_baseline, identifier)
+        row['mode'] = args.mode
+        row['exit'] = code
+        if last:
+            if instance_dir.exists():
+                _headless_stop(args, instance_name, env, lane_log)
+                try:
+                    _headless_remove_instance(instance_dir)
+                    row['cleanup'] = 'removed-after-launcher'
+                    cleanup = 'removed-after-launcher'
+                except (OSError, RuntimeError):
+                    row['cleanup'] = 'left'
+                    cleanup = 'left'
+            else:
+                row['cleanup'] = 'ok'
+        elif code != 0:
+            _headless_stop(args, instance_name, env, lane_log)
+        rows.append(row)
+        with print_lock:
+            print(f"[{lane + 1}] {identifier} {args.mode} exit={code} outcome={row['outcome']} "
+                  f"turn={row['turn']} hp={row['hp']}/{row['max_hp']} "
+                  f"adopted={row['adopted']} verified={row['verified']} "
+                  f"searchFailed={row['search_failed']} verifyMismatch={row['verify_mismatch']} "
+                  f"previewMismatch={row['preview_mismatch']} replans={row['replans']} "
+                  f"scenario={row['scenario']}", flush=True)
+    if instance_dir.exists():
+        _headless_stop(args, instance_name, env, lane_log)
+        try:
+            _headless_remove_instance(instance_dir)
+            if cleanup == 'ok':
+                cleanup = 'removed-after-lane'
+        except (OSError, RuntimeError):
+            cleanup = 'left'
+    return rows, {'lane': lane + 1, 'instance': instance_name, 'runs': len(ids), 'cleanup': cleanup}
+
+
+def cmd_headless(args: argparse.Namespace) -> int:
+    if not sys.platform.startswith('linux'):
+        print('headless: the Linux run-unattended-test.sh entry is the only supported launcher; '
+              'the PowerShell path is out of scope for this batch', file=sys.stderr)
+        return 2
+    if not HEADLESS_SCRIPT.is_file():
+        print(f'headless: missing launcher {HEADLESS_SCRIPT}', file=sys.stderr)
+        return 2
+    ids, missing = _headless_selected_ids(args)
+    if missing:
+        print('headless: unknown quality-corpus ids: ' + ', '.join(missing), file=sys.stderr)
+        return 2
+    if not ids:
+        print('headless: no ids selected', file=sys.stderr)
+        return 2
+    if args.lanes < 1:
+        print('headless: --lanes must be >= 1', file=sys.stderr)
+        return 2
+    if args.timeout_seconds < 1:
+        print('headless: --timeout-seconds must be >= 1', file=sys.stderr)
+        return 2
+    if args.search_budget_ms < 1:
+        print('headless: --search-budget-ms must be >= 1', file=sys.stderr)
+        return 2
+    xdg_data_home = args.xdg_data_home
+    if xdg_data_home is None:
+        candidate = ROOT / '.local/headless-seed/data'
+        if candidate.is_dir():
+            xdg_data_home = candidate
+    if xdg_data_home is not None:
+        xdg_data_home = Path(xdg_data_home).expanduser().resolve()
+        if not (xdg_data_home / 'SlayTheSpire2/default/1/settings.save').is_file():
+            print(f'headless: --xdg-data-home is not a seeded SlayTheSpire2 profile: {xdg_data_home}',
+                  file=sys.stderr)
+            return 2
+    host_root = Path(args.headless_host_root).expanduser().resolve() if args.headless_host_root \
+        else Path(os.environ.get('COMBATSOLVER_HEADLESS_HOST_ROOT',
+                                 str(ROOT / '.local/headless-host'))).expanduser().resolve()
+    for option in ('sts2_game_root', 'ritsu_workshop_root', 'combat_solver_build_dir'):
+        value = getattr(args, option)
+        if value:
+            setattr(args, option, Path(value).expanduser().resolve())
+    if args.scenario_baseline is not None:
+        args.scenario_baseline = Path(args.scenario_baseline).expanduser().resolve()
+    out = output_dir(args, 'headless')
+    out.mkdir(parents=True, exist_ok=True)
+    if not args.skip_build:
+        ok, detail = _headless_build(args, out)
+        print(detail or 'BUILD OK', flush=True)
+        if not ok:
+            (out / 'SUMMARY.txt').write_text('BUILD FAILED\n', encoding='utf-8')
+            return 1
+    dll = _headless_dll(args)
+    if not dll.is_file():
+        print(f'headless: CombatSolver.dll not found: {dll}', file=sys.stderr)
+        (out / 'SUMMARY.txt').write_text(f'COMBATSOLVER DLL MISSING {dll}\n', encoding='utf-8')
+        return 1
+    lanes = min(max(1, args.lanes), len(ids))
+    assignments = [ids[index::lanes] for index in range(lanes)]
+    print(f'headless: {len(ids)} runs, lanes={lanes}, mode={args.mode}, '
+          f'timeout={args.timeout_seconds}s, host={host_root}', flush=True)
+    rows_by_id: dict[str, dict] = {}
+    lane_rows: list[dict] = []
+    print_lock = threading.Lock()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=lanes) as executor:
+        futures = {}
+        for index, lane in enumerate(assignments):
+            future = executor.submit(_run_headless_lane, index, lane, args, out, host_root,
+                                     xdg_data_home, print_lock)
+            futures[future] = (index, lane)
+        for future in concurrent.futures.as_completed(futures):
+            index, lane_ids = futures[future]
+            try:
+                rows, lane = future.result()
+            except Exception as error:  # orchestration boundary: report the lane, keep the summary
+                instance_name = f"{_headless_safe_label(args.label or 'headless')}-{index + 1}"
+                instance_dir = _headless_instance_root() / instance_name
+                lane = {'lane': index + 1, 'instance': instance_name, 'runs': len(lane_ids),
+                        'cleanup': 'failed'}
+                try:
+                    _headless_stop(args, instance_name,
+                                   _headless_environment(args, instance_dir, host_root, xdg_data_home),
+                                   out / f'lane-{index + 1}.log')
+                    _headless_remove_instance(instance_dir)
+                    lane['cleanup'] = 'removed-after-error'
+                except (OSError, RuntimeError):
+                    lane['cleanup'] = 'left'
+                rows = []
+                for identifier in lane_ids:
+                    rows.append({
+                        'id': identifier, 'mode': args.mode, 'status': 'lane-error',
+                        'outcome': 'no-result', 'turn': None, 'hp': None, 'max_hp': None,
+                        'adopted': 0, 'verified': 0, 'search_failed': 0, 'verify_mismatch': 0,
+                        'preview_mismatch': 0, 'replans': None, 'scenario': 'mismatch:lane-error',
+                        'detail': f'{type(error).__name__}: {error}'[:240], 'ok': False,
+                        'exit': None, 'cleanup': 'failed',
+                        'evidence': _relative(out / identifier / 'evidence')})
+                with print_lock:
+                    print(f'lane {index + 1} failed: {type(error).__name__}: {error}', flush=True)
+            lane_rows.append(lane)
+            for row in rows:
+                rows_by_id[row['id']] = row
+    ordered = []
+    for identifier in ids:
+        row = rows_by_id.get(identifier)
+        if row is None:
+            row = {'id': identifier, 'mode': args.mode, 'status': 'missing', 'outcome': 'no-result',
+                   'turn': None, 'hp': None, 'max_hp': None, 'adopted': 0, 'verified': 0,
+                   'search_failed': 0, 'verify_mismatch': 0, 'preview_mismatch': 0,
+                   'replans': None, 'scenario': 'mismatch:not-run', 'detail': 'lane did not return a row',
+                   'ok': False, 'exit': None, 'cleanup': '-',
+                   'evidence': _relative(out / identifier / 'evidence')}
+        ordered.append(row)
+    lane_rows.sort(key=lambda item: item['lane'])
+    summary = _headless_summary(ordered, lane_rows)
+    (out / 'SUMMARY.txt').write_text(summary, encoding='utf-8')
+    (out / 'results.json').write_text(json.dumps(ordered, ensure_ascii=False, indent=2) + '\n',
+                                      encoding='utf-8')
+    print(summary, flush=True)
+    return 0 if summary.rstrip().endswith('RESULT PASS') else 1
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__,
@@ -1048,6 +1857,45 @@ def build_parser() -> argparse.ArgumentParser:
     trace.add_argument('--timeout', type=float, default=480)
     trace.set_defaults(func=cmd_trace)
 
+    headless = sub.add_parser(
+        'headless',
+        help='Linux full-battle deployment on the 40 fixed quality-corpus roots')
+    headless.add_argument('--label', default='headless',
+                          help='output directory and instance prefix (default headless)')
+    headless.add_argument('--out', type=Path, default=None,
+                          help='explicit output directory (wins over --label)')
+    headless.add_argument('--dotnet', default=DOTNET, help='dotnet executable used for the Release build')
+    headless.add_argument('--skip-build', action='store_true', help='use the existing Release build')
+    headless.add_argument('--ids', nargs='+', default=None,
+                          help='override the 40 root ids (space or comma separated corpus directory names)')
+    headless.add_argument('--quality-dir', type=Path, default=QUALITY,
+                          help='quality corpus with <id>/spec.json (default coverage/corpora/flash-quality)')
+    headless.add_argument('--mode', choices=('On', 'Off'), default='On',
+                          help='--flash-search-mode-for-test value (default On)')
+    headless.add_argument('--lanes', type=int, default=2, help='parallel headless instances (default 2)')
+    headless.add_argument('--timeout-seconds', type=int, default=600,
+                          help='per-battle launcher timeout (default 600)')
+    headless.add_argument('--search-budget-ms', type=int, default=120000,
+                          help='per-search soft budget override (default 120000, matching the quality corpus)')
+    headless.add_argument('--xdg-data-home', type=Path, default=None,
+                          help='seeded XDG_DATA_HOME passed to the launcher '
+                               '(default .local/headless-seed/data when present)')
+    headless.add_argument('--headless-host-root', default=None,
+                          help='shared COMBATSOLVER_HEADLESS_HOST_ROOT (default .local/headless-host)')
+    headless.add_argument('--headless-cpu-reservation', type=int, default=4,
+                          help='per-instance CPU reservation (default 4)')
+    headless.add_argument('--headless-memory-reservation-mib', type=int, default=8192,
+                          help='per-instance memory reservation in MiB (default 8192)')
+    headless.add_argument('--sts2-game-root', default=None,
+                          help='passed through to --sts2-game-root')
+    headless.add_argument('--ritsu-workshop-root', default=None,
+                          help='passed through to --ritsu-workshop-root')
+    headless.add_argument('--combat-solver-build-dir', default=None,
+                          help='passed through to --combat-solver-build-dir (use with --skip-build)')
+    headless.add_argument('--scenario-baseline', type=Path, default=None,
+                          help='prior evidence tree; compare each generated resolved/loadout scenario')
+    headless.set_defaults(func=cmd_headless)
+
     compat = sub.add_parser('compat',
                             help='FlashSearchMode persistence contract: legacy Shadow/numeric values read Off, On round-trips')
     compat.add_argument('--label', default=None)
@@ -1084,6 +1932,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error('--shards must be >= 1')
     if getattr(args, 'jobs', 1) < 1:
         parser.error('--jobs must be >= 1')
+    if getattr(args, 'lanes', 1) < 1:
+        parser.error('--lanes must be >= 1')
+    if getattr(args, 'timeout_seconds', 1) < 1:
+        parser.error('--timeout-seconds must be >= 1')
     return args.func(args)
 
 
