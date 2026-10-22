@@ -2549,6 +2549,16 @@ internal static class SolverOverlay
             tone = TextMuted;
         }
 
+        if (SolverController.FlashFallbackNotice is { } fallback)
+        {
+            string name = SolverUiModelNames.Content(fallback.Detail, fallback.Detail);
+            string notice = SolverText.Format(
+                $"本场有 Flash 尚未支持的内容（{name}），改用常规搜索。");
+            text = text == null ? notice : notice + "\n" + text;
+            if (tone != Danger)
+                tone = Warning;
+        }
+
         if (OnlinePresence.AvailableUpdateVersion is { } latestVersion)
         {
             string notice = SolverText.Format($"求解器新版本 {latestVersion} 已发布，请更新 Mod 后重启游戏。");

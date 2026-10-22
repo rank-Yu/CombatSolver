@@ -16,10 +16,12 @@ internal enum FlashSearchMode
     Off,
 
     /// <summary>
-    /// Flash only. A no-route result is returned in the existing search's shape; unsupported content,
-    /// capacity, root-phase, verification and development-strategy cases stop the search with
-    /// <see cref="FlashSearchFailedException"/>. The existing solver is never constructed in this mode.
-    /// The explicit value keeps persisted <c>On</c> readable after the removed <c>Shadow</c> value (1).
+    /// Flash first. A no-route result is returned in the existing search's shape; unsupported content
+    /// and unrepresentable state admitted by Flash raise <see cref="FlashFallbackRequiredException"/>
+    /// so the coordinator can discard and re-run the whole search with its saved regular profile, while
+    /// capacity, root-phase, verification, development-strategy and other admission cases stop the
+    /// search with <see cref="FlashSearchFailedException"/>. The explicit value keeps persisted
+    /// <c>On</c> readable after the removed <c>Shadow</c> value (1).
     /// </summary>
     On = 2,
 }
@@ -61,10 +63,11 @@ internal sealed record BeamSolveRequest(
 /// direct audit members consult <see cref="SearchPolicySnapshot.FlashMode"/>; fixed-prefix continuations
 /// go through <see cref="SolveContinuation"/> under the same mode.
 /// <para>
-/// Off runs only the existing solver. On runs only Flash: a potion-policy no-route is reported with the existing
-/// <see cref="PotionPolicyUnsatisfiedException"/> shape, and every other refusal becomes one stable
-/// <c>FLASH_SEARCH_FAILED</c> event plus <see cref="FlashSearchFailedException"/>. On mode never
-/// constructs <see cref="CombatBeamSolver"/> and never writes a legacy search line.
+/// Off runs only the existing solver. On runs Flash first: a potion-policy no-route is reported with the existing
+/// <see cref="PotionPolicyUnsatisfiedException"/> shape; the two admission categories for unsupported content and
+/// unrepresentable state raise <see cref="FlashFallbackRequiredException"/> so <see cref="CombatSearchCoordinator.Solve"/>
+/// can log one <c>FLASH_FALLBACK</c> and re-run the whole search with the saved regular profile; every other refusal
+/// becomes one stable <c>FLASH_SEARCH_FAILED</c> event plus <see cref="FlashSearchFailedException"/>.
 /// </para>
 /// </summary>
 internal static class BeamSolveDispatch
@@ -99,6 +102,7 @@ internal static class BeamSolveDispatch
                         $"[CombatSolver/Flash] FLASH_ADOPTED purpose={request.Purpose} incumbent={IncumbentText(request.PrimaryIncumbent)} flash=[{Describe(flash, flashTime)}]");
                     return adopted;
                 }
+                ThrowIfFallbackRequired(request.Purpose, flash);
                 ThrowOnRefusal(request.Policy, request.Purpose, flash);
                 throw new InvalidOperationException("Flash refusal did not throw.");
             }
@@ -111,9 +115,11 @@ internal static class BeamSolveDispatch
     /// A fixed-prefix continuation solve. Every continuation shape FlashBeam models goes through the
     /// Flash backend: plan members (including any early-turn scout, potion baseline, earliest-turn bound,
     /// forced directive and potion bounds), the plan pass's own scout, and the Smart potion posterior.
-    /// Off runs only the existing solver. On runs only Flash and either returns the existing no-route shape or throws
-    /// <see cref="FlashSearchFailedException"/>; an unsupported root phase is one of those explicit
-    /// failures.
+    /// Off runs only the existing solver. On runs Flash first: the two admission categories for
+    /// unsupported content and unrepresentable state raise <see cref="FlashFallbackRequiredException"/>
+    /// for the coordinator to discard and re-run the whole search; every other non-adopted shape returns
+    /// the existing no-route result or throws <see cref="FlashSearchFailedException"/>; an unsupported
+    /// root phase is one of those explicit failures.
     /// </summary>
     public static SolverResult SolveContinuation(ContinuationSearchRequest request)
     {
@@ -145,6 +151,7 @@ internal static class BeamSolveDispatch
                         + $"prefix={request.Prefix.Length} flash=[{Describe(flash, flashTime)}]");
                     return adopted;
                 }
+                ThrowIfFallbackRequired(request.Purpose, flash);
                 ThrowOnRefusal(effectivePolicy, request.Purpose, flash);
                 throw new InvalidOperationException("Flash refusal did not throw.");
             }
@@ -160,8 +167,8 @@ internal static class BeamSolveDispatch
     /// The Flash backend is audited for the listed direct purposes only. Every other purpose is an
     /// ordinary existing-solver request in Off mode; in On mode it is an explicit failure instead of a
     /// silent Off fallback, because a new purpose that forgets this list would otherwise bypass the
-    /// On-mode no-fallback contract. Continuation requests are audited through
-    /// <see cref="SolveContinuation"/>'s continuation purposes.
+    /// On-mode failure contract. This category is not one of the two admission fallbacks. Continuation
+    /// requests are audited through <see cref="SolveContinuation"/>'s continuation purposes.
     /// </summary>
     private static FlashSearchMode ModeFor(DirectSearchPurpose purpose, SearchPolicySnapshot policy)
     {
@@ -247,8 +254,45 @@ internal static class BeamSolveDispatch
     }
 
     /// <summary>
-    /// Turns a non-adopted Flash attempt into the caller's existing no-route shape or one stable
-    /// explicit failure. Never falls back to the existing solver.
+    /// The only two admission categories that abort this coordinator search with
+    /// <see cref="FlashFallbackRequiredException"/>: unsupported content (card, Power, relic, potion,
+    /// orb, monster, enchantment, affliction or generation closure) and an existing-engine state Flash
+    /// cannot project (third-party subscriber, unregistered model and similar). The coordinator writes
+    /// the one <c>FLASH_FALLBACK</c> line and re-runs the whole search; dispatch never constructs the
+    /// regular solver itself. Every other rejection keeps the explicit failure contract. A verification
+    /// mismatch or kernel boundary always wins over the admission category.
+    /// </summary>
+    private static void ThrowIfFallbackRequired(object purpose, FlashAttempt attempt)
+    {
+        if (attempt.Mismatch != null || attempt.BoundaryReason != null)
+            return;
+        FlashSearchFailureReason reason;
+        string detail;
+        if (attempt.AdmissionRejection is { } admission && admission != FlashRejection.None)
+        {
+            reason = FlashSearchFailureReasons.FromRejection(admission);
+            detail = attempt.AdmissionDetail ?? "-";
+        }
+        else if (attempt.Outcome is { Rejection: not FlashRejection.None } outcome
+            && outcome.ConstraintFailure == null)
+        {
+            reason = FlashSearchFailureReasons.FromRejection(outcome.Rejection);
+            detail = outcome.Detail;
+        }
+        else
+        {
+            return;
+        }
+        if (reason is not (FlashSearchFailureReason.AdmissionUnsupportedContent
+            or FlashSearchFailureReason.AdmissionUnrepresentableState))
+        {
+            return;
+        }
+        throw new FlashFallbackRequiredException(reason, detail, purpose.ToString() ?? "-");
+    }
+
+    /// <summary>
+    /// Attaches the Flash-only work metrics to an adopted result. Off-mode results carry no Flash state.
     /// </summary>
     private static void AttachFlashMetrics(FlashSolveOutcome outcome)
     {
@@ -258,6 +302,11 @@ internal static class BeamSolveDispatch
         result.FlashSearchElapsed = search.Elapsed;
     }
 
+    /// <summary>
+    /// Turns a non-adopted Flash attempt into the caller's existing no-route shape or one stable
+    /// explicit failure. Callers first call <see cref="ThrowIfFallbackRequired"/>; an admission
+    /// rejection that reaches this method is a non-fallback category.
+    /// </summary>
     private static void ThrowOnRefusal(SearchPolicySnapshot policy, object purpose, FlashAttempt attempt)
     {
         if (attempt.Mismatch is { } mismatch)
@@ -530,7 +579,9 @@ internal static class BeamSolveDispatch
     /// <see cref="FlashCapacityException"/>). A child-level capacity overflow inside the expansion loop
     /// is a search boundary handled by <see cref="FlashBeamSolver"/> and does not reach this record.
     /// Either kind is an explicit On-mode failure, never a fallback. <paramref name="AdmissionRejection"/>
-    /// carries an admission exception that escaped the materializer's own admission boundary.
+    /// carries an admission exception that escaped the materializer's own admission boundary; the
+    /// unsupported-content and unrepresentable-state members of that collection are the two fallback
+    /// categories handled before <see cref="ThrowOnRefusal"/>.
     /// </summary>
     private sealed record FlashAttempt(
         FlashSolveOutcome? Outcome,

@@ -136,7 +136,9 @@ internal sealed record FlashVerificationFailure(
 /// The stable, search-owned failure of an On-mode Flash solve. Search reports it through
 /// <see cref="SearchDiagnosticsSink"/> and the faulted search task; Runtime keeps its existing
 /// failed-search path (stop this turn's deployment, clear the session, record the issue bundle entry
-/// and show the localized message) and never falls back to the existing solver.
+/// and show the localized message). Unsupported content and unrepresentable state are the two
+/// admission categories that instead switch the request to the regular solver before this failure
+/// is constructed; every other category never falls back.
 /// </summary>
 internal sealed class FlashSearchFailedException : InvalidOperationException
 {
