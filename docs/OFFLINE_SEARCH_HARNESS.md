@@ -66,6 +66,8 @@ dotnet .local/tool-build/OfflineSearchHarness/bin/Release/net9.0/OfflineSearchHa
 
 纯 ETC 外部生命界合同可运行 `dotnet .local/tool-build/OfflineSearchHarness/bin/Release/net9.0/OfflineSearchHarness.dll --check-early-turn-continuation-bound`，直接调用生产门禁及剪枝谓词，不建游戏状态。当前覆盖 143 条断言。普通 ETC 诊断起始行新增 `incumbent_bound=eligible_strict_hp`，已完成续搜行输出 `incumbent_hp`（`-` 表示旁路）及 `incumbent_pruned`；后者包含原有内部生命界剪枝，不能直接视为外部界的净收益。新版本另输出 `incumbent_certified_healing_bound_pruned`，只归因于根认证治疗上界的边际剪枝；根捕获行记录认证状态、首个拒绝原因和固定战后治疗量。两个计数的口径不同，前者是成员内合计，后者只统计认证上界相对完整缺血余量增加剪掉的候选节点。它不是所有阶段的总剪枝量或节省的节点数。固定根对照及实际适用范围见 [测试矩阵](archive/testing/volume-01.md#早期回合探索的外部生命界2026-10-01)。
 
+`OFFLINE_HARNESS_FLASH_PROFILE_SCALE=N` 把开启模式中 Flash 相对现有档位的宽度与节点倍数从默认 4 改为 N（N ≥ 1，只影响原本使用该倍数的成员），供宽度实验；模组本体不读取。
+
 `OFFLINE_HARNESS_WARMUP_SEARCHES=N` 让 M2 在计量的那次搜索之前先跑 N 次同根搜索并丢弃结果（不写会话指标），计量的搜索因此处在已预热的进程里，对应长时间游戏会话中的后续请求；每次预热耗时写入 `harness-result.json` 的 `warmupWallSeconds`。
 
 ## 批量用法

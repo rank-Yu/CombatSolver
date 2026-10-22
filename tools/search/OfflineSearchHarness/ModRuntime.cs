@@ -428,6 +428,10 @@ internal static class ModRuntime
         // OFFLINE_HARNESS_FLASH_MODE=Off|Shadow|On 覆盖设置里的 Flash 档位（主搜索分发点，见 BeamSolveDispatch）。
         if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_MODE") is { Length: > 0 } flashMode)
             policy = policy with { FlashMode = Enum.Parse<FlashSearchMode>(flashMode, ignoreCase: true) };
+        // OFFLINE_HARNESS_FLASH_PROFILE_SCALE=N 把开启模式里 Flash 相对现有档位的宽度与节点倍数从 4 改为 N（宽度实验用）。
+        CombatSolver.Flash.Bridge.FlashRouteMaterializer.ProfileWidthScaleOverrideForTesting =
+            int.TryParse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FLASH_PROFILE_SCALE"), out int flashScale)
+            && flashScale > 0 ? flashScale : null;
         // SR2 强制用药矩阵的复跑入口：Forced 把根上的每瓶可搜索药水标为 Force，Req 打开
         // RequireAtLeastOne。生产策略不受影响，只供离线矩阵对照。
         switch (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_POTION_PRESET"))

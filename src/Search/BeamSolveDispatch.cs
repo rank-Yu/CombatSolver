@@ -501,7 +501,7 @@ internal static class BeamSolveDispatch
             or DirectSearchPurpose.NoveltyExploration
             or DirectSearchPurpose.AdaptiveNoveltyRefinement
                 ? 1
-                : FlashRouteMaterializer.ProfileWidthScale;
+                : FlashRouteMaterializer.EffectiveProfileWidthScale;
 
     private static FlashAttempt SolveFlashContinuation(ContinuationSearchRequest request)
     {
@@ -532,6 +532,7 @@ internal static class BeamSolveDispatch
                 planCommitment: request.Commitment,
                 earlyTurnScoutDepth: request.EarlyTurnScoutDepth,
                 earlyTurnScoutObserver: request.EarlyTurnScoutObserver,
+                profileScale: FlashRouteMaterializer.EffectiveProfileWidthScale,
                 resetFixedPrefixSchedulingBaseline: request.Purpose == ContinuationPurpose.SmartOpeningPotionPosterior
                     ? request.ResetFixedPrefixSchedulingBaseline : null);
             AttachFlashMetrics(outcome);

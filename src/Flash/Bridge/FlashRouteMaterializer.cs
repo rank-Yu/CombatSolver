@@ -68,6 +68,14 @@ internal static partial class FlashRouteMaterializer
     internal const int ProfileWidthScale = 4;
 
     /// <summary>
+    /// Offline width experiments only (<c>OFFLINE_HARNESS_FLASH_PROFILE_SCALE</c>): replaces
+    /// <see cref="ProfileWidthScale"/> for every member that uses it. The mod never sets it.
+    /// </summary>
+    internal static int? ProfileWidthScaleOverrideForTesting { get; set; }
+
+    internal static int EffectiveProfileWidthScale => ProfileWidthScaleOverrideForTesting ?? ProfileWidthScale;
+
+    /// <summary>
     /// Requests at or below this soft budget keep the 25% offensive diversity lane. The 10 s
     /// natural-root benchmark and short player budgets use it; the 120 s Medium coordinator path
     /// ranks the whole beam by the existing rank order.
