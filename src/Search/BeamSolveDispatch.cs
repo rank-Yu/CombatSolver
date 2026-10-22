@@ -285,7 +285,10 @@ internal static class BeamSolveDispatch
     private static void ThrowOnRefusal(SearchPolicySnapshot policy, object purpose, FlashAttempt attempt)
     {
         if (attempt.Mismatch is { } mismatch)
-            throw Failure(policy, FlashSearchFailureReason.VerifyMismatch, mismatch.Message);
+        {
+            throw Failure(policy, FlashSearchFailureReason.VerifyMismatch, mismatch.Message,
+                mismatch.ToFailure());
+        }
         if (attempt.BoundaryReason is { } boundaryReason)
             throw Failure(policy, boundaryReason, attempt.BoundaryDetail ?? "内核边界");
         if (attempt.AdmissionRejection is { } admissionRejection
@@ -335,9 +338,9 @@ internal static class BeamSolveDispatch
     /// for the caller to throw. Search never references Runtime, UI or the logger directly.
     /// </summary>
     private static FlashSearchFailedException Failure(SearchPolicySnapshot policy,
-        FlashSearchFailureReason reason, string detail)
+        FlashSearchFailureReason reason, string detail, FlashVerificationFailure? verification = null)
     {
-        FlashSearchFailedException failure = new(reason, detail);
+        FlashSearchFailedException failure = new(reason, detail, verification);
         policy.Diagnostics.Info(failure.DiagnosticLine);
         return failure;
     }

@@ -153,7 +153,7 @@ internal static partial class FlashRouteMaterializer
                 snapshot = child;
                 owns = true;
                 plan.Add(planned);
-                FlashBattle beforeFlash = diagnostics != null ? state : default;
+                FlashBattle beforeFlash = state;
                 if (FlashKernel.Step(ref state, action, rules, out _) != FlashStepResult.Completed)
                     throw new InvalidOperationException("已选路线的 Flash 动作缺少选择。");
                 FlashBattle projected;
@@ -183,7 +183,15 @@ internal static partial class FlashRouteMaterializer
                             string.Join(" | ", FlashBattleDump.Lines(beforeFlash)));
                     }
                     throw new FlashVerificationException(step,
-                        [$"action={actionText}", $"plan={planText}", .. differences]);
+                        [$"action={actionText}", $"plan={planText}", .. differences])
+                    {
+                        Action = actionText,
+                        Plan = planText,
+                        StateDifferences = differences,
+                        StateBefore = [.. FlashBattleDump.Lines(beforeFlash)],
+                        OldAfter = [.. FlashBattleDump.Lines(projected)],
+                        FlashAfter = [.. FlashBattleDump.Lines(state)],
+                    };
                 }
             }
             return plan;

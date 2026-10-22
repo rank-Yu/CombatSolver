@@ -103,7 +103,11 @@ plan 每项的字段：`label`（必填，简单目录名）、`request`（必�
 - `route.json`：选中路线的动作序列。
 - `root-diagnostics.txt`：`SolverDiagnostics.DescribeStart` 的根局面描述。
 - `search-policy.json`：这一次求解实际用的 `SearchPolicySnapshot`。
-- `harness-result.json`：上面全部加上分步时间线、绕过清单、补丁装载记录。
+- `harness-result.json`：上面全部加上分步时间线、绕过清单、补丁装载记录。搜索以
+  `FlashSearchFailedException` 失败且该异常带核对证据时，另有 `flashFailure`：协调器成员上下文
+  （`directPurpose`/`continuationPurpose`/`profileScale`/`prefix`）、`step`、`action`、完整 `plan`、
+  全部 `differences`、步前状态与旧引擎/Flash 的步后状态；同一记录也写入 `result.json` 的
+  `flashFailure`。稳定的 `error.message` 与 `FLASH_SEARCH_FAILED` 日志行不变。
 
 ## 口径
 

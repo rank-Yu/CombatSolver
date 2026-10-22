@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CombatSolver;
+using CombatSolver.Flash.Bridge;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 
@@ -287,6 +288,26 @@ internal static class Program
                 message = root.Message,
                 stack = root.StackTrace,
             };
+            // The stable event line keeps its 320-character bound; this companion record is the
+            // complete verify-mismatch evidence (full route, both states, request member).
+            if (root is FlashSearchFailedException { Verification: { } verification } flashException)
+            {
+                payload["flashFailure"] = new
+                {
+                    reason = flashException.ReasonToken,
+                    step = verification.Step,
+                    action = verification.Action,
+                    plan = verification.Plan,
+                    differences = verification.Differences,
+                    stateBefore = verification.StateBefore,
+                    oldAfter = verification.OldAfter,
+                    flashAfter = verification.FlashAfter,
+                    directPurpose = verification.DirectPurpose,
+                    continuationPurpose = verification.ContinuationPurpose,
+                    profileScale = verification.ProfileScale,
+                    prefix = verification.Prefix,
+                };
+            }
             WriteProgress(options, NextMilestone(reached), "blocked", $"{root.GetType().Name}: {root.Message}");
             Console.Error.WriteLine($"[FAIL] {root.GetType().Name}: {root.Message}");
             // 包装异常（如 SearchTransitionException）的真正原因在 InnerException 上，必须打出来。
@@ -308,37 +329,42 @@ internal static class Program
         string resultPath = Path.Combine(options.OutputDirectory, "harness-result.json");
         File.WriteAllText(resultPath, JsonSerializer.Serialize(payload, Json));
         // run_plan.py 直接消费的一份：solverMetrics 与游戏内 result.json 同名同形。
+        Dictionary<string, object?> resultPayload = new()
+        {
+            ["label"] = options.Label,
+            ["status"] = exitCode == 0 ? "Passed" : "Failed",
+            ["reachedMilestone"] = reached,
+            ["requestPath"] = options.RequestPath,
+            ["profile"] = options.Profile,
+            ["searchMode"] = options.SearchMode,
+            ["budget"] = payload.GetValueOrDefault("budget"),
+            ["solverMetrics"] = payload.GetValueOrDefault("solverMetrics"),
+            ["pruneCounters"] = payload.GetValueOrDefault("pruneCounters"),
+            ["timeBoundaryObserved"] = payload.GetValueOrDefault("timeBoundaryObserved"),
+            ["wallSeconds"] = payload.GetValueOrDefault("wallSeconds"),
+            ["peakManagedHeapBytes"] = payload.GetValueOrDefault("peakManagedHeapBytes"),
+            ["peakManagedLiveBytes"] = payload.GetValueOrDefault("peakManagedLiveBytes"),
+            ["peakWorkingSetBytes"] = payload.GetValueOrDefault("peakWorkingSetBytes"),
+            ["peakProcessWorkingSetBytes"] = payload.GetValueOrDefault("peakProcessWorkingSetBytes"),
+            ["totalAllocatedBytes"] = payload.GetValueOrDefault("totalAllocatedBytes"),
+            ["rootContinuationStamp"] = payload.GetValueOrDefault("search") is Dictionary<string, object?> s
+                ? s.GetValueOrDefault("rootContinuationStamp")
+                : null,
+            ["comparisonQuality"] = payload.GetValueOrDefault("comparisonQuality"),
+            ["continuations"] = payload.GetValueOrDefault("search") is Dictionary<string, object?> search
+                ? search.GetValueOrDefault("continuations")
+                : null,
+            ["catalogFingerprint"] = payload.GetValueOrDefault("catalogFingerprint"),
+
+            ["error"] = payload.GetValueOrDefault("error"),
+        };
+        // Keep the successful result shape unchanged; the full evidence record exists only on a
+        // verify-mismatch failure.
+        if (payload.GetValueOrDefault("flashFailure") is { } flashFailure)
+            resultPayload["flashFailure"] = flashFailure;
         File.WriteAllText(
             Path.Combine(options.OutputDirectory, "result.json"),
-            JsonSerializer.Serialize(new Dictionary<string, object?>
-            {
-                ["label"] = options.Label,
-                ["status"] = exitCode == 0 ? "Passed" : "Failed",
-                ["reachedMilestone"] = reached,
-                ["requestPath"] = options.RequestPath,
-                ["profile"] = options.Profile,
-                ["searchMode"] = options.SearchMode,
-                ["budget"] = payload.GetValueOrDefault("budget"),
-                ["solverMetrics"] = payload.GetValueOrDefault("solverMetrics"),
-                ["pruneCounters"] = payload.GetValueOrDefault("pruneCounters"),
-                ["timeBoundaryObserved"] = payload.GetValueOrDefault("timeBoundaryObserved"),
-                ["wallSeconds"] = payload.GetValueOrDefault("wallSeconds"),
-                ["peakManagedHeapBytes"] = payload.GetValueOrDefault("peakManagedHeapBytes"),
-                ["peakManagedLiveBytes"] = payload.GetValueOrDefault("peakManagedLiveBytes"),
-                ["peakWorkingSetBytes"] = payload.GetValueOrDefault("peakWorkingSetBytes"),
-                ["peakProcessWorkingSetBytes"] = payload.GetValueOrDefault("peakProcessWorkingSetBytes"),
-                ["totalAllocatedBytes"] = payload.GetValueOrDefault("totalAllocatedBytes"),
-                ["rootContinuationStamp"] = payload.GetValueOrDefault("search") is Dictionary<string, object?> s
-                    ? s.GetValueOrDefault("rootContinuationStamp")
-                    : null,
-                ["comparisonQuality"] = payload.GetValueOrDefault("comparisonQuality"),
-                ["continuations"] = payload.GetValueOrDefault("search") is Dictionary<string, object?> search
-                    ? search.GetValueOrDefault("continuations")
-                    : null,
-                ["catalogFingerprint"] = payload.GetValueOrDefault("catalogFingerprint"),
-
-                ["error"] = payload.GetValueOrDefault("error"),
-            }, UnattendedTestFiles.JsonOptions));
+            JsonSerializer.Serialize(resultPayload, UnattendedTestFiles.JsonOptions));
 
         Console.WriteLine();
         Console.WriteLine("| 步骤 | 结果 | 详情 | 耗时 ms |");

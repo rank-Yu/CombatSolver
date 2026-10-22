@@ -120,6 +120,24 @@ internal static class FlashSearchFailureReasons
 }
 
 /// <summary>
+/// The complete content of one <c>FLASH_VERIFY_MISMATCH</c>. The stable event line and
+/// <see cref="FlashSearchFailedException.Detail"/> stay bounded for logs and issue bundles; the
+/// offline host writes this record into its result JSON so the full route and both states survive.
+/// </summary>
+internal sealed record FlashVerificationFailure(
+    int Step,
+    string Action,
+    string Plan,
+    IReadOnlyList<string> Differences,
+    IReadOnlyList<string> StateBefore,
+    IReadOnlyList<string> OldAfter,
+    IReadOnlyList<string> FlashAfter,
+    string? DirectPurpose,
+    string? ContinuationPurpose,
+    int ProfileScale,
+    IReadOnlyList<string> Prefix);
+
+/// <summary>
 /// The stable, search-owned failure of an On-mode Flash solve. Search reports it through
 /// <see cref="SearchDiagnosticsSink"/> and the faulted search task; Runtime keeps its existing
 /// failed-search path (stop this turn's deployment, clear the session, record the issue bundle entry
@@ -129,19 +147,24 @@ internal sealed class FlashSearchFailedException : InvalidOperationException
 {
     private const int MaximumDetailLength = 320;
 
-    public FlashSearchFailedException(FlashSearchFailureReason reason, string detail)
+    public FlashSearchFailedException(FlashSearchFailureReason reason, string detail,
+        FlashVerificationFailure? verification = null)
         : base(BuildEventLine(reason, detail))
     {
         Reason = reason;
         ReasonToken = reason.Token();
         Detail = NormalizeDetail(detail);
         EventLine = BuildEventLine(reason, detail);
+        Verification = verification;
     }
 
     public FlashSearchFailureReason Reason { get; }
 
     /// <summary>The stable <c>reason=</c> token, e.g. <c>verify-mismatch</c>.</summary>
     public string ReasonToken { get; }
+
+    /// <summary>Full mismatch content for offline evidence; null for every other failure category.</summary>
+    public FlashVerificationFailure? Verification { get; }
 
     /// <summary>The first difference or admission detail, normalized to one bounded line.</summary>
     public string Detail { get; }

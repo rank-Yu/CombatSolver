@@ -12,6 +12,28 @@
 
 新增可选的结构体状态内核（`src/Flash/Kernel/`、`src/Flash/Content/`）与旧引擎衔接层（`src/Flash/Bridge/`）。默认关闭；设置 > 性能 > 搜索预算 >「Flash 快速搜索（实验）」可选择关闭、对照或启用。关闭时玩家可见行为不变；对照只记录一行对照日志，结果、工作量和诊断与关闭相同。启用模式只运行 Flash，不回落现有搜索：Flash 判定没有满足药水策略的路线时，返回与现有搜索同形的无路线结果；遇到不支持的内容、根状态超容量、内核边界、逐步回放核对不一致或药水约束复核不一致时，停止本回合部署、关闭全自动、提示切回关闭模式，问题包标注 `FlashSearchFailed` 与具体失败类别；回合准备搜索失败按同一约定处理，原生选择留给玩家作答。无人测试在这些失败上直接判 Failed。覆盖五个角色卡池、296 个遗物、65 种药水、三幕已实现遭遇与第三幕首领策略，以及事件卡牌与事件遭遇；未支持的内容在准入阶段按类别拒绝。当前同政策、同预算的质量对照（五个角色、三幕均衡的 120 个生成牌组）：开启相对关闭 28 好 / 76 同 / 16 差，胜场 87 → 88，总耗时约为关闭模式的 42%；按角色与幕次的细分和变差根见测试记录。规格、失败类别与请求参数见 [Flash 搜索](flash-search/README.md) 与 [搜索与接入](flash-search/search.md)，覆盖、逐根证据与未验证项见 [Flash 测试记录](flash-search/testing.md)。
 
+### Flash 内核：Anger 复制与 Dampen 恢复顺序（QF5）
+
+1 倍宽度（`OFFLINE_HARNESS_FLASH_PROFILE_SCALE=1`）下 `quality-IRONCLAD-019` 的协调器开启模式在第 18 步
+核对失败：`PlayCard:ANGER#0->3` 的复制在旧引擎为 `ANGER+1`、Flash 为 `ANGER+0`。根因是现有引擎
+`CorePowerSupport.ApplyCardPowers` 在镜像攻击之后、Anger 的复制补偿之前执行 `ApplyEnemyDeathPowers`：
+本次攻击击杀最后一个 `DampenPower` 施法者时，原版 `DampenPower.AfterRemoved` 先把正在打出的 `CardModel`
+升级回原等级，`Anger.OnPlay` 随后按该活对象 `CreateClone`。Flash 的 `Anger.OnPlay` 没有在这次攻击后运行
+死亡结算，又用了离开手牌时的 `FlashExec.Card` 副本，于是复制出降级后的 `+0`。现改为攻击后先
+`ApplyEnemyDeathPowers`，再 `SyncCurrentPlayCard` 从实际出牌行取当前值后复制。旧引擎与原版语义一致，
+未改旧引擎；`Anger` 是唯一在 `CorePowerSupport` 的 death pass 之后克隆自己的卡，`AdaptiveStrike`/
+`Undeath` 的克隆位于 `CardEffectSpecRegistry`（death pass 之前），顺序本来就一致。
+
+新增固定根 `flash-qf5-anger-dampen-clone`：修正前 32 条游走 `failed=1 walkFailed=18`（首个差异旧
+`Discard[0]=ANGER+1`、Flash `ANGER+0`），修正后 `failed=0 walkFailed=0 actionSetFailed=0`；
+`quality-IRONCLAD-019` 默认 48 条游走同为零差异。1 倍宽度单根协调器开启模式 30 行 `FLASH_ADOPTED`，
+没有 `FLASH_SEARCH_FAILED`。默认游走、动作集合检查与 4 倍宽度没发现它的原因见下面三条：该状态只位于
+协调器 `OpeningPowerRouteMember` 的 `JUGGLING` 固定前缀之后，默认差分从原始根做随机游走没有走到
+“Dampen 已施加、第二张 Anger 击杀最后施法者”的时点；动作集合只比较根/单步合法动作，不执行该步；
+4 倍宽度的候选与质量路线在相同预算下走了另一条不触发该时点的路线。离线宿主在
+`harness-result.json`/`result.json` 新增 `flashFailure` 全量记录（成员、完整路线、步前状态、两侧步后
+状态、全部差异），稳定日志行与 320 字符 `detail` 不变。
+
 ### Flash 选牌药水 X 费筛选（QF4）
 
 `TouchOfInsanity` 的 Flash 选项谓词把 `EnergyCostWithModifiers`/`StarCostWithModifiers`

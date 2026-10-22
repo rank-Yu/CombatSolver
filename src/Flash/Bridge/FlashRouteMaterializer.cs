@@ -12,7 +12,37 @@ internal sealed class FlashVerificationException(int step, IReadOnlyList<string>
 {
     public int Step { get; } = step;
 
+    /// <summary>The bounded message pieces (action, plan, then the first differences).</summary>
     public IReadOnlyList<string> Differences { get; } = differences;
+
+    /// <summary>The mismatch action, as it appears in the stable message.</summary>
+    public string Action { get; init; } = "";
+
+    /// <summary>The full route as it appears in the stable message (not truncated).</summary>
+    public string Plan { get; init; } = "";
+
+    /// <summary>Every field-level difference from <see cref="FlashBattleDump.Diff"/>, without the cap.</summary>
+    public IReadOnlyList<string> StateDifferences { get; init; } = [];
+
+    /// <summary>Full state before the step; equal on both sides after the previous step verified.</summary>
+    public IReadOnlyList<string> StateBefore { get; init; } = [];
+
+    public IReadOnlyList<string> OldAfter { get; init; } = [];
+
+    public IReadOnlyList<string> FlashAfter { get; init; } = [];
+
+    /// <summary>Request context filled by <see cref="FlashRouteMaterializer.Solve"/> for evidence.</summary>
+    public string? DirectPurpose { get; set; }
+
+    public string? ContinuationPurpose { get; set; }
+
+    public int ProfileScale { get; set; }
+
+    public IReadOnlyList<string> Prefix { get; set; } = [];
+
+    public FlashVerificationFailure ToFailure()
+        => new(Step, Action, Plan, StateDifferences, StateBefore, OldAfter, FlashAfter,
+            DirectPurpose, ContinuationPurpose, ProfileScale, Prefix);
 }
 
 internal sealed record FlashSolveOutcome(
@@ -119,6 +149,17 @@ internal static partial class FlashRouteMaterializer
                 earliestPotionTurn, continuationPurpose, potionFreePolicyBaseline,
                 resetFixedPrefixSchedulingBaseline, profileScale, planCommitment, earlyTurnScoutDepth,
                 earlyTurnScoutObserver, trace, traceFactory);
+        }
+        catch (FlashVerificationException ex)
+        {
+            // Request context for the offline evidence record; the stable message and bounds stay
+            // unchanged. The exception is rethrown in place so the verification stack is preserved.
+            ex.DirectPurpose = purpose?.ToString();
+            ex.ContinuationPurpose = continuationPurpose?.ToString();
+            ex.ProfileScale = profileScale;
+            ex.Prefix = [.. (fixedPrefixActions ?? []).Select(action =>
+                $"{action.Turn}:{action.Kind}:{action.CardId}->{action.TargetCombatId}")];
+            throw;
         }
         finally
         {

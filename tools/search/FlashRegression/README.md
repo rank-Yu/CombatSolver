@@ -24,7 +24,7 @@
 # Release 模组 + OfflineSearchHarness + K0 纯内核合同
 python3 -B tools/search/FlashRegression/flash_regression.py build
 
-# 全量差分回归（394 根；输出 .local/flash-regression/diff）
+# 全量差分回归（410 根；输出 .local/flash-regression/diff）
 python3 -B tools/search/FlashRegression/flash_regression.py diff --label diff --jobs 8
 
 # 只跑一个固定根或一个质量牌组
@@ -66,10 +66,10 @@ K1 单步穷举与 K2 随机游走的差分回归，默认根集合：
 
 | 组 | 数量 | 输入 |
 | --- | --- | --- |
-| 固定根 | 274 | `coverage/fixtures/cards/flash-*.json`，默认每根 32 条游走 |
+| 固定根 | 290 | `coverage/fixtures/cards/flash-*.json`，默认每根 32 条游走 |
 | 质量语料 | 120 | `coverage/corpora/flash-quality/*/request.json`，默认每根 48 条游走（`--quality-walks`） |
 
-默认集合共 394 根；`--only fixtures` / `--only quality` 只跑其中一组。每根运行
+默认集合共 410 根；`--only fixtures` / `--only quality` 只跑其中一组。每根运行
 `OFFLINE_HARNESS_FLASH_DIFF=1 OFFLINE_HARNESS_FLASH_DIFF_WALKS=<walks>`，单根超时 600 秒，
 结果写入 `<out>/<root>/`（每次运行前重建该目录）。`SUMMARY.txt` 每行是
 `<root> exit=<code> <flash-diff.txt 首行>`，末行 `DONE`。`--baseline previous/SUMMARY.txt`
